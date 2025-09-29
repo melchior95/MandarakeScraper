@@ -1,0 +1,18 @@
+{
+  "keyword": "AV actress/Photograph Collection",
+  "category": "050801",
+  "shop": "nakano",
+  "client_id": "YOUR_EBAY_CLIENT_ID_HERE",
+  "client_secret": "YOUR_EBAY_CLIENT_SECRET_HERE",
+  "google_sheets": {
+    "sheet_name": "Mandarake Test Results",
+    "worksheet_name": "Sheet1"
+  },
+  "csv": "test_results.csv",
+  "download_images": "images/test/",
+  "upload_drive": true,
+  "drive_folder": "1xBVwaTFGdD5HkQtq8WOILSrc9mr0AQb0",
+  "thumbnails": 400,
+  "fast": false,
+  "resume": true
+}

@@ -1,0 +1,90 @@
+{
+  "photobook": {
+    "primary_keyword": "photobook",
+    "secondary_keywords": ["photo book", "gravure book"],
+    "description": "Photo books and gravure collections",
+    "last_updated": null,
+    "research_data": {
+      "effectiveness_score": null,
+      "common_variants": [],
+      "best_performing": null
+    }
+  },
+  "figure": {
+    "primary_keyword": "figure",
+    "secondary_keywords": ["anime figure", "collectible figure"],
+    "description": "Collectible figures and statues",
+    "last_updated": null,
+    "research_data": {
+      "effectiveness_score": null,
+      "common_variants": [],
+      "best_performing": null
+    }
+  },
+  "trading_card": {
+    "primary_keyword": "trading card",
+    "secondary_keywords": ["tcg", "card game"],
+    "description": "Trading cards and card games",
+    "last_updated": null,
+    "research_data": {
+      "effectiveness_score": null,
+      "common_variants": [],
+      "best_performing": null
+    }
+  },
+  "artbook": {
+    "primary_keyword": "artbook",
+    "secondary_keywords": ["art book", "illustration book"],
+    "description": "Art books and illustration collections",
+    "last_updated": null,
+    "research_data": {
+      "effectiveness_score": null,
+      "common_variants": [],
+      "best_performing": null
+    }
+  },
+  "magazine": {
+    "primary_keyword": "magazine",
+    "secondary_keywords": ["photo magazine", "idol magazine"],
+    "description": "Magazines and periodicals",
+    "last_updated": null,
+    "research_data": {
+      "effectiveness_score": null,
+      "common_variants": [],
+      "best_performing": null
+    }
+  },
+  "calendar": {
+    "primary_keyword": "calendar",
+    "secondary_keywords": ["photo calendar", "idol calendar"],
+    "description": "Calendars and date books",
+    "last_updated": null,
+    "research_data": {
+      "effectiveness_score": null,
+      "common_variants": [],
+      "best_performing": null
+    }
+  },
+  "poster": {
+    "primary_keyword": "poster",
+    "secondary_keywords": ["photo poster", "art poster"],
+    "description": "Posters and prints",
+    "last_updated": null,
+    "research_data": {
+      "effectiveness_score": null,
+      "common_variants": [],
+      "best_performing": null
+    }
+  },
+  "dvd": {
+    "primary_keyword": "dvd",
+    "secondary_keywords": ["blu ray", "bluray"],
+    "description": "DVDs and Blu-ray discs",
+    "last_updated": null,
+    "research_data": {
+      "effectiveness_score": null,
+      "common_variants": [],
+      "best_performing": null
+    }
+  }
+}

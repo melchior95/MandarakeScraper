@@ -1,0 +1,47 @@
+{
+  "window": {
+    "width": 1000,
+    "height": 951,
+    "x": 66,
+    "y": 294,
+    "maximized": false
+  },
+  "ebay_analysis": {
+    "min_sold_items": 1,
+    "search_days_back": 90,
+    "min_profit_margin": 20.0,
+    "usd_jpy_rate": 150.0,
+    "image_search_method": "direct",
+    "image_enhancement": "medium",
+    "lazy_search_enabled": false,
+    "ai_confirmation_enabled": false,
+    "similarity_threshold": "70",
+    "max_images": "3"
+  },
+  "scraper": {
+    "last_config_directory": "",
+    "auto_save_results": true,
+    "default_output_format": "google_sheets",
+    "resume_enabled": true,
+    "fast_mode": false,
+    "download_thumbnails": true
+  },
+  "ui": {
+    "theme": "default",
+    "show_debug_messages": false,
+    "auto_clear_logs": true,
+    "status_update_interval": 1000
+  },
+  "recent": {
+    "config_files": [],
+    "image_analysis_path": "C:\\Python Projects\\mandarake_scraper\\images\\naruto\\thumb_product_0002.jpg",
+    "last_export_directory": "",
+    "last_results_save_path": ""
+  },
+  "meta": {
+    "version": "1.0.0",
+    "first_run": false,
+    "last_updated": "2025-09-29T09:41:11.149939",
+    "settings_version": 1
+  }
+}

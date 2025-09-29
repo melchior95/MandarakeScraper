@@ -1,0 +1,10 @@
+{
+  "keyword": "羽田あい",
+  "category": "050801",
+  "language": "ja",
+  "fast": true,
+  "resume": false,
+  "debug": true,
+  "csv": "test_unicode.csv",
+  "mimic": true
+}

@@ -1,0 +1,19 @@
+{
+  "keyword": "羽田あい",
+  "category": "050801",
+  "shop": "",
+  "debug": true,
+  "client_id": "YOUR_EBAY_CLIENT_ID_HERE",
+  "client_secret": "YOUR_EBAY_CLIENT_SECRET_HERE",
+  "google_sheets": {
+    "sheet_name": "Mandarake Results",
+    "worksheet_name": "Sheet1"
+  },
+  "csv": "haneda_ai_results.csv",
+  "download_images": "images/",
+  "upload_drive": true,
+  "drive_folder": "1xBVwaTFGdD5HkQtq8WOILSrc9mr0AQb0",
+  "thumbnails": 400,
+  "fast": true,
+  "resume": true
+}

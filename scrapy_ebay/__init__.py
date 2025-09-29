@@ -1,0 +1,1 @@
+# Scrapy eBay search module

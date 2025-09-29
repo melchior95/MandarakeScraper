@@ -1,0 +1,18 @@
+{
+  "keyword": "Minamo",
+  "hide_sold_out": false,
+  "language": "en",
+  "fast": true,
+  "resume": false,
+  "debug": false,
+  "client_id": "",
+  "client_secret": "",
+  "category": "050801",
+  "shop": "0",
+  "csv": "results\\minamo_050801_0.csv",
+  "download_images": "images/naruto/",
+  "upload_drive": true,
+  "upload_sheets": true,
+  "show_images": false,
+  "thumbnails": 400
+}

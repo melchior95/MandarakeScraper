@@ -1,0 +1,48 @@
+INFO - Loaded 8 categories from category_keywords.json
+INFO - Using browser profile: Firefox_Windows
+INFO - Debug output directory: debug_images/single_search_test_20250928_184309
+INFO - Starting image matching for: yura kano photobook
+INFO - Loading reference image: debug_images/single_search_test_20250928_184309\test_image.webp
+INFO - Reference image loaded: (500, 375, 3) shape
+INFO - Saved reference image copy: debug_images/single_search_test_20250928_184309\reference_image.jpg
+INFO - Extracted features from reference: 920 features
+INFO - Searching eBay sold listings: yura kano photobook
+INFO - Saved eBay HTML response to: debug_images/single_search_test_20250928_184309\ebay_response_yura_kano_photobook.html
+INFO - eBay page title: Pardon Our Interruption......
+WARNING - No listing items found on page
+WARNING - No recognizable eBay page structure found
+INFO - Extracted 0 listings for 'yura kano photobook'
+INFO - Found 0 unique sold listings to analyze
+INFO - Starting image comparison with 0 listings
+INFO - Similarity threshold: 0.30
+INFO - 
+=== COMPARISON COMPLETE ===
+INFO - Total matches found: 0
+INFO - Image matching complete: 0 matches found
+=== Testing Single Search Behavior ===
+
+Downloaded test image: debug_images/single_search_test_20250928_184309\test_image.webp
+Testing search term: 'yura kano photobook'
+Expected: Single eBay search with exact term
+
+Looking for eBay search URLs in output...
+[BROWSER DEBUG] Original URL: https://www.ebay.com/sch/i.html?_nkw=yura+kano+photobook&_sacat=0&LH_Sold=1&LH_Complete=1&_sop=12&_ipg=25
+[BROWSER DEBUG] URL type: <class 'str'>
+[BROWSER DEBUG] URL length: 105
+[BROWSER DEBUG] Original query: _nkw=yura+kano+photobook&_sacat=0&LH_Sold=1&LH_Complete=1&_sop=12&_ipg=25
+[BROWSER DEBUG] Processing param: _nkw=yura+kano+photobook
+[BROWSER DEBUG] Preserved query param: _nkw=yura+kano+photobook
+[BROWSER DEBUG] Processing param: _sacat=0
+[BROWSER DEBUG] Encoded param: _sacat=0
+[BROWSER DEBUG] Processing param: LH_Sold=1
+[BROWSER DEBUG] Encoded param: LH_Sold=1
+[BROWSER DEBUG] Processing param: LH_Complete=1
+[BROWSER DEBUG] Encoded param: LH_Complete=1
+[BROWSER DEBUG] Processing param: _sop=12
+[BROWSER DEBUG] Encoded param: _sop=12
+[BROWSER DEBUG] Processing param: _ipg=25
+[BROWSER DEBUG] Encoded param: _ipg=25
+[BROWSER DEBUG] Final URL: https://www.ebay.com/sch/i.html?_nkw=yura+kano+photobook&_sacat=0&LH_Sold=1&LH_Complete=1&_sop=12&_ipg=25
+
+Search completed. Results: 0 matches
+Debug directory: C:\Python Projects\mandarake_scraper\debug_images\single_search_test_20250928_184309

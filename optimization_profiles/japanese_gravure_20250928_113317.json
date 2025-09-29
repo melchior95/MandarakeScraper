@@ -1,0 +1,35 @@
+{
+  "category": "japanese_gravure",
+  "description": "Japanese gravure models and photo books",
+  "test_terms": [
+    "japanese gravure",
+    "photo book",
+    "idol photobook",
+    "gravure model"
+  ],
+  "research_date": "2025-09-28T11:31:54.391276",
+  "learned_keywords": {},
+  "price_patterns": {},
+  "seller_patterns": {
+    "top_countries": {},
+    "international_ratio": 0.0
+  },
+  "title_patterns": {
+    "common_phrases": [],
+    "avg_title_length": 0,
+    "common_formats": {
+      "has_brackets": 0,
+      "has_parentheses": 0,
+      "has_year": 0,
+      "has_brand": 0,
+      "all_caps_words": 0
+    }
+  },
+  "optimization_rules": [],
+  "performance_metrics": {
+    "total_items_analyzed": 0,
+    "avg_sold_count_per_term": 0,
+    "most_effective_term": null,
+    "research_quality_score": 0
+  }
+}
