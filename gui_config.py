@@ -47,6 +47,27 @@ RECENT_OPTIONS = [
 
 SETTINGS_PATH = Path('configs/gui_settings.json')
 
+# Category keyword mapping for eBay searches
+CATEGORY_KEYWORDS = {
+    '05': 'Photobook',
+    '050801': 'Photobook',
+    '0501': 'Photobook',
+    '050101': 'Photobook',
+    '050102': 'Photobook',
+    '050103': 'Bromide',
+    '050230': 'Photobook',
+    '0502': 'Goods',
+    '0503': 'Video',
+    '0504': 'Music',
+    '06': 'Card',
+    '0601': 'Trading Card',
+    '060101': 'Pokemon Card',
+    '060102': 'Yu-Gi-Oh Card',
+    '060103': 'Magic Card',
+    '060104': 'One Piece Card',
+    '060105': 'Dragon Ball Card',
+}
+
 
 class ScraperGUI(tk.Tk):
     """GUI wrapper for Mandarake scraper configuration."""
@@ -335,14 +356,21 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         notebook.add(advanced_frame, text="Advanced")
 
         # Search tab ----------------------------------------------------
+        # Mandarake URL input
+        self.url_var = tk.StringVar()
+        ttk.Label(basic_frame, text="Mandarake URL:").grid(row=0, column=0, sticky=tk.W, **pad)
+        url_entry = ttk.Entry(basic_frame, textvariable=self.url_var, width=60)
+        url_entry.grid(row=0, column=1, columnspan=3, sticky=(tk.W, tk.E), **pad)
+        ttk.Button(basic_frame, text="Load URL", command=self._load_from_url).grid(row=0, column=4, sticky=tk.W, **pad)
+
         self.keyword_var = tk.StringVar()
-        ttk.Label(basic_frame, text="Keyword:").grid(row=0, column=0, sticky=tk.W, **pad)
+        ttk.Label(basic_frame, text="Keyword:").grid(row=1, column=0, sticky=tk.W, **pad)
         keyword_entry = ttk.Entry(basic_frame, textvariable=self.keyword_var, width=42)
-        keyword_entry.grid(row=0, column=1, columnspan=3, sticky=tk.W, **pad)
+        keyword_entry.grid(row=1, column=1, columnspan=3, sticky=tk.W, **pad)
         self.keyword_var.trace_add("write", self._update_preview)
 
         self.main_category_var = tk.StringVar()
-        ttk.Label(basic_frame, text="Main category:").grid(row=1, column=0, sticky=tk.W, **pad)
+        ttk.Label(basic_frame, text="Main category:").grid(row=2, column=0, sticky=tk.W, **pad)
         self.main_category_combo = ttk.Combobox(
             basic_frame,
             textvariable=self.main_category_var,
@@ -350,15 +378,15 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             width=42,
             values=[f"{name} ({code})" for code, name in MAIN_CATEGORY_OPTIONS],
         )
-        self.main_category_combo.grid(row=1, column=1, columnspan=3, sticky=tk.W, **pad)
+        self.main_category_combo.grid(row=2, column=1, columnspan=3, sticky=tk.W, **pad)
         self.main_category_combo.bind("<<ComboboxSelected>>", self._on_main_category_selected)
 
-        ttk.Label(basic_frame, text="Detailed categories:").grid(row=2, column=0, sticky=tk.W, **pad)
+        ttk.Label(basic_frame, text="Detailed categories:").grid(row=3, column=0, sticky=tk.W, **pad)
         detail_frame = ttk.Frame(basic_frame)
-        detail_frame.grid(row=3, column=0, columnspan=4, sticky=tk.W, **pad)
+        detail_frame.grid(row=4, column=0, columnspan=4, sticky=tk.W, **pad)
         self.detail_listbox = tk.Listbox(
             detail_frame,
-            selectmode=tk.MULTIPLE,
+            selectmode=tk.SINGLE,
             height=10,
             width=68,
             exportselection=False,
@@ -371,7 +399,7 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         self._populate_detail_categories()
 
         self.shop_var = tk.StringVar()
-        ttk.Label(basic_frame, text="Shop:").grid(row=4, column=0, sticky=tk.W, **pad)
+        ttk.Label(basic_frame, text="Shop:").grid(row=5, column=0, sticky=tk.W, **pad)
         shop_combo = ttk.Combobox(
             basic_frame,
             textvariable=self.shop_var,
@@ -379,32 +407,32 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             width=37,
             values=[f"{name} ({code})" for code, name in STORE_OPTIONS] + ["Custom..."],
         )
-        shop_combo.grid(row=4, column=1, columnspan=2, sticky=tk.W, **pad)
+        shop_combo.grid(row=5, column=1, columnspan=2, sticky=tk.W, **pad)
         shop_combo.bind("<<ComboboxSelected>>", self._handle_shop_selection)
         self.shop_var.trace_add("write", self._update_preview)
 
         self.custom_shop_var = tk.StringVar()
-        ttk.Label(basic_frame, text="Custom shop code/slug:").grid(row=4, column=3, sticky=tk.W, **pad)
+        ttk.Label(basic_frame, text="Custom shop code/slug:").grid(row=5, column=3, sticky=tk.W, **pad)
         self.custom_shop_entry = ttk.Entry(basic_frame, textvariable=self.custom_shop_var, width=20, state="disabled")
-        self.custom_shop_entry.grid(row=4, column=4, sticky=tk.W, **pad)
+        self.custom_shop_entry.grid(row=5, column=4, sticky=tk.W, **pad)
         self.custom_shop_var.trace_add("write", self._update_preview)
 
         self.hide_sold_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(basic_frame, text="Hide sold-out listings", variable=self.hide_sold_var,
-                        command=self._update_preview).grid(row=5, column=0, sticky=tk.W, **pad)
+                        command=self._update_preview).grid(row=6, column=0, sticky=tk.W, **pad)
 
         self.language_var = tk.StringVar(value="ja")
-        ttk.Label(basic_frame, text="Language:").grid(row=5, column=1, sticky=tk.W, **pad)
+        ttk.Label(basic_frame, text="Language:").grid(row=6, column=1, sticky=tk.W, **pad)
         lang_combo = ttk.Combobox(basic_frame, textvariable=self.language_var, values=["ja", "en"], width=6, state="readonly")
-        lang_combo.grid(row=5, column=2, sticky=tk.W, **pad)
+        lang_combo.grid(row=6, column=2, sticky=tk.W, **pad)
         self.language_var.trace_add("write", self._update_preview)
 
         self.max_pages_var = tk.StringVar()
-        ttk.Label(basic_frame, text="Max pages:").grid(row=6, column=0, sticky=tk.W, **pad)
-        ttk.Entry(basic_frame, textvariable=self.max_pages_var, width=8).grid(row=6, column=1, sticky=tk.W, **pad)
+        ttk.Label(basic_frame, text="Max pages:").grid(row=7, column=0, sticky=tk.W, **pad)
+        ttk.Entry(basic_frame, textvariable=self.max_pages_var, width=8).grid(row=7, column=1, sticky=tk.W, **pad)
 
         self.recent_hours_var = tk.StringVar(value=RECENT_OPTIONS[0][0])
-        ttk.Label(basic_frame, text="New items timeframe:").grid(row=6, column=2, sticky=tk.W, **pad)
+        ttk.Label(basic_frame, text="New items timeframe:").grid(row=7, column=2, sticky=tk.W, **pad)
         self.recent_combo = ttk.Combobox(
             basic_frame,
             textvariable=self.recent_hours_var,
@@ -412,12 +440,12 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             width=20,
             values=[label for label, _ in RECENT_OPTIONS],
         )
-        self.recent_combo.grid(row=6, column=3, columnspan=2, sticky=tk.W, **pad)
+        self.recent_combo.grid(row=7, column=3, columnspan=2, sticky=tk.W, **pad)
         self.recent_hours_var.trace_add("write", self._update_preview)
 
         # Saved configs tree
         tree_frame = ttk.Frame(basic_frame)
-        tree_frame.grid(row=7, column=0, columnspan=5, sticky=tk.NSEW, **pad)
+        tree_frame.grid(row=8, column=0, columnspan=5, sticky=tk.NSEW, **pad)
         columns = ('file', 'keyword', 'category', 'shop', 'hide')
         self.config_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=6)
         headings = {
@@ -437,8 +465,15 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         self.config_tree.configure(yscrollcommand=tree_scroll.set)
         self.config_tree.bind('<Double-1>', self._on_tree_double_click)
 
+        # Config management buttons
+        config_buttons_frame = ttk.Frame(basic_frame)
+        config_buttons_frame.grid(row=9, column=0, columnspan=5, sticky=tk.W, **pad)
+        ttk.Button(config_buttons_frame, text="Delete Selected", command=self._delete_selected_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(config_buttons_frame, text="Move Up", command=lambda: self._move_config(-1)).pack(side=tk.LEFT, padx=5)
+        ttk.Button(config_buttons_frame, text="Move Down", command=lambda: self._move_config(1)).pack(side=tk.LEFT, padx=5)
+
         self._load_config_tree()
-        basic_frame.rowconfigure(7, weight=1)
+        basic_frame.rowconfigure(8, weight=1)
         basic_frame.columnconfigure(0, weight=1)
         basic_frame.columnconfigure(1, weight=1)
         basic_frame.columnconfigure(2, weight=1)
@@ -615,14 +650,106 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         # Bind double-click to open URL
         self.browserless_tree.bind('<Double-1>', self.open_browserless_url)
 
-        # Status area for browserless search (below the tree)
+        # Results filters row
+        filters_frame = ttk.Frame(browserless_results_frame)
+        filters_frame.grid(row=2, column=0, columnspan=2, sticky=tk.EW, pady=(5, 0))
+
+        ttk.Label(filters_frame, text="Min Similarity %:").pack(side=tk.LEFT, padx=5)
+        self.min_similarity_var = tk.StringVar(value="0")
+        similarity_entry = ttk.Entry(filters_frame, textvariable=self.min_similarity_var, width=5)
+        similarity_entry.pack(side=tk.LEFT, padx=5)
+        similarity_entry.bind('<Return>', lambda e: self.apply_results_filter())
+
+        ttk.Label(filters_frame, text="Min Profit %:").pack(side=tk.LEFT, padx=5)
+        self.min_profit_var = tk.StringVar(value="0")
+        profit_entry = ttk.Entry(filters_frame, textvariable=self.min_profit_var, width=5)
+        profit_entry.pack(side=tk.LEFT, padx=5)
+        profit_entry.bind('<Return>', lambda e: self.apply_results_filter())
+
+        ttk.Button(filters_frame, text="Apply Filters", command=self.apply_results_filter).pack(side=tk.LEFT, padx=5)
+
+        # Status area for browserless search (below filters)
         self.browserless_status = tk.StringVar(value="Ready for eBay text search")
         browserless_status_label = ttk.Label(browserless_results_frame, textvariable=self.browserless_status, relief=tk.SUNKEN, anchor='w')
-        browserless_status_label.grid(row=2, column=0, columnspan=2, sticky=tk.EW, pady=(5, 0))
+        browserless_status_label.grid(row=3, column=0, columnspan=2, sticky=tk.EW, pady=(5, 0))
+
+        # CSV Batch Comparison section --------------------------------
+        csv_compare_frame = ttk.LabelFrame(browserless_frame, text="CSV Batch Comparison")
+        csv_compare_frame.grid(row=5, column=0, columnspan=5, sticky=tk.NSEW, **pad)
+        browserless_frame.rowconfigure(5, weight=1)
+
+        # CSV loader
+        ttk.Label(csv_compare_frame, text="Load Mandarake CSV:").grid(row=0, column=0, sticky=tk.W, **pad)
+        ttk.Button(csv_compare_frame, text="Load CSV...", command=self.load_csv_for_comparison).grid(row=0, column=1, sticky=tk.W, **pad)
+        self.csv_compare_label = ttk.Label(csv_compare_frame, text="No file loaded", foreground="gray")
+        self.csv_compare_label.grid(row=0, column=2, columnspan=2, sticky=tk.W, **pad)
+
+        # Filter option
+        self.csv_in_stock_only = tk.BooleanVar(value=True)
+        ttk.Checkbutton(csv_compare_frame, text="In-stock only", variable=self.csv_in_stock_only, command=self.filter_csv_items).grid(row=0, column=4, sticky=tk.W, **pad)
+
+        # CSV items treeview
+        csv_items_frame = ttk.Frame(csv_compare_frame)
+        csv_items_frame.grid(row=1, column=0, columnspan=5, sticky=tk.NSEW, **pad)
+        csv_compare_frame.rowconfigure(1, weight=1)
+        csv_compare_frame.columnconfigure(0, weight=1)
+
+        csv_columns = ('title', 'price', 'shop', 'stock', 'category')
+        self.csv_items_tree = ttk.Treeview(csv_items_frame, columns=csv_columns, show='tree headings', height=6)
+
+        self.csv_items_tree.heading('#0', text='#')
+        self.csv_items_tree.column('#0', width=30, stretch=False)
+
+        csv_headings = {
+            'title': 'Title',
+            'price': 'Mandarake Price',
+            'shop': 'Shop',
+            'stock': 'Stock',
+            'category': 'Category'
+        }
+
+        for col, heading in csv_headings.items():
+            self.csv_items_tree.heading(col, text=heading)
+
+        self.csv_items_tree.column('title', width=280)
+        self.csv_items_tree.column('price', width=100)
+        self.csv_items_tree.column('shop', width=80)
+        self.csv_items_tree.column('stock', width=60)
+        self.csv_items_tree.column('category', width=120)
+
+        self.csv_items_tree.grid(row=0, column=0, sticky=tk.NSEW)
+        csv_items_frame.rowconfigure(0, weight=1)
+        csv_items_frame.columnconfigure(0, weight=1)
+
+        # Scrollbars
+        csv_v_scroll = ttk.Scrollbar(csv_items_frame, orient=tk.VERTICAL, command=self.csv_items_tree.yview)
+        csv_v_scroll.grid(row=0, column=1, sticky=tk.NS)
+        self.csv_items_tree.configure(yscrollcommand=csv_v_scroll.set)
+
+        # Bind selection to auto-fill search query
+        self.csv_items_tree.bind('<<TreeviewSelect>>', self.on_csv_item_selected)
+
+        # Comparison action buttons
+        button_frame = ttk.Frame(csv_compare_frame)
+        button_frame.grid(row=2, column=0, columnspan=5, sticky=tk.W, **pad)
+
+        ttk.Label(button_frame, text="Single Search:", font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        ttk.Button(button_frame, text="Compare Selected", command=self.compare_selected_csv_item).grid(row=0, column=1, sticky=tk.W, **pad)
+        ttk.Button(button_frame, text="Compare All", command=self.compare_all_csv_items).grid(row=0, column=2, sticky=tk.W, **pad)
+
+        ttk.Label(button_frame, text="Individual Searches:", font=('TkDefaultFont', 9, 'bold')).grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
+        ttk.Button(button_frame, text="Compare Selected Individually", command=self.compare_selected_csv_item_individually).grid(row=1, column=1, sticky=tk.W, padx=(5, 5), pady=(5, 0))
+        ttk.Button(button_frame, text="Compare All Individually", command=self.compare_all_csv_items_individually).grid(row=1, column=2, sticky=tk.W, padx=(5, 5), pady=(5, 0))
+
+        self.csv_compare_progress = ttk.Progressbar(button_frame, mode='indeterminate', length=200)
+        self.csv_compare_progress.grid(row=0, column=3, sticky=tk.W, padx=(10, 5))
 
         # Initialize variables
         self.browserless_image_path = None
         self.browserless_results_data = []
+        self.all_comparison_results = []  # Store unfiltered results for filtering
+        self.csv_compare_data = []
+        self.csv_compare_path = None
 
         # Advanced tab --------------------------------------------------
         self.fast_var = tk.BooleanVar(value=False)
@@ -2278,23 +2405,14 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         config = self._collect_config()
         if not config:
             return
-        default_name = self._suggest_config_filename(config)
-        configs_dir = Path('configs')
-        configs_dir.mkdir(parents=True, exist_ok=True)
-        path = filedialog.asksaveasfilename(
-            defaultextension='.json',
-            filetypes=[('JSON files', '*.json')],
-            initialdir=str(configs_dir.resolve()),
-            initialfile=default_name
-        )
-        if not path:
-            return
+
+        # Save directly without prompts
         try:
-            actual_path = Path(path)
-            self._save_config_to_path(config, actual_path)
+            config_path = self._save_config_autoname(config)
             # Add to recent files
-            self.settings.add_recent_config_file(str(actual_path))
+            self.settings.add_recent_config_file(str(config_path))
             self._update_recent_menu()
+            self.status_var.set(f"Saved: {config_path.name}")
         except Exception as exc:
             messagebox.showerror('Error', f'Failed to save config: {exc}')
 
@@ -2359,16 +2477,27 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
     def _suggest_config_filename(self, config: dict) -> str:
         keyword = self._slugify(str(config.get('keyword', 'search')))
-        category = config.get('category')
-        if isinstance(category, list):
-            category = category[0] if category else ''
-        category = self._slugify(str(category or 'all'))
 
-        # Handle shop with special default to '0'
-        shop_value = config.get('shop', '0')
-        if not shop_value or shop_value.strip() == '':
-            shop_value = '0'
-        shop = self._slugify(str(shop_value))
+        # Use category name if available, otherwise use code
+        category_name = config.get('category_name', '')
+        if category_name:
+            category = self._slugify(category_name)
+        else:
+            category = config.get('category')
+            if isinstance(category, list):
+                category = category[0] if category else ''
+            category = self._slugify(str(category or 'all'))
+
+        # Use shop name if available, otherwise use code
+        shop_name = config.get('shop_name', '')
+        if shop_name:
+            shop = self._slugify(shop_name)
+        else:
+            shop_value = config.get('shop', '0')
+            if not shop_value or shop_value.strip() == '':
+                shop_value = '0'
+            shop = self._slugify(str(shop_value))
+
         return f"{keyword}_{category}_{shop}.json"
 
     def _generate_csv_filename(self, config: dict) -> str:
@@ -2483,9 +2612,6 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
     def _collect_config(self):
         keyword = self.keyword_var.get().strip()
-        if not keyword:
-            messagebox.showerror("Validation", "Keyword is required.")
-            return None
 
         config: dict[str, object] = {
             'keyword': keyword,
@@ -2500,7 +2626,13 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         categories = self._get_selected_categories()
         if categories:
-            config['category'] = categories if len(categories) > 1 else categories[0]
+            category_code = categories[0]
+            # Save as category name instead of code
+            from mandarake_codes import get_category_name
+            category_name = get_category_name(category_code, language='en')
+            # Store both for reference
+            config['category'] = category_code
+            config['category_name'] = category_name
 
         max_pages = self.max_pages_var.get().strip()
         if max_pages:
@@ -2517,6 +2649,10 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         shop_value = self._resolve_shop()
         if shop_value:
             config['shop'] = shop_value
+            # Store shop name for readable filenames
+            from mandarake_codes import get_store_name
+            shop_name = get_store_name(shop_value, language='en')
+            config['shop_name'] = shop_name
 
         sheet_name = self.sheet_name_var.get().strip()
         worksheet = self.worksheet_var.get().strip() or 'Sheet1'
@@ -2954,10 +3090,15 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 continue
 
             keyword = data.get('keyword', '')
-            category = data.get('category', '')
+
+            # Use category name if available, otherwise show code
+            category = data.get('category_name', data.get('category', ''))
             if isinstance(category, list):
                 category = ', '.join(category)
-            shop = data.get('shop', '')
+
+            # Use shop name if available, otherwise show code
+            shop = data.get('shop_name', data.get('shop', ''))
+
             hide = 'Yes' if data.get('hide_sold_out') else 'No'
             values = (cfg_path.name, keyword, category, shop, hide)
             item = self.config_tree.insert('', tk.END, values=values)
@@ -2979,6 +3120,99 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             self.status_var.set(f"Loaded config: {path}")
         except Exception as exc:
             messagebox.showerror('Error', f'Failed to load config: {exc}')
+
+    def _delete_selected_config(self):
+        """Delete the selected config file"""
+        selection = self.config_tree.selection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select a config file to delete")
+            return
+
+        item = selection[0]
+        path = self.config_paths.get(item)
+        if not path:
+            return
+
+        # Confirm deletion
+        response = messagebox.askyesno(
+            "Confirm Delete",
+            f"Are you sure you want to delete:\n{path.name}?"
+        )
+
+        if response:
+            try:
+                path.unlink()  # Delete the file
+                self._load_config_tree()  # Reload the tree
+                self.status_var.set(f"Deleted: {path.name}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to delete file: {e}")
+
+    def _move_config(self, direction):
+        """Move selected config up (-1) or down (1) in the list"""
+        selection = self.config_tree.selection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select a config file to move")
+            return
+
+        item = selection[0]
+        path = self.config_paths.get(item)
+        if not path:
+            return
+
+        # Get all config files in order
+        configs_dir = Path('configs')
+        config_files = sorted(configs_dir.glob('*.json'))
+
+        try:
+            current_index = config_files.index(path)
+        except ValueError:
+            return
+
+        new_index = current_index + direction
+
+        # Check bounds
+        if new_index < 0 or new_index >= len(config_files):
+            return
+
+        # Swap filenames by renaming
+        other_path = config_files[new_index]
+
+        # Use temporary name to avoid conflicts
+        temp_name = configs_dir / f"_temp_{path.name}"
+
+        try:
+            path.rename(temp_name)
+            other_path.rename(path)
+            temp_name.rename(other_path)
+
+            self._load_config_tree()  # Reload the tree
+
+            # Re-select the moved item
+            for tree_item in self.config_tree.get_children():
+                if self.config_paths.get(tree_item) == path:
+                    self.config_tree.selection_set(tree_item)
+                    self.config_tree.see(tree_item)
+                    break
+
+            self.status_var.set(f"Moved: {path.name}")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to move file: {e}")
+
+    def _load_from_url(self):
+        """Parse Mandarake URL and populate config fields"""
+        url = self.url_var.get().strip()
+        if not url:
+            messagebox.showinfo("No URL", "Please enter a Mandarake URL")
+            return
+
+        try:
+            from mandarake_scraper import parse_mandarake_url
+            config = parse_mandarake_url(url)
+            self._populate_from_config(config)
+            self.status_var.set(f"Loaded URL parameters")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to parse URL: {e}")
 
     def _populate_from_config(self, config: dict):
         self.keyword_var.set(config.get('keyword', ''))
@@ -3161,10 +3395,17 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
             print(f"[SCRAPY COMPARE] Found {len(scrapy_results)} results, comparing images...")
 
+            # Create debug folder
+            debug_folder = self._create_debug_folder(query)
+
             # Load reference image
             ref_image = cv2.imread(str(self.browserless_image_path))
             if ref_image is None:
                 raise Exception(f"Could not load reference image: {self.browserless_image_path}")
+
+            # Save reference image to debug folder
+            ref_debug_path = debug_folder / f"REF_selected_image.jpg"
+            cv2.imwrite(str(ref_debug_path), ref_image)
 
             # Determine how many to compare
             items_to_compare = scrapy_results if max_comparisons is None else scrapy_results[:max_comparisons]
@@ -3185,20 +3426,13 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                             ebay_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
                             if ebay_img is not None:
-                                # Resize images to same size for comparison
-                                ref_resized = cv2.resize(ref_image, (300, 300))
-                                ebay_resized = cv2.resize(ebay_img, (300, 300))
+                                # Save eBay image to debug folder
+                                ebay_title_safe = "".join(c for c in item.get('product_title', 'unknown')[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
+                                ebay_debug_path = debug_folder / f"ebay_{i+1:02d}_{ebay_title_safe}.jpg"
+                                cv2.imwrite(str(ebay_debug_path), ebay_img)
 
-                                # Calculate similarity using histogram comparison
-                                ref_hist = cv2.calcHist([ref_resized], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-                                ebay_hist = cv2.calcHist([ebay_resized], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-
-                                # Normalize histograms
-                                cv2.normalize(ref_hist, ref_hist)
-                                cv2.normalize(ebay_hist, ebay_hist)
-
-                                # Compare histograms
-                                similarity = cv2.compareHist(ref_hist, ebay_hist, cv2.HISTCMP_CORREL) * 100
+                                # Use shared comparison method
+                                similarity = self._compare_images(ref_image, ebay_img)
                     except Exception as e:
                         print(f"[SCRAPY COMPARE] Error comparing image {i+1}: {e}")
 
@@ -3318,6 +3552,692 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             self.browserless_tree.delete(item)
         self.browserless_results_data = []
         self.browserless_status.set("Ready for eBay text search")
+
+    # CSV Batch Comparison methods
+    def load_csv_for_comparison(self):
+        """Load CSV file for batch comparison"""
+        file_path = filedialog.askopenfilename(
+            title="Select CSV file for comparison",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialdir="results"
+        )
+
+        if file_path:
+            self.csv_compare_path = Path(file_path)
+            self.csv_compare_label.config(text=f"Loaded: {self.csv_compare_path.name}", foreground="black")
+            print(f"[CSV COMPARE] Loaded CSV: {self.csv_compare_path}")
+
+            # Load CSV data
+            self.csv_compare_data = []
+            try:
+                with open(self.csv_compare_path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        self.csv_compare_data.append(row)
+
+                self.filter_csv_items()  # Display with filter applied
+                print(f"[CSV COMPARE] Loaded {len(self.csv_compare_data)} items")
+
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load CSV: {e}")
+                print(f"[CSV COMPARE ERROR] {e}")
+
+    def filter_csv_items(self):
+        """Filter and display CSV items based on in-stock filter"""
+        # Clear existing items
+        for item in self.csv_items_tree.get_children():
+            self.csv_items_tree.delete(item)
+
+        if not self.csv_compare_data:
+            return
+
+        # Apply filter
+        in_stock_only = self.csv_in_stock_only.get()
+        filtered_items = []
+
+        for row in self.csv_compare_data:
+            stock = row.get('in_stock', '').lower()
+            if in_stock_only and stock not in ('true', 'yes', '1'):
+                continue
+            filtered_items.append(row)
+
+        # Display filtered items
+        for i, row in enumerate(filtered_items, 1):
+            title = row.get('title', '')[:50]
+            price = row.get('price_text', row.get('price', ''))
+            shop = row.get('shop', row.get('shop_text', ''))
+            stock_display = 'Yes' if row.get('in_stock', '').lower() in ('true', 'yes', '1') else 'No'
+            category = row.get('category', '')
+
+            self.csv_items_tree.insert('', 'end', iid=str(i), text=str(i),
+                                      values=(title, price, shop, stock_display, category))
+
+        print(f"[CSV COMPARE] Displayed {len(filtered_items)} items (in-stock filter: {in_stock_only})")
+
+    def on_csv_item_selected(self, event):
+        """Auto-fill search query when CSV item is selected"""
+        selection = self.csv_items_tree.selection()
+        if not selection:
+            return
+
+        item_id = selection[0]
+        try:
+            index = int(item_id) - 1
+            if 0 <= index < len(self.csv_compare_data):
+                row = self.csv_compare_data[index]
+
+                # Extract core word from title and category keyword
+                title = row.get('title', '')
+                category = row.get('category', '')
+                keyword = row.get('keyword', '')  # Use extracted keyword if available
+
+                # Use keyword if available, otherwise extract from title
+                if keyword:
+                    core_words = keyword
+                else:
+                    core_words = ' '.join(title.split()[:3]) if title else ''
+
+                # Get category keyword from mapping
+                category_keyword = CATEGORY_KEYWORDS.get(category, '')
+
+                # Build search query: keyword + category keyword
+                search_query = f"{core_words} {category_keyword}".strip()
+
+                if search_query:
+                    self.browserless_query_var.set(search_query)
+                    print(f"[CSV COMPARE] Auto-filled search: {search_query}")
+
+        except (ValueError, IndexError) as e:
+            print(f"[CSV COMPARE] Error selecting item: {e}")
+
+    def compare_selected_csv_item(self):
+        """Compare selected CSV item with eBay"""
+        selection = self.csv_items_tree.selection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select an item to compare")
+            return
+
+        # Get selected item data
+        item_id = selection[0]
+        try:
+            # Need to find the actual item from filtered display
+            # The iid in tree might not match csv_compare_data index due to filtering
+            values = self.csv_items_tree.item(item_id)['values']
+            if not values:
+                messagebox.showerror("Error", "Could not get item data")
+                return
+
+            # Find matching item in csv_compare_data by title
+            title_prefix = values[0]  # Truncated title from display
+            item = None
+            for row in self.csv_compare_data:
+                if row.get('title', '').startswith(title_prefix.replace('...', '')):
+                    item = row
+                    break
+
+            if not item:
+                messagebox.showerror("Error", "Could not find selected item")
+                return
+
+            # Run comparison in background
+            self.csv_compare_progress.start()
+            self._start_thread(lambda: self._compare_csv_items_worker([item]))
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Invalid selection: {e}")
+
+    def compare_all_csv_items(self):
+        """Compare all visible CSV items with eBay"""
+        if not self.csv_compare_data:
+            messagebox.showinfo("No Data", "Please load a CSV file first")
+            return
+
+        # Get filtered items
+        in_stock_only = self.csv_in_stock_only.get()
+        items_to_compare = []
+
+        for row in self.csv_compare_data:
+            stock = row.get('in_stock', '').lower()
+            if in_stock_only and stock not in ('true', 'yes', '1'):
+                continue
+            items_to_compare.append(row)
+
+        if not items_to_compare:
+            messagebox.showinfo("No Items", "No items to compare (check filter settings)")
+            return
+
+        # Confirm before batch processing
+        response = messagebox.askyesno(
+            "Batch Comparison",
+            f"Compare {len(items_to_compare)} items with eBay?\nThis may take several minutes."
+        )
+
+        if response:
+            self.csv_compare_progress.start()
+            self._start_thread(lambda: self._compare_csv_items_worker(items_to_compare))
+
+    def compare_selected_csv_item_individually(self):
+        """Compare selected CSV item individually with its own eBay search"""
+        selection = self.csv_items_tree.selection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select an item to compare")
+            return
+
+        # Get selected item data
+        item_id = selection[0]
+        try:
+            # Find the actual item from the tree display
+            title_prefix = self.csv_items_tree.item(item_id)['values'][0]
+            item = None
+            for row in self.csv_compare_data:
+                if row.get('title', '').startswith(title_prefix.replace('...', '')):
+                    item = row
+                    break
+
+            if not item:
+                messagebox.showerror("Error", "Could not find selected item")
+                return
+
+            # Run comparison in background
+            self.csv_compare_progress.start()
+            self._start_thread(lambda: self._compare_csv_items_individually_worker([item]))
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Invalid selection: {e}")
+
+    def compare_all_csv_items_individually(self):
+        """Compare all visible CSV items individually with separate eBay searches"""
+        if not self.csv_compare_data:
+            messagebox.showinfo("No Data", "Please load a CSV file first")
+            return
+
+        # Get filtered items
+        in_stock_only = self.csv_in_stock_only.get()
+        items_to_compare = []
+
+        for row in self.csv_compare_data:
+            stock = row.get('in_stock', '').lower()
+            if in_stock_only and stock not in ('true', 'yes', '1'):
+                continue
+            items_to_compare.append(row)
+
+        if not items_to_compare:
+            messagebox.showinfo("No Items", "No items to compare (check filter settings)")
+            return
+
+        # Confirm before batch processing
+        response = messagebox.askyesno(
+            "Individual Batch Comparison",
+            f"Run {len(items_to_compare)} separate eBay searches?\nThis will take longer than single search."
+        )
+
+        if response:
+            self.csv_compare_progress.start()
+            self._start_thread(lambda: self._compare_csv_items_individually_worker(items_to_compare))
+
+    def _compare_csv_items_worker(self, items):
+        """Worker to compare CSV items with eBay - OPTIMIZED with caching (runs in background thread)"""
+        try:
+            from ebay_scrapy_search import run_ebay_scrapy_search
+            import cv2
+            import numpy as np
+            import requests
+            from datetime import datetime
+            import os
+
+            max_results = int(self.browserless_max_results.get())
+
+            print(f"[CSV BATCH] Comparing {len(items)} CSV items...")
+
+            # Use the search query from the browserless_query_var (user can edit it)
+            search_query = self.browserless_query_var.get().strip()
+
+            if not search_query:
+                # Fallback to building from first item
+                title = items[0].get('title', '') if items else ''
+                category = items[0].get('category', '') if items else ''
+                core_words = ' '.join(title.split()[:3])
+                category_keyword = category.split()[0] if category else ''
+                search_query = f"{core_words} {category_keyword}".strip()
+
+            if not search_query:
+                self.after(0, lambda: messagebox.showerror("Error", "Could not build search query"))
+                return
+
+            print(f"[CSV BATCH] Using search query: '{search_query}'")
+            self.after(0, lambda: self.browserless_status.set(f"Searching eBay for '{search_query}'..."))
+
+            # Create debug folder
+            debug_folder = self._create_debug_folder(search_query)
+
+            # **ONE eBay search for all items**
+            ebay_results = run_ebay_scrapy_search(
+                query=search_query,
+                max_results=max_results,
+                sold_listings=True
+            )
+
+            if not ebay_results:
+                self.after(0, lambda: messagebox.showinfo("No Results", "No eBay listings found"))
+                return
+
+            print(f"[CSV BATCH] Found {len(ebay_results)} eBay listings")
+            self.after(0, lambda: self.browserless_status.set(f"Downloading and caching {len(ebay_results)} eBay images..."))
+
+            # **Cache all eBay images at once AND save to debug folder**
+            ebay_image_cache = {}
+            for idx, ebay_item in enumerate(ebay_results):
+                ebay_image_url = ebay_item.get('main_image', '')
+                if ebay_image_url and ebay_image_url not in ebay_image_cache:
+                    try:
+                        response = requests.get(ebay_image_url, timeout=5)
+                        if response.status_code == 200:
+                            img_array = np.frombuffer(response.content, np.uint8)
+                            ebay_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                            if ebay_img is not None:
+                                ebay_image_cache[ebay_image_url] = ebay_img
+
+                                # Save debug image
+                                ebay_title_safe = "".join(c for c in ebay_item.get('product_title', 'unknown')[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
+                                debug_path = debug_folder / f"ebay_{idx+1:02d}_{ebay_title_safe}.jpg"
+                                cv2.imwrite(str(debug_path), ebay_img)
+                                print(f"[CSV BATCH] Cached & saved eBay image {idx+1}/{len(ebay_results)}: {debug_path.name}")
+                    except Exception as e:
+                        print(f"[CSV BATCH] Error downloading eBay image {idx+1}: {e}")
+
+            print(f"[CSV BATCH] Cached {len(ebay_image_cache)} eBay images")
+
+            # **Now compare each CSV item with cached eBay images**
+            comparison_results = []
+
+            for item_idx, item in enumerate(items, 1):
+                try:
+                    self.after(0, lambda i=item_idx: self.browserless_status.set(f"Comparing CSV item {i}/{len(items)}..."))
+
+                    csv_title = item.get('title', 'unknown')
+                    print(f"\n[CSV BATCH] === Processing CSV item {item_idx}/{len(items)}: {csv_title[:50]} ===")
+
+                    # Load CSV item image
+                    item_image_url = item.get('image_url', '')
+                    ref_image = None
+
+                    if item_image_url:
+                        try:
+                            response = requests.get(item_image_url, timeout=5)
+                            if response.status_code == 200:
+                                img_array = np.frombuffer(response.content, np.uint8)
+                                ref_image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+                                if ref_image is not None:
+                                    # Save CSV reference image to debug folder
+                                    csv_title_safe = "".join(c for c in csv_title[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
+                                    csv_debug_path = debug_folder / f"CSV_{item_idx:02d}_REF_{csv_title_safe}.jpg"
+                                    cv2.imwrite(str(csv_debug_path), ref_image)
+                                    print(f"[CSV BATCH] Saved CSV reference image: {csv_debug_path.name}")
+                                    print(f"[CSV BATCH] CSV image shape: {ref_image.shape}")
+                        except Exception as e:
+                            print(f"[CSV BATCH] Error loading CSV item {item_idx} image: {e}")
+
+                    if ref_image is None:
+                        print(f"[CSV BATCH] WARNING: No reference image for CSV item {item_idx}, skipping comparisons")
+                        continue
+
+                    # Compare with all cached eBay images
+                    item_comparisons = []
+                    for ebay_idx, ebay_item in enumerate(ebay_results):
+                        similarity = 0.0
+
+                        ebay_image_url = ebay_item.get('main_image', '')
+                        ebay_img = ebay_image_cache.get(ebay_image_url)
+
+                        if ebay_img is not None:
+                            try:
+                                # Use shared comparison method
+                                similarity = self._compare_images(ref_image, ebay_img)
+                                item_comparisons.append((similarity, ebay_idx, ebay_item.get('product_title', 'unknown')[:50]))
+
+                            except Exception as e:
+                                print(f"[CSV BATCH] Error comparing with eBay item {ebay_idx+1}: {e}")
+
+                    # Sort by similarity and show top 5
+                    item_comparisons.sort(reverse=True)
+                    print(f"[CSV BATCH] Top 5 matches for '{csv_title[:40]}':")
+                    for rank, (sim, idx, title) in enumerate(item_comparisons[:5], 1):
+                        print(f"  {rank}. {sim:.1f}% - {title}")
+
+                    # Add all comparisons to results
+                    for similarity, ebay_idx, _ in item_comparisons:
+                        ebay_item = ebay_results[ebay_idx]
+
+                        # Calculate profit margin
+                        mandarake_price_text = item.get('price_text', item.get('price', '0'))
+                        mandarake_price = self._extract_price(mandarake_price_text)
+
+                        ebay_price_text = ebay_item.get('current_price', '0')
+                        ebay_price = self._extract_price(ebay_price_text)
+
+                        shipping_text = ebay_item.get('shipping_cost', '0')
+                        shipping_cost = self._extract_price(shipping_text)
+
+                        # Profit = eBay - Mandarake - Shipping
+                        profit = ebay_price - mandarake_price - shipping_cost
+                        profit_margin = (profit / mandarake_price * 100) if mandarake_price > 0 else 0
+
+                        comparison_results.append({
+                            'thumbnail': ebay_item.get('main_image', ''),
+                            'ebay_title': ebay_item.get('product_title', 'N/A'),
+                            'mandarake_title': item.get('title', 'N/A'),
+                            'mandarake_price': f"¥{mandarake_price:,.0f}",
+                            'ebay_price': ebay_price_text,
+                            'shipping': shipping_text,
+                            'similarity': similarity,  # Keep as number for sorting
+                            'similarity_display': f"{similarity:.1f}%" if similarity > 0 else '-',
+                            'profit_margin': profit_margin,  # Keep as number for sorting
+                            'profit_display': f"{profit_margin:.1f}%",
+                            'mandarake_link': item.get('product_url', ''),
+                            'ebay_link': ebay_item.get('product_url', '')
+                        })
+
+                except Exception as e:
+                    print(f"[CSV BATCH] Error processing CSV item {item_idx}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+
+            # Sort by similarity (highest first)
+            comparison_results.sort(key=lambda x: x['similarity'], reverse=True)
+
+            print(f"\n[CSV BATCH] ========================================")
+            print(f"[CSV BATCH] Generated {len(comparison_results)} comparison results")
+            print(f"[CSV BATCH] Debug images saved to: {debug_folder.absolute()}")
+            print(f"[CSV BATCH] - {len(ebay_image_cache)} eBay images")
+            print(f"[CSV BATCH] - {len(items)} CSV reference images")
+            print(f"[CSV BATCH] ========================================\n")
+
+            # Store unfiltered results for filtering
+            self.all_comparison_results = comparison_results
+
+            # Apply filters and display
+            self.after(0, lambda: self._display_csv_comparison_results(comparison_results))
+            self.after(0, lambda: self.browserless_status.set(f"Compared {len(items)} CSV items with {len(ebay_results)} eBay listings - {len(comparison_results)} total matches"))
+
+        except Exception as e:
+            import traceback
+            print(f"[CSV BATCH ERROR] {e}")
+            traceback.print_exc()
+            self.after(0, lambda: messagebox.showerror("Comparison Error", f"Failed: {str(e)}"))
+        finally:
+            self.after(0, self.csv_compare_progress.stop)
+
+    def _compare_csv_items_individually_worker(self, items):
+        """Worker to compare CSV items individually - each item gets its own eBay search"""
+        try:
+            from ebay_scrapy_search import run_ebay_scrapy_search
+            import cv2
+            import numpy as np
+            import requests
+
+            max_results = int(self.browserless_max_results.get())
+            comparison_results = []
+
+            print(f"\n[CSV INDIVIDUAL] Starting individual comparisons for {len(items)} items")
+            print(f"[CSV INDIVIDUAL] Each item will get its own eBay search with keyword + category")
+
+            for item_idx, item in enumerate(items, 1):
+                csv_title = item.get('title', 'Unknown')
+                keyword = item.get('keyword', '')
+                category = item.get('category', '')
+
+                # Build search query for this specific item
+                if keyword:
+                    core_words = keyword
+                else:
+                    core_words = ' '.join(csv_title.split()[:3])
+
+                category_keyword = CATEGORY_KEYWORDS.get(category, '')
+                search_query = f"{core_words} {category_keyword}".strip()
+
+                if not search_query:
+                    print(f"[CSV INDIVIDUAL] Skipping item {item_idx}: no search query")
+                    continue
+
+                print(f"\n[CSV INDIVIDUAL] Item {item_idx}/{len(items)}: {csv_title[:50]}")
+                print(f"[CSV INDIVIDUAL] Search query: '{search_query}'")
+
+                self.after(0, lambda q=search_query, idx=item_idx: self.browserless_status.set(
+                    f"Item {idx}/{len(items)}: Searching eBay for '{q}'..."))
+
+                # Create debug folder for this item
+                debug_folder = self._create_debug_folder(f"{search_query}_item{item_idx}")
+
+                # Run eBay search for this specific item
+                ebay_results = run_ebay_scrapy_search(
+                    query=search_query,
+                    max_results=max_results,
+                    sold_listings=True
+                )
+
+                if not ebay_results:
+                    print(f"[CSV INDIVIDUAL] No eBay results for item {item_idx}")
+                    continue
+
+                print(f"[CSV INDIVIDUAL] Found {len(ebay_results)} eBay listings")
+
+                # Load CSV item image
+                csv_image_path = item.get('local_image', '')
+                if not csv_image_path or not Path(csv_image_path).exists():
+                    print(f"[CSV INDIVIDUAL] No image for item {item_idx}, skipping visual comparison")
+                    continue
+
+                ref_image = cv2.imread(str(csv_image_path))
+                if ref_image is None:
+                    print(f"[CSV INDIVIDUAL] Failed to load image for item {item_idx}")
+                    continue
+
+                # Save reference image to debug folder
+                csv_title_safe = "".join(c for c in csv_title[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
+                csv_debug_path = debug_folder / f"CSV_REF_{csv_title_safe}.jpg"
+                cv2.imwrite(str(csv_debug_path), ref_image)
+
+                # Download and compare with each eBay result
+                item_comparisons = []
+                for ebay_idx, ebay_item in enumerate(ebay_results):
+                    ebay_image_url = ebay_item.get('main_image', '')
+                    if not ebay_image_url:
+                        continue
+
+                    try:
+                        response = requests.get(ebay_image_url, timeout=5)
+                        if response.status_code == 200:
+                            img_array = np.frombuffer(response.content, np.uint8)
+                            ebay_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+                            if ebay_img is not None:
+                                # Save eBay image to debug folder
+                                ebay_title_safe = "".join(c for c in ebay_item.get('product_title', 'unknown')[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
+                                ebay_debug_path = debug_folder / f"ebay_{ebay_idx+1:02d}_{ebay_title_safe}.jpg"
+                                cv2.imwrite(str(ebay_debug_path), ebay_img)
+
+                                # Use shared comparison method
+                                similarity = self._compare_images(ref_image, ebay_img)
+                                item_comparisons.append((similarity, ebay_idx, ebay_item.get('product_title', 'unknown')[:50]))
+
+                    except Exception as e:
+                        print(f"[CSV INDIVIDUAL] Error comparing with eBay item {ebay_idx+1}: {e}")
+
+                # Sort by similarity and show top 5
+                item_comparisons.sort(reverse=True)
+                print(f"[CSV INDIVIDUAL] Top 5 matches for '{csv_title[:40]}':")
+                for rank, (sim, idx, title) in enumerate(item_comparisons[:5], 1):
+                    print(f"  {rank}. {sim:.1f}% - {title}")
+
+                # Add all comparisons to results
+                for similarity, ebay_idx, _ in item_comparisons:
+                    ebay_item = ebay_results[ebay_idx]
+
+                    # Calculate profit margin
+                    mandarake_price_text = item.get('price_text', item.get('price', '0'))
+                    mandarake_price = self._extract_price(mandarake_price_text)
+
+                    ebay_price_text = ebay_item.get('current_price', '0')
+                    ebay_price = self._extract_price(ebay_price_text)
+
+                    shipping_text = ebay_item.get('shipping_cost', '0')
+                    shipping_cost = self._extract_price(shipping_text)
+
+                    # Profit = eBay - Mandarake - Shipping
+                    profit = ebay_price - mandarake_price - shipping_cost
+                    profit_margin = (profit / mandarake_price * 100) if mandarake_price > 0 else 0
+
+                    comparison_results.append({
+                        'thumbnail': ebay_item.get('main_image', ''),
+                        'csv_title': csv_title,
+                        'ebay_title': ebay_item.get('product_title', 'N/A'),
+                        'mandarake_price': f"¥{mandarake_price:,.0f}",
+                        'ebay_price': ebay_price_text,
+                        'shipping': shipping_text,
+                        'similarity': similarity,
+                        'similarity_display': f"{similarity:.1f}%" if similarity > 0 else '-',
+                        'profit_margin': profit_margin,
+                        'profit_display': f"{profit_margin:.1f}%",
+                        'mandarake_link': item.get('product_url', ''),
+                        'ebay_link': ebay_item.get('product_url', '')
+                    })
+
+            # Sort by similarity (highest first)
+            comparison_results.sort(key=lambda x: x['similarity'], reverse=True)
+
+            print(f"\n[CSV INDIVIDUAL] ========================================")
+            print(f"[CSV INDIVIDUAL] Completed {len(items)} individual searches")
+            print(f"[CSV INDIVIDUAL] Generated {len(comparison_results)} comparison results")
+            print(f"[CSV INDIVIDUAL] ========================================\n")
+
+            # Store unfiltered results for filtering
+            self.all_comparison_results = comparison_results
+
+            # Apply filters and display
+            self.after(0, lambda: self._display_csv_comparison_results(comparison_results))
+            self.after(0, lambda: self.browserless_status.set(f"Completed {len(items)} individual searches - {len(comparison_results)} total matches"))
+
+        except Exception as e:
+            import traceback
+            print(f"[CSV INDIVIDUAL ERROR] {e}")
+            traceback.print_exc()
+            self.after(0, lambda: messagebox.showerror("Comparison Error", f"Failed: {str(e)}"))
+        finally:
+            self.after(0, self.csv_compare_progress.stop)
+
+    def _extract_price(self, price_text):
+        """Extract numeric price from text"""
+        import re
+        if not price_text:
+            return 0.0
+        # Remove currency symbols and commas, extract number
+        match = re.search(r'[\d,]+\.?\d*', str(price_text).replace(',', ''))
+        if match:
+            return float(match.group(0))
+        return 0.0
+
+    def _compare_images(self, ref_image, compare_image):
+        """
+        Compare two images and return similarity score (0-100).
+        Uses SSIM (70%) + Histogram (30%) for robust comparison.
+
+        Args:
+            ref_image: Reference image (numpy array)
+            compare_image: Image to compare (numpy array)
+
+        Returns:
+            float: Similarity score from 0-100
+        """
+        import cv2
+        from skimage.metrics import structural_similarity as ssim
+
+        try:
+            # Resize images to same size for comparison
+            ref_resized = cv2.resize(ref_image, (300, 300))
+            compare_resized = cv2.resize(compare_image, (300, 300))
+
+            # Convert to grayscale for SSIM
+            ref_gray = cv2.cvtColor(ref_resized, cv2.COLOR_BGR2GRAY)
+            compare_gray = cv2.cvtColor(compare_resized, cv2.COLOR_BGR2GRAY)
+
+            # Calculate SSIM (Structural Similarity Index)
+            ssim_score = ssim(ref_gray, compare_gray)
+
+            # Calculate histogram similarity as secondary metric
+            ref_hist = cv2.calcHist([ref_resized], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+            compare_hist = cv2.calcHist([compare_resized], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+            cv2.normalize(ref_hist, ref_hist)
+            cv2.normalize(compare_hist, compare_hist)
+            hist_score = cv2.compareHist(ref_hist, compare_hist, cv2.HISTCMP_CORREL)
+
+            # Weighted combination: SSIM (70%) + Histogram (30%)
+            similarity = (ssim_score * 0.7 + hist_score * 0.3) * 100
+
+            return similarity
+
+        except Exception as e:
+            print(f"[IMAGE COMPARE] Error: {e}")
+            return 0.0
+
+    def _create_debug_folder(self, query):
+        """
+        Create debug folder for saving comparison images.
+
+        Args:
+            query: Search query string
+
+        Returns:
+            Path: Debug folder path
+        """
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_query = "".join(c for c in query if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
+        debug_folder = Path(f"debug_comparison/{safe_query}_{timestamp}")
+        debug_folder.mkdir(parents=True, exist_ok=True)
+        print(f"[DEBUG] Debug folder: {debug_folder}")
+        return debug_folder
+
+    def apply_results_filter(self):
+        """Apply filters to comparison results"""
+        if not self.all_comparison_results:
+            return
+
+        try:
+            min_similarity = float(self.min_similarity_var.get() or 0)
+            min_profit = float(self.min_profit_var.get() or 0)
+        except ValueError:
+            messagebox.showerror("Invalid Filter", "Please enter valid numbers for filters")
+            return
+
+        # Filter results
+        filtered_results = []
+        for r in self.all_comparison_results:
+            if r['similarity'] >= min_similarity and r['profit_margin'] >= min_profit:
+                filtered_results.append(r)
+
+        print(f"[FILTER] Showing {len(filtered_results)} of {len(self.all_comparison_results)} results (similarity>={min_similarity}%, profit>={min_profit}%)")
+
+        self._display_csv_comparison_results(filtered_results)
+        self.browserless_status.set(f"Showing {len(filtered_results)} of {len(self.all_comparison_results)} results (filtered)")
+
+    def _display_csv_comparison_results(self, results):
+        """Display CSV comparison results in the browserless tree"""
+        # Convert format to match existing display
+        display_results = []
+        for r in results:
+            display_results.append({
+                'title': r['ebay_title'],
+                'price': r['ebay_price'],
+                'shipping': r['shipping'],
+                'sold_date': r['profit_display'],  # Show profit margin
+                'similarity': r['similarity_display'],
+                'url': r['ebay_link'],
+                'image_url': r['thumbnail']
+            })
+
+        self._display_browserless_results(display_results)
 
     def open_browserless_url(self, event):
         """Open selected eBay URL in browser"""

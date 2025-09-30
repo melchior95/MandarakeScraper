@@ -268,7 +268,7 @@ class MandarakeScraper:
         shop_code = shop or self.config.get('shop', '')
 
         params = {
-            'keyword': self.config['keyword'],
+            'keyword': self.config.get('keyword', ''),  # Make keyword optional
             'categoryCode': category_code,
             'shop': shop_code,
             'dispCount': 240,  # Max items per page
@@ -304,7 +304,8 @@ class MandarakeScraper:
         # Log detailed URL information
         logging.info(f"Building request URL for page {page}:")
         logging.info(f"   Base URL: {base_url}")
-        logging.info(f"   Keyword: '{self.config['keyword']}'")
+        keyword = self.config.get('keyword', '')
+        logging.info(f"   Keyword: '{keyword}'" if keyword else "   Keyword: (none - browsing category)")
         if category_code:
             logging.info(f"   Category: {category_code}")
         if shop_code:
@@ -409,6 +410,85 @@ class MandarakeScraper:
             return int(match.group(1).replace(',', ''))
         return 0
 
+    def extract_keyword_from_title(self, title: str, search_keyword: str = None) -> str:
+        """
+        Extract the main keyword/subject from a title.
+        Uses the search keyword as reference to find the proper form in the title.
+
+        Args:
+            title: Product title
+            search_keyword: The keyword used in the search (from config)
+
+        Returns:
+            Extracted keyword with proper capitalization
+        """
+        if not title:
+            return ""
+
+        # If no search keyword provided, try to extract from config
+        if not search_keyword:
+            search_keyword = self.config.get('keyword', '')
+
+        if not search_keyword:
+            # Fallback: extract first 2-3 capitalized words
+            words = title.split()
+            capitalized = [w for w in words[:5] if w and (w[0].isupper() or not w[0].isalpha())]
+            return ' '.join(capitalized[:3]) if capitalized else words[0] if words else ""
+
+        # Normalize for comparison
+        search_lower = search_keyword.lower()
+        title_lower = title.lower()
+
+        # Split search keyword into parts
+        search_parts = search_lower.split()
+
+        # Try to find exact match (case-insensitive)
+        if search_lower in title_lower:
+            # Find the position and extract with original capitalization
+            start_idx = title_lower.index(search_lower)
+            return title[start_idx:start_idx + len(search_keyword)]
+
+        # Try to find reversed name (e.g., "Kano Yura" when searching "Yura Kano")
+        if len(search_parts) == 2:
+            reversed_keyword = f"{search_parts[1]} {search_parts[0]}"
+            if reversed_keyword in title_lower:
+                start_idx = title_lower.index(reversed_keyword)
+                # Return in original search order
+                return search_keyword.title()
+
+        # Try to find all parts present (possibly non-contiguous)
+        all_parts_present = all(part in title_lower for part in search_parts)
+        if all_parts_present and len(search_parts) >= 2:
+            # Find the span containing all parts
+            words = title.split()
+            words_lower = [w.lower() for w in words]
+
+            # Find first and last occurrence of search parts
+            first_idx = None
+            last_idx = None
+
+            for i, word in enumerate(words_lower):
+                if any(part in word for part in search_parts):
+                    if first_idx is None:
+                        first_idx = i
+                    last_idx = i
+
+            if first_idx is not None and last_idx is not None:
+                # Extract the span, but limit to reasonable length
+                span_length = last_idx - first_idx + 1
+                if span_length <= 5:  # Reasonable span
+                    extracted = ' '.join(words[first_idx:last_idx + 1])
+                    # Remove common publisher prefixes if present
+                    publishers = ['Takeshobo', 'S-Digital', 'G-WALK', 'Cosplay', 'Fetish', 'Book']
+                    for pub in publishers:
+                        if extracted.startswith(pub + ' '):
+                            extracted = extracted[len(pub) + 1:]
+                            break
+                    return extracted
+
+        # Fallback: return search keyword with title case
+        return search_keyword.title()
+
     def parse_item_number(self, item_no_text: str) -> List[str]:
         """Parse item number from mdrscr format"""
         if not item_no_text:
@@ -502,8 +582,12 @@ class MandarakeScraper:
             item_no_text = item_no_elem.get_text(strip=True) if item_no_elem else ''
             item_numbers = self.parse_item_number(item_no_text)
 
+            # Extract keyword from title
+            keyword = self.extract_keyword_from_title(title)
+
             return {
                 'title': title,
+                'keyword': keyword,
                 'price': price,
                 'price_text': price_text,
                 'image_url': image_url,
@@ -968,7 +1052,8 @@ class MandarakeScraper:
             logging.info("=" * 60)
             logging.info("MANDARAKE SCRAPER STARTED")
             logging.info("=" * 60)
-            logging.info(f"Search keyword: '{self.config['keyword']}'")
+            keyword = self.config.get('keyword', '')
+            logging.info(f"Search keyword: '{keyword}'" if keyword else "Search keyword: (none - browsing by category/shop)")
             logging.info(f"Category: {self.config.get('category', 'All categories')}")
             logging.info(f"Shop: {self.config.get('shop', 'All shops')}")
             logging.info(f"Browser mimic: {'Enabled' if self.use_mimic else 'Disabled'}")
@@ -1006,7 +1091,8 @@ class MandarakeScraper:
             logging.info("SCRAPING COMPLETED SUCCESSFULLY!")
             logging.info("=" * 60)
             logging.info(f"FINAL RESULTS SUMMARY:")
-            logging.info(f"   Search term: '{self.config['keyword']}'")
+            keyword = self.config.get('keyword', '')
+            logging.info(f"   Search term: '{keyword}'" if keyword else "   Search term: (none - category/shop browse)")
             logging.info(f"   Total products found: {len(self.results)}")
             logging.info(f"   Pages scraped: Multiple")
             logging.info(f"   Fast mode: {'Yes' if self.config.get('fast', False) else 'No'}")
@@ -1726,6 +1812,12 @@ def parse_mandarake_url(url: str) -> Dict:
                 config['recent_hours'] = max(1, minutes // 60)
             except (ValueError, TypeError):
                 pass
+
+        # Language
+        if 'lang' in params:
+            lang = params['lang'][0].lower()
+            if lang in ('en', 'ja'):
+                config['language'] = lang
 
         return config
 
