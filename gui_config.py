@@ -525,7 +525,7 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         output_frame.columnconfigure(3, weight=1)
 
         # eBay Text Search tab ------------------------------------------
-        ttk.Label(browserless_frame, text="Direct eBay search with image comparison:").grid(row=0, column=0, columnspan=4, sticky=tk.W, **pad)
+        ttk.Label(browserless_frame, text="Scrapy eBay Search (Sold Listings):").grid(row=0, column=0, columnspan=5, sticky=tk.W, **pad)
 
         # Search input
         ttk.Label(browserless_frame, text="Search query:").grid(row=1, column=0, sticky=tk.W, **pad)
@@ -533,26 +533,36 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         browserless_entry = ttk.Entry(browserless_frame, textvariable=self.browserless_query_var, width=32)
         browserless_entry.grid(row=1, column=1, columnspan=2, sticky=tk.W, **pad)
 
-        # Max results setting
+        # Max results setting (for rate limiting)
         ttk.Label(browserless_frame, text="Max results:").grid(row=1, column=3, sticky=tk.W, **pad)
-        self.browserless_max_results = tk.StringVar(value="5")
+        self.browserless_max_results = tk.StringVar(value="10")
         max_results_combo = ttk.Combobox(browserless_frame, textvariable=self.browserless_max_results,
-                                       values=["3", "5", "7", "10", "15"], width=5, state="readonly")
+                                       values=["5", "10", "15", "20", "25", "30"], width=5, state="readonly")
         max_results_combo.grid(row=1, column=4, sticky=tk.W, **pad)
+        max_results_combo.bind("<<ComboboxSelected>>", lambda e: self._save_gui_settings())
 
-        # Reference image selection
+        # Reference image selection (for image comparison)
         ttk.Label(browserless_frame, text="Reference image:").grid(row=2, column=0, sticky=tk.W, **pad)
         ttk.Button(browserless_frame, text="Select Image...", command=self.select_browserless_image).grid(row=2, column=1, sticky=tk.W, **pad)
-        self.browserless_image_label = ttk.Label(browserless_frame, text="No image selected", foreground="gray")
+        self.browserless_image_label = ttk.Label(browserless_frame, text="No image selected (optional)", foreground="gray")
         self.browserless_image_label.grid(row=2, column=2, columnspan=2, sticky=tk.W, **pad)
 
+        # Max comparisons setting (only used when image is selected)
+        ttk.Label(browserless_frame, text="Max comparisons:").grid(row=2, column=3, sticky=tk.W, **pad)
+        self.browserless_max_comparisons = tk.StringVar(value="MAX")
+        max_comp_combo = ttk.Combobox(browserless_frame, textvariable=self.browserless_max_comparisons,
+                                     values=["1", "2", "3", "5", "7", "10", "MAX"], width=5, state="readonly")
+        max_comp_combo.grid(row=2, column=4, sticky=tk.W, **pad)
+        max_comp_combo.bind("<<ComboboxSelected>>", lambda e: self._save_gui_settings())
+
         # Action buttons
-        ttk.Button(browserless_frame, text="Search & Compare", command=self.run_browserless_search).grid(row=3, column=0, sticky=tk.W, **pad)
-        ttk.Button(browserless_frame, text="Clear Results", command=self.clear_browserless_results).grid(row=3, column=1, sticky=tk.W, **pad)
+        ttk.Button(browserless_frame, text="Search", command=self.run_scrapy_text_search).grid(row=3, column=0, sticky=tk.W, **pad)
+        ttk.Button(browserless_frame, text="Search & Compare", command=self.run_scrapy_search_with_compare).grid(row=3, column=1, sticky=tk.W, **pad)
+        ttk.Button(browserless_frame, text="Clear Results", command=self.clear_browserless_results).grid(row=3, column=2, sticky=tk.W, **pad)
 
         # Progress bar
         self.browserless_progress = ttk.Progressbar(browserless_frame, mode='indeterminate')
-        self.browserless_progress.grid(row=3, column=2, columnspan=2, sticky=tk.EW, **pad)
+        self.browserless_progress.grid(row=3, column=3, columnspan=2, sticky=tk.EW, **pad)
 
         # Results section
         browserless_results_frame = ttk.LabelFrame(browserless_frame, text="eBay Search Results")
@@ -565,7 +575,7 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         browserless_results_frame.columnconfigure(0, weight=1)
 
         # Results treeview
-        browserless_columns = ('title', 'price', 'similarity', 'images', 'url')
+        browserless_columns = ('title', 'price', 'shipping', 'sold_date', 'similarity', 'url')
         self.browserless_tree = ttk.Treeview(browserless_results_frame, columns=browserless_columns, show='tree headings', height=8)
 
         self.browserless_tree.heading('#0', text='#')
@@ -574,8 +584,9 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         browserless_headings = {
             'title': 'Title',
             'price': 'Price',
+            'shipping': 'Shipping',
+            'sold_date': 'Sold Date',
             'similarity': 'Similarity %',
-            'images': 'Images',
             'url': 'eBay URL'
         }
 
@@ -583,11 +594,12 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             self.browserless_tree.heading(col, text=heading)
 
         # Set column widths
-        self.browserless_tree.column('title', width=300)
-        self.browserless_tree.column('price', width=80)
-        self.browserless_tree.column('similarity', width=80)
-        self.browserless_tree.column('images', width=60)
-        self.browserless_tree.column('url', width=200)
+        self.browserless_tree.column('title', width=280)
+        self.browserless_tree.column('price', width=70)
+        self.browserless_tree.column('shipping', width=70)
+        self.browserless_tree.column('sold_date', width=100)
+        self.browserless_tree.column('similarity', width=90)
+        self.browserless_tree.column('url', width=180)
 
         self.browserless_tree.grid(row=0, column=0, sticky=tk.NSEW)
 
@@ -2663,6 +2675,12 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         try:
             self._settings_loaded = False
             self.mimic_var.set(settings.get('mimic', True))  # Default to True for Unicode support
+
+            # Load eBay search settings if they exist
+            if hasattr(self, 'browserless_max_results'):
+                self.browserless_max_results.set(settings.get('ebay_max_results', "10"))
+            if hasattr(self, 'browserless_max_comparisons'):
+                self.browserless_max_comparisons.set(settings.get('ebay_max_comparisons', "MAX"))
         finally:
             self._settings_loaded = True
 
@@ -2671,7 +2689,11 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             return
         try:
             SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-            data = {'mimic': bool(self.mimic_var.get())}
+            data = {
+                'mimic': bool(self.mimic_var.get()),
+                'ebay_max_results': self.browserless_max_results.get() if hasattr(self, 'browserless_max_results') else "10",
+                'ebay_max_comparisons': self.browserless_max_comparisons.get() if hasattr(self, 'browserless_max_comparisons') else "MAX"
+            }
             with SETTINGS_PATH.open('w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
         except Exception:
@@ -3032,23 +3054,181 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             self.browserless_image_label.config(text=f"Selected: {self.browserless_image_path.name}", foreground="black")
             print(f"[BROWSERLESS SEARCH] Loaded reference image: {self.browserless_image_path}")
 
-    def run_browserless_search(self):
-        """Run browserless eBay search with image comparison"""
+    def run_scrapy_text_search(self):
+        """Run Scrapy eBay search (text only, no image comparison)"""
+        query = self.browserless_query_var.get().strip()
+        if not query:
+            messagebox.showerror("Error", "Please enter a search query")
+            return
+
+        # Start search in background thread
+        self.browserless_progress.start()
+        self.browserless_status.set("Searching eBay...")
+        self._start_thread(self._run_scrapy_text_search_worker)
+
+    def run_scrapy_search_with_compare(self):
+        """Run Scrapy eBay search WITH image comparison"""
         query = self.browserless_query_var.get().strip()
         if not query:
             messagebox.showerror("Error", "Please enter a search query")
             return
 
         if not hasattr(self, 'browserless_image_path') or not self.browserless_image_path or not Path(self.browserless_image_path).exists():
-            messagebox.showerror("Error", "Please select a reference image first")
+            messagebox.showerror("Error", "Please select a reference image first for comparison")
             return
 
-        # Start search in background thread
+        # Start search with comparison in background thread
         self.browserless_progress.start()
-        self._start_thread(self._run_browserless_search_worker)
+        self.browserless_status.set("Searching eBay and comparing images...")
+        self._start_thread(self._run_scrapy_search_with_compare_worker)
 
-    def _run_browserless_search_worker(self):
-        """Worker method for browserless search (runs in background thread)"""
+    def _run_scrapy_text_search_worker(self):
+        """Worker method for Scrapy text-only search (runs in background thread)"""
+        try:
+            from ebay_scrapy_search import run_ebay_scrapy_search
+
+            query = self.browserless_query_var.get().strip()
+            max_results = int(self.browserless_max_results.get())
+
+            print(f"[SCRAPY SEARCH] Starting search for: {query}")
+            print(f"[SCRAPY SEARCH] Max results: {max_results}")
+
+            # Run Scrapy spider
+            scrapy_results = run_ebay_scrapy_search(
+                query=query,
+                max_results=max_results,
+                sold_listings=True
+            )
+
+            if not scrapy_results:
+                self.after(0, lambda: messagebox.showinfo("No Results", "No eBay listings found"))
+                return
+
+            print(f"[SCRAPY SEARCH] Found {len(scrapy_results)} results")
+
+            # Convert to display format (no similarity since no image comparison)
+            results = []
+            for item in scrapy_results:
+                results.append({
+                    'title': item.get('product_title', 'N/A'),
+                    'price': item.get('current_price', 'N/A'),
+                    'shipping': item.get('shipping_cost', 'N/A'),
+                    'sold_date': item.get('sold_date', 'N/A'),
+                    'similarity': '-',  # No comparison
+                    'url': item.get('product_url', ''),
+                    'image_url': item.get('main_image', '')
+                })
+
+            # Update UI with results
+            self.after(0, lambda: self._display_browserless_results(results))
+            self.after(0, lambda: self.browserless_status.set(f"Found {len(results)} eBay sold listings"))
+
+        except Exception as e:
+            import traceback
+            print(f"[SCRAPY SEARCH ERROR] {e}")
+            traceback.print_exc()
+            self.after(0, lambda: messagebox.showerror("Search Error", f"Failed to search eBay: {str(e)}"))
+        finally:
+            self.after(0, self.browserless_progress.stop)
+
+    def _run_scrapy_search_with_compare_worker(self):
+        """Worker method for Scrapy search WITH image comparison (runs in background thread)"""
+        try:
+            from ebay_scrapy_search import run_ebay_scrapy_search
+            import cv2
+            import numpy as np
+
+            query = self.browserless_query_var.get().strip()
+            max_results = int(self.browserless_max_results.get())
+            max_comparisons_str = self.browserless_max_comparisons.get()
+            max_comparisons = None if max_comparisons_str == "MAX" else int(max_comparisons_str)
+
+            print(f"[SCRAPY COMPARE] Starting search for: {query}")
+            print(f"[SCRAPY COMPARE] Max results: {max_results}")
+            print(f"[SCRAPY COMPARE] Max comparisons: {max_comparisons or 'ALL'}")
+            print(f"[SCRAPY COMPARE] Reference image: {self.browserless_image_path}")
+
+            # Run Scrapy spider
+            scrapy_results = run_ebay_scrapy_search(
+                query=query,
+                max_results=max_results,
+                sold_listings=True
+            )
+
+            if not scrapy_results:
+                self.after(0, lambda: messagebox.showinfo("No Results", "No eBay listings found"))
+                return
+
+            print(f"[SCRAPY COMPARE] Found {len(scrapy_results)} results, comparing images...")
+
+            # Load reference image
+            ref_image = cv2.imread(str(self.browserless_image_path))
+            if ref_image is None:
+                raise Exception(f"Could not load reference image: {self.browserless_image_path}")
+
+            # Determine how many to compare
+            items_to_compare = scrapy_results if max_comparisons is None else scrapy_results[:max_comparisons]
+
+            # Simple image comparison using template matching
+            results = []
+            for i, item in enumerate(items_to_compare):
+                # Download and compare image
+                image_url = item.get('main_image', '')
+                similarity = 0.0
+
+                if image_url:
+                    try:
+                        import requests
+                        response = requests.get(image_url, timeout=5)
+                        if response.status_code == 200:
+                            img_array = np.frombuffer(response.content, np.uint8)
+                            ebay_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+                            if ebay_img is not None:
+                                # Resize images to same size for comparison
+                                ref_resized = cv2.resize(ref_image, (300, 300))
+                                ebay_resized = cv2.resize(ebay_img, (300, 300))
+
+                                # Calculate similarity using histogram comparison
+                                ref_hist = cv2.calcHist([ref_resized], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+                                ebay_hist = cv2.calcHist([ebay_resized], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+
+                                # Normalize histograms
+                                cv2.normalize(ref_hist, ref_hist)
+                                cv2.normalize(ebay_hist, ebay_hist)
+
+                                # Compare histograms
+                                similarity = cv2.compareHist(ref_hist, ebay_hist, cv2.HISTCMP_CORREL) * 100
+                    except Exception as e:
+                        print(f"[SCRAPY COMPARE] Error comparing image {i+1}: {e}")
+
+                results.append({
+                    'title': item.get('product_title', 'N/A'),
+                    'price': item.get('current_price', 'N/A'),
+                    'shipping': item.get('shipping_cost', 'N/A'),
+                    'sold_date': item.get('sold_date', 'N/A'),
+                    'similarity': f"{similarity:.1f}%" if similarity > 0 else '-',
+                    'url': item.get('product_url', ''),
+                    'image_url': image_url
+                })
+
+            # Sort by similarity (highest first)
+            results.sort(key=lambda x: float(x['similarity'].replace('%', '')) if x['similarity'] != '-' else 0, reverse=True)
+
+            # Update UI with results
+            self.after(0, lambda: self._display_browserless_results(results))
+            self.after(0, lambda: self.browserless_status.set(f"Found {len(results)} results, compared {len(items_to_compare)} images"))
+
+        except Exception as e:
+            import traceback
+            print(f"[SCRAPY COMPARE ERROR] {e}")
+            traceback.print_exc()
+            self.after(0, lambda: messagebox.showerror("Search Error", f"Failed to search/compare: {str(e)}"))
+        finally:
+            self.after(0, self.browserless_progress.stop)
+
+    def _run_browserless_search_worker_OLD(self):
+        """OLD Worker method - DEPRECATED"""
         try:
             import asyncio
             from sold_listing_matcher import match_product_with_sold_listings
@@ -3056,9 +3236,9 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             query = self.browserless_query_var.get().strip()
             max_results = int(self.browserless_max_results.get())
 
-            print(f"[BROWSERLESS SEARCH] Starting search for: {query}")
-            print(f"[BROWSERLESS SEARCH] Max results: {max_results}")
-            print(f"[BROWSERLESS SEARCH] Reference image: {self.browserless_image_path}")
+            print(f"[OLD BROWSERLESS SEARCH] Starting search for: {query}")
+            print(f"[OLD BROWSERLESS SEARCH] Max results: {max_results}")
+            print(f"[OLD BROWSERLESS SEARCH] Reference image: {self.browserless_image_path}")
 
             # Run the async matcher function
             loop = asyncio.new_event_loop()
@@ -3074,7 +3254,7 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                     )
                 )
 
-                print(f"[BROWSERLESS SEARCH] Found {match_result.matches_found} matches")
+                print(f"[OLD BROWSERLESS SEARCH] Found {match_result.matches_found} matches")
 
                 # Convert match results to display format
                 results = []
@@ -3165,19 +3345,23 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         for item in self.browserless_tree.get_children():
             self.browserless_tree.delete(item)
 
+        # Store results for URL opening
+        self.browserless_results_data = results
+
         # Add new results
         for i, result in enumerate(results, 1):
             values = (
-                result['title'][:50] + "..." if len(result['title']) > 50 else result['title'],
+                result['title'][:45] + "..." if len(result['title']) > 45 else result['title'],
                 result['price'],
+                result['shipping'],
+                result['sold_date'],
                 result['similarity'],
-                result['images'],
-                result['url'][:40] + "..." if len(result['url']) > 40 else result['url']
+                result['url'][:35] + "..." if len(result['url']) > 35 else result['url']
             )
 
             self.browserless_tree.insert('', 'end', iid=str(i), text=str(i), values=values)
 
-        print(f"[BROWSERLESS SEARCH] Displayed {len(results)} results in tree view")
+        print(f"[SCRAPY SEARCH] Displayed {len(results)} results in tree view")
 
     def _clean_ebay_url(self, url: str) -> str:
         """Clean and validate eBay URL"""
