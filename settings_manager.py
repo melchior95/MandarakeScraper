@@ -179,13 +179,15 @@ class SettingsManager:
         """Get window-specific settings"""
         return self.get_setting("window", {})
 
-    def save_window_settings(self, width: int, height: int, x: int, y: int, maximized: bool = False):
+    def save_window_settings(self, width: int, height: int, x: int, y: int, maximized: bool = False, ebay_paned_pos: int = None):
         """Save window geometry and state"""
         self.set_setting("window.width", width)
         self.set_setting("window.height", height)
         self.set_setting("window.x", x)
         self.set_setting("window.y", y)
         self.set_setting("window.maximized", maximized)
+        if ebay_paned_pos is not None:
+            self.set_setting("window.ebay_paned_pos", ebay_paned_pos)
 
     def get_ebay_analysis_settings(self) -> Dict[str, Any]:
         """Get eBay analysis specific settings"""

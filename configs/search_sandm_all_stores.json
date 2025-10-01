@@ -1,0 +1,17 @@
+{
+  "keyword": "羽田あい",
+  "hide_sold_out": false,
+  "language": "en",
+  "fast": false,
+  "resume": true,
+  "debug": true,
+  "client_id": "",
+  "client_secret": "",
+  "category": "050801",
+  "category_name": "AV Actress/Photograph Collection",
+  "results_per_page": 240,
+  "shop": "0",
+  "shop_name": "All Stores",
+  "csv": "results\\unicode_5cd08f13_av_actress_photograph_collection_all_stores.csv",
+  "download_images": "images\\search_sandm_all_stores/"
+}

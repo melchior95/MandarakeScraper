@@ -78,6 +78,10 @@ class ScraperGUI(tk.Tk):
         # Initialize settings manager
         self.settings = get_settings_manager()
 
+        # Fetch current USD/JPY exchange rate
+        self.usd_jpy_rate = self._fetch_exchange_rate()
+        print(f"[EXCHANGE RATE] USD/JPY: {self.usd_jpy_rate}")
+
         self.title("Mandarake Scraper GUI")
 
         # Load window settings or use defaults
@@ -102,14 +106,23 @@ class ScraperGUI(tk.Tk):
         self.run_thread = None
         self.run_queue: "queue.Queue[tuple[str, str]]" = queue.Queue()
         self.config_paths: dict[str, Path] = {}
+        self.current_scraper = None  # Track current scraper instance for cancellation
+        self.cancel_requested = False  # Flag to signal cancellation
         self.detail_code_map: list[str] = []
-        self.result_links: dict[str, str] = {}
-        self.result_images: dict[str, ImageTk.PhotoImage] = {}
-        self.result_data: dict[str, dict] = {}
+        self.browserless_images: dict[str, ImageTk.PhotoImage] = {}  # Store eBay search thumbnails
+        self.csv_images: dict[str, ImageTk.PhotoImage] = {}  # Store CSV comparison thumbnails
         self.last_saved_path: Path | None = None
         self.gui_settings: dict[str, bool] = {}
         self._settings_loaded = False
         self._active_playwright_matchers = []  # Track active Playwright instances
+
+        # Initialize output-related variables (needed for config save/load)
+        self.csv_path_var = tk.StringVar(value="results.csv")
+        self.download_dir_var = tk.StringVar(value="images/")
+        self.thumbnails_var = tk.StringVar(value="400")
+
+        # Load publisher list
+        self.publisher_list = self._load_publisher_list()
 
         # Create menu bar
         self._create_menu_bar()
@@ -128,9 +141,6 @@ class ScraperGUI(tk.Tk):
         # File menu
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Load Config", command=self.load_config)
-        file_menu.add_command(label="Save Config", command=self.save_config)
-        file_menu.add_separator()
 
         # Recent files submenu
         self.recent_menu = tk.Menu(file_menu, tearoff=0)
@@ -152,7 +162,7 @@ class ScraperGUI(tk.Tk):
         # Tools menu
         tools_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Tools", menu=tools_menu)
-        tools_menu.add_command(label="Research & Optimize", command=self.open_research_optimizer)
+        tools_menu.add_command(label="Research & Optimize", command=self.start_category_research)
         tools_menu.add_command(label="View Optimization Profiles", command=self.view_optimization_profiles)
 
         # Help menu
@@ -340,32 +350,57 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
     def _build_widgets(self):
         pad = {"padx": 8, "pady": 4}
 
+        # Create status bar first (will pack at bottom)
+        self.status_var = tk.StringVar(value="Ready")
+        status_label = ttk.Label(self, textvariable=self.status_var, relief=tk.SUNKEN, anchor='w')
+        status_label.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=4)
+
+        # Create clickable URL label (pack at bottom, above status)
+        self.url_var = tk.StringVar(value="(enter keyword)")
+        self.url_label = tk.Label(self, textvariable=self.url_var, relief=tk.GROOVE, anchor='w',
+                                   wraplength=720, justify=tk.LEFT, cursor="hand2", fg="blue")
+        self.url_label.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=4)
+        self.url_label.bind("<Button-1>", self._open_search_url)
+
+        # Create button frame (pack at bottom, above URL)
+        button_frame = ttk.Frame(self)
+        button_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=6)
+
+        ttk.Button(button_frame, text="Run Now", command=self.run_now).pack(side=tk.LEFT, padx=4)
+        self.cancel_button = ttk.Button(button_frame, text="Cancel Search", command=self.cancel_search, state='disabled')
+        self.cancel_button.pack(side=tk.LEFT, padx=4)
+        ttk.Button(button_frame, text="Schedule", command=self.schedule_run).pack(side=tk.LEFT, padx=4)
+
+        # Now create notebook (will fill remaining space)
         notebook = ttk.Notebook(self)
         notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
         basic_frame = ttk.Frame(notebook)
-        output_frame = ttk.Frame(notebook)
         browserless_frame = ttk.Frame(notebook)
         advanced_frame = ttk.Frame(notebook)
 
         notebook.add(basic_frame, text="Search")
-        notebook.add(output_frame, text="Output")
-        notebook.add(browserless_frame, text="eBay Text Search")
+        notebook.add(browserless_frame, text="eBay Search & CSV")
         notebook.add(advanced_frame, text="Advanced")
 
         # Search tab ----------------------------------------------------
         # Mandarake URL input
-        self.url_var = tk.StringVar()
+        self.mandarake_url_var = tk.StringVar()
         ttk.Label(basic_frame, text="Mandarake URL:").grid(row=0, column=0, sticky=tk.W, **pad)
-        url_entry = ttk.Entry(basic_frame, textvariable=self.url_var, width=60)
+        url_entry = ttk.Entry(basic_frame, textvariable=self.mandarake_url_var, width=60)
         url_entry.grid(row=0, column=1, columnspan=3, sticky=(tk.W, tk.E), **pad)
         ttk.Button(basic_frame, text="Load URL", command=self._load_from_url).grid(row=0, column=4, sticky=tk.W, **pad)
 
         self.keyword_var = tk.StringVar()
         ttk.Label(basic_frame, text="Keyword:").grid(row=1, column=0, sticky=tk.W, **pad)
-        keyword_entry = ttk.Entry(basic_frame, textvariable=self.keyword_var, width=42)
-        keyword_entry.grid(row=1, column=1, columnspan=3, sticky=tk.W, **pad)
+        self.keyword_entry = ttk.Entry(basic_frame, textvariable=self.keyword_var, width=42)
+        self.keyword_entry.grid(row=1, column=1, columnspan=3, sticky=tk.W, **pad)
         self.keyword_var.trace_add("write", self._update_preview)
+
+        # Add right-click context menu to keyword entry
+        self.keyword_menu = tk.Menu(self.keyword_entry, tearoff=0)
+        self.keyword_menu.add_command(label="Add Selected Text to Publisher List", command=self._add_to_publisher_list)
+        self.keyword_entry.bind("<Button-3>", self._show_keyword_menu)
 
         self.main_category_var = tk.StringVar()
         ttk.Label(basic_frame, text="Main category:").grid(row=2, column=0, sticky=tk.W, **pad)
@@ -419,15 +454,28 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         ttk.Checkbutton(basic_frame, text="Hide sold-out listings", variable=self.hide_sold_var,
                         command=self._update_preview).grid(row=6, column=0, sticky=tk.W, **pad)
 
-        self.language_var = tk.StringVar(value="ja")
+        self.language_var = tk.StringVar(value="en")
         ttk.Label(basic_frame, text="Language:").grid(row=6, column=1, sticky=tk.W, **pad)
-        lang_combo = ttk.Combobox(basic_frame, textvariable=self.language_var, values=["ja", "en"], width=6, state="readonly")
+        lang_combo = ttk.Combobox(basic_frame, textvariable=self.language_var, values=["en", "ja"], width=6, state="readonly")
         lang_combo.grid(row=6, column=2, sticky=tk.W, **pad)
         self.language_var.trace_add("write", self._update_preview)
 
         self.max_pages_var = tk.StringVar()
         ttk.Label(basic_frame, text="Max pages:").grid(row=7, column=0, sticky=tk.W, **pad)
         ttk.Entry(basic_frame, textvariable=self.max_pages_var, width=8).grid(row=7, column=1, sticky=tk.W, **pad)
+
+        # Results per page dropdown
+        self.results_per_page_var = tk.StringVar(value="48")
+        ttk.Label(basic_frame, text="Results/page:").grid(row=8, column=0, sticky=tk.W, **pad)
+        results_per_page_combo = ttk.Combobox(
+            basic_frame,
+            textvariable=self.results_per_page_var,
+            state="readonly",
+            width=6,
+            values=["48", "120", "240"]
+        )
+        results_per_page_combo.grid(row=8, column=1, sticky=tk.W, **pad)
+        self.results_per_page_var.trace_add("write", self._update_preview)
 
         self.recent_hours_var = tk.StringVar(value=RECENT_OPTIONS[0][0])
         ttk.Label(basic_frame, text="New items timeframe:").grid(row=7, column=2, sticky=tk.W, **pad)
@@ -443,8 +491,8 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         # Saved configs tree
         tree_frame = ttk.Frame(basic_frame)
-        tree_frame.grid(row=8, column=0, columnspan=5, sticky=tk.NSEW, **pad)
-        columns = ('file', 'keyword', 'category', 'shop', 'hide')
+        tree_frame.grid(row=9, column=0, columnspan=5, sticky=tk.NSEW, **pad)
+        columns = ('file', 'keyword', 'category', 'shop', 'hide', 'results_per_page', 'max_pages', 'timeframe', 'language')
         self.config_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=6)
         headings = {
             'file': 'File',
@@ -452,117 +500,61 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             'category': 'Category',
             'shop': 'Shop',
             'hide': 'Hide Sold Out',
+            'results_per_page': 'Results/Page',
+            'max_pages': 'Max Pages',
+            'timeframe': 'New Items',
+            'language': 'Lang',
+        }
+        widths = {
+            'file': 220,
+            'keyword': 130,
+            'category': 130,
+            'shop': 130,
+            'hide': 100,
+            'results_per_page': 90,
+            'max_pages': 80,
+            'timeframe': 100,
+            'language': 50,
         }
         for col, heading in headings.items():
             self.config_tree.heading(col, text=heading)
-            width = 220 if col == 'file' else 130
+            width = widths.get(col, 100)
             self.config_tree.column(col, width=width, stretch=False)
         self.config_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tree_scroll = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.config_tree.yview)
         tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.config_tree.configure(yscrollcommand=tree_scroll.set)
-        self.config_tree.bind('<Double-1>', self._on_tree_double_click)
+        # Single click to load config
+        self.config_tree.bind('<<TreeviewSelect>>', self._on_config_selected)
+
+        # Add right-click context menu for config tree
+        self.config_tree_menu = tk.Menu(self.config_tree, tearoff=0)
+        self.config_tree_menu.add_command(label="Load CSV", command=self._load_csv_from_config)
+        self.config_tree.bind("<Button-3>", self._show_config_tree_menu)
+
+        # Enable column drag-to-reorder
+        self._setup_column_drag(self.config_tree)
 
         # Config management buttons
         config_buttons_frame = ttk.Frame(basic_frame)
-        config_buttons_frame.grid(row=9, column=0, columnspan=5, sticky=tk.W, **pad)
+        config_buttons_frame.grid(row=10, column=0, columnspan=5, sticky=tk.W, **pad)
         ttk.Button(config_buttons_frame, text="Delete Selected", command=self._delete_selected_config).pack(side=tk.LEFT, padx=5)
         ttk.Button(config_buttons_frame, text="Move Up", command=lambda: self._move_config(-1)).pack(side=tk.LEFT, padx=5)
         ttk.Button(config_buttons_frame, text="Move Down", command=lambda: self._move_config(1)).pack(side=tk.LEFT, padx=5)
 
         self._load_config_tree()
-        basic_frame.rowconfigure(8, weight=1)
+        basic_frame.rowconfigure(9, weight=1)
         basic_frame.columnconfigure(0, weight=1)
         basic_frame.columnconfigure(1, weight=1)
         basic_frame.columnconfigure(2, weight=1)
         basic_frame.columnconfigure(3, weight=1)
 
-        # Output tab ----------------------------------------------------
-        self.sheet_name_var = tk.StringVar()
-        self.worksheet_var = tk.StringVar(value="Sheet1")
-        ttk.Label(output_frame, text="Google Sheet name:").grid(row=0, column=0, sticky=tk.W, **pad)
-        ttk.Entry(output_frame, textvariable=self.sheet_name_var, width=40).grid(row=0, column=1, columnspan=2, sticky=tk.W, **pad)
-        ttk.Label(output_frame, text="Worksheet:").grid(row=0, column=3, sticky=tk.W, **pad)
-        ttk.Entry(output_frame, textvariable=self.worksheet_var, width=18).grid(row=0, column=4, sticky=tk.W, **pad)
-
-        self.csv_path_var = tk.StringVar(value="naruto_results.csv")
-        ttk.Label(output_frame, text="CSV filename:").grid(row=1, column=0, sticky=tk.W, **pad)
-        ttk.Entry(output_frame, textvariable=self.csv_path_var, width=32).grid(row=1, column=1, sticky=tk.W, **pad)
-        ttk.Button(output_frame, text="Browse...", command=self._select_csv).grid(row=1, column=2, sticky=tk.W, **pad)
-
-        self.download_dir_var = tk.StringVar(value="images/naruto/")
-        ttk.Label(output_frame, text="Image folder:").grid(row=2, column=0, sticky=tk.W, **pad)
-        ttk.Entry(output_frame, textvariable=self.download_dir_var, width=32).grid(row=2, column=1, sticky=tk.W, **pad)
-        ttk.Button(output_frame, text="Browse...", command=self._select_image_dir).grid(row=2, column=2, sticky=tk.W, **pad)
-
-        self.upload_drive_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(output_frame, text="Upload images to Google Drive", variable=self.upload_drive_var).grid(row=3, column=0, sticky=tk.W, **pad)
-        self.drive_folder_var = tk.StringVar()
-        ttk.Label(output_frame, text="Drive folder ID:").grid(row=3, column=1, sticky=tk.W, **pad)
-        ttk.Entry(output_frame, textvariable=self.drive_folder_var, width=32).grid(row=3, column=2, columnspan=2, sticky=tk.W, **pad)
-
-        self.thumbnails_var = tk.StringVar(value="400")
-        ttk.Label(output_frame, text="Thumbnail width (px):").grid(row=4, column=0, sticky=tk.W, **pad)
-        ttk.Entry(output_frame, textvariable=self.thumbnails_var, width=10).grid(row=4, column=1, sticky=tk.W, **pad)
-
-        self.upload_sheets_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(output_frame, text="Upload results to Google Sheets", variable=self.upload_sheets_var).grid(row=4, column=2, sticky=tk.W, **pad)
-
-        self.show_images_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(output_frame, text="Show thumbnails in results", variable=self.show_images_var).grid(row=4, column=3, sticky=tk.W, **pad)
-
-        # Add Load CSV button
-        ttk.Button(output_frame, text="Load CSV...", command=self.load_csv_file).grid(row=4, column=4, sticky=tk.W, **pad)
-
-        results_frame = ttk.LabelFrame(output_frame, text="Latest Results")
-        results_frame.grid(row=5, column=0, columnspan=5, sticky=tk.NSEW, **pad)
-        results_columns = ('title', 'price', 'shop', 'stock', 'category', 'link')
-
-        # Create a custom style for results treeview only
-        style = ttk.Style()
-        style.configure('Results.Treeview', rowheight=70)  # Custom style for results with thumbnails
-        print(f"[GUI DEBUG] Configured results treeview row height: 70px")
-
-        self.result_tree = ttk.Treeview(results_frame, columns=results_columns, show='tree headings', height=8, style='Results.Treeview')
-
-        self.result_tree.heading('#0', text='Thumb')
-        self.result_tree.column('#0', width=70, stretch=False)
-        headings = {
-            'title': 'Title',
-            'price': 'Price (JPY)',
-            'shop': 'Shop',
-            'stock': 'In Stock',
-            'category': 'Category',
-            'link': 'Product Link',
-        }
-        for col, heading in headings.items():
-            self.result_tree.heading(col, text=heading)
-            width = 260 if col == 'title' else 160 if col == 'link' else 120
-            self.result_tree.column(col, width=width, stretch=False)
-        self.result_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        result_scroll = ttk.Scrollbar(results_frame, orient=tk.VERTICAL, command=self.result_tree.yview)
-        result_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.result_tree.configure(yscrollcommand=result_scroll.set)
-        self.result_tree.bind('<Double-1>', self._on_result_double_click)
-
-        self.result_tree_menu = tk.Menu(self.result_tree, tearoff=0)
-        self.result_tree_menu.add_command(label="Search by Image on eBay (API)", command=self._search_by_image_api)
-        self.result_tree_menu.add_command(label="Search by Image on eBay (Web)", command=self._search_by_image_web)
-
-        self.result_tree.bind("<Button-3>", self._show_result_tree_menu)
-
-        output_frame.rowconfigure(5, weight=1)
-        output_frame.columnconfigure(0, weight=1)
-        output_frame.columnconfigure(1, weight=1)
-        output_frame.columnconfigure(2, weight=1)
-        output_frame.columnconfigure(3, weight=1)
-
-        # eBay Text Search tab ------------------------------------------
+        # eBay Search & CSV tab ------------------------------------------
         ttk.Label(browserless_frame, text="Scrapy eBay Search (Sold Listings):").grid(row=0, column=0, columnspan=5, sticky=tk.W, **pad)
 
         # Search input
         ttk.Label(browserless_frame, text="Search query:").grid(row=1, column=0, sticky=tk.W, **pad)
-        self.browserless_query_var = tk.StringVar(value="pokemon card")
+        self.browserless_query_var = tk.StringVar(value="")
         browserless_entry = ttk.Entry(browserless_frame, textvariable=self.browserless_query_var, width=32)
         browserless_entry.grid(row=1, column=1, columnspan=2, sticky=tk.W, **pad)
 
@@ -597,42 +589,57 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         self.browserless_progress = ttk.Progressbar(browserless_frame, mode='indeterminate')
         self.browserless_progress.grid(row=3, column=3, columnspan=2, sticky=tk.EW, **pad)
 
-        # Results section
-        browserless_results_frame = ttk.LabelFrame(browserless_frame, text="eBay Search Results")
-        browserless_results_frame.grid(row=4, column=0, columnspan=5, sticky=tk.NSEW, **pad)
+        # Create PanedWindow to split eBay results and CSV comparison sections
+        self.ebay_paned = tk.PanedWindow(browserless_frame, orient=tk.VERTICAL, sashwidth=5, sashrelief=tk.RAISED)
+        self.ebay_paned.grid(row=4, column=0, columnspan=5, sticky=tk.NSEW, **pad)
 
         # Configure grid weights for proper resizing
         browserless_frame.rowconfigure(4, weight=1)
         browserless_frame.columnconfigure(2, weight=1)
+
+        # Results section (top pane)
+        browserless_results_frame = ttk.LabelFrame(self.ebay_paned, text="eBay Search Results")
         browserless_results_frame.rowconfigure(0, weight=1)
         browserless_results_frame.columnconfigure(0, weight=1)
 
-        # Results treeview
-        browserless_columns = ('title', 'price', 'shipping', 'sold_date', 'similarity', 'url')
-        self.browserless_tree = ttk.Treeview(browserless_results_frame, columns=browserless_columns, show='tree headings', height=8)
+        # Results treeview with thumbnail support
+        browserless_columns = ('title', 'price', 'shipping', 'mandarake_price', 'profit_margin', 'sold_date', 'similarity', 'url')
 
-        self.browserless_tree.heading('#0', text='#')
-        self.browserless_tree.column('#0', width=30, stretch=False)
+        # Create custom style for eBay results treeview with thumbnails
+        style = ttk.Style()
+        style.configure('Browserless.Treeview', rowheight=70)  # Match output tree height
+
+        self.browserless_tree = ttk.Treeview(browserless_results_frame, columns=browserless_columns, show='tree headings', height=8, style='Browserless.Treeview')
+
+        self.browserless_tree.heading('#0', text='Thumb')
+        self.browserless_tree.column('#0', width=70, stretch=False)  # Match output tree width
 
         browserless_headings = {
             'title': 'Title',
-            'price': 'Price',
+            'price': 'eBay Price',
             'shipping': 'Shipping',
+            'mandarake_price': 'Mandarake ¥',
+            'profit_margin': 'Profit %',
             'sold_date': 'Sold Date',
             'similarity': 'Similarity %',
             'url': 'eBay URL'
         }
 
+        browserless_widths = {
+            'title': 280,
+            'price': 80,
+            'shipping': 70,
+            'mandarake_price': 90,
+            'profit_margin': 80,
+            'sold_date': 100,
+            'similarity': 90,
+            'url': 180
+        }
+
         for col, heading in browserless_headings.items():
             self.browserless_tree.heading(col, text=heading)
-
-        # Set column widths
-        self.browserless_tree.column('title', width=280)
-        self.browserless_tree.column('price', width=70)
-        self.browserless_tree.column('shipping', width=70)
-        self.browserless_tree.column('sold_date', width=100)
-        self.browserless_tree.column('similarity', width=90)
-        self.browserless_tree.column('url', width=180)
+            width = browserless_widths.get(col, 100)
+            self.browserless_tree.column(col, width=width, stretch=False)
 
         self.browserless_tree.grid(row=0, column=0, sticky=tk.NSEW)
 
@@ -647,6 +654,9 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         # Bind double-click to open URL
         self.browserless_tree.bind('<Double-1>', self.open_browserless_url)
+
+        # Enable column drag-to-reorder for browserless tree
+        self._setup_column_drag(self.browserless_tree)
 
         # Results filters row
         filters_frame = ttk.Frame(browserless_results_frame)
@@ -671,10 +681,13 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         browserless_status_label = ttk.Label(browserless_results_frame, textvariable=self.browserless_status, relief=tk.SUNKEN, anchor='w')
         browserless_status_label.grid(row=3, column=0, columnspan=2, sticky=tk.EW, pady=(5, 0))
 
-        # CSV Batch Comparison section --------------------------------
-        csv_compare_frame = ttk.LabelFrame(browserless_frame, text="CSV Batch Comparison")
-        csv_compare_frame.grid(row=5, column=0, columnspan=5, sticky=tk.NSEW, **pad)
-        browserless_frame.rowconfigure(5, weight=1)
+        # Add the results frame to the paned window
+        self.ebay_paned.add(browserless_results_frame, minsize=200)
+
+        # CSV Batch Comparison section (bottom pane) --------------------------------
+        csv_compare_frame = ttk.LabelFrame(self.ebay_paned, text="CSV Batch Comparison")
+        csv_compare_frame.rowconfigure(1, weight=1)
+        csv_compare_frame.columnconfigure(0, weight=1)
 
         # CSV loader
         ttk.Label(csv_compare_frame, text="Load Mandarake CSV:").grid(row=0, column=0, sticky=tk.W, **pad)
@@ -684,7 +697,15 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         # Filter option
         self.csv_in_stock_only = tk.BooleanVar(value=True)
-        ttk.Checkbutton(csv_compare_frame, text="In-stock only", variable=self.csv_in_stock_only, command=self.filter_csv_items).grid(row=0, column=4, sticky=tk.W, **pad)
+        ttk.Checkbutton(csv_compare_frame, text="In-stock only", variable=self.csv_in_stock_only, command=self._on_csv_filter_changed).grid(row=0, column=4, sticky=tk.W, **pad)
+
+        # Add 2nd keyword toggle
+        self.csv_add_secondary_keyword = tk.BooleanVar(value=False)
+        ttk.Checkbutton(csv_compare_frame, text="Add 2nd keyword", variable=self.csv_add_secondary_keyword).grid(row=0, column=5, sticky=tk.W, **pad)
+
+        # Thumbnail toggle
+        self.csv_show_thumbnails = tk.BooleanVar(value=True)
+        ttk.Checkbutton(csv_compare_frame, text="Show thumbnails", variable=self.csv_show_thumbnails, command=self.toggle_csv_thumbnails).grid(row=0, column=6, sticky=tk.W, **pad)
 
         # CSV items treeview
         csv_items_frame = ttk.Frame(csv_compare_frame)
@@ -692,11 +713,14 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         csv_compare_frame.rowconfigure(1, weight=1)
         csv_compare_frame.columnconfigure(0, weight=1)
 
-        csv_columns = ('title', 'price', 'shop', 'stock', 'category')
-        self.csv_items_tree = ttk.Treeview(csv_items_frame, columns=csv_columns, show='tree headings', height=6)
+        # Create custom style for CSV treeview with thumbnails
+        style.configure('CSV.Treeview', rowheight=70)  # Match other trees
 
-        self.csv_items_tree.heading('#0', text='#')
-        self.csv_items_tree.column('#0', width=30, stretch=False)
+        csv_columns = ('title', 'price', 'shop', 'stock', 'category')
+        self.csv_items_tree = ttk.Treeview(csv_items_frame, columns=csv_columns, show='tree headings', height=6, style='CSV.Treeview')
+
+        self.csv_items_tree.heading('#0', text='Thumb')
+        self.csv_items_tree.column('#0', width=70, stretch=False)
 
         csv_headings = {
             'title': 'Title',
@@ -727,6 +751,23 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         # Bind selection to auto-fill search query
         self.csv_items_tree.bind('<<TreeviewSelect>>', self.on_csv_item_selected)
 
+        # Enable column drag-to-reorder for CSV items tree
+        self._setup_column_drag(self.csv_items_tree)
+
+        # Add right-click context menu for CSV tree
+        self.csv_tree_menu = tk.Menu(self.csv_items_tree, tearoff=0)
+        self.csv_tree_menu.add_command(label="Add Full Title to Search", command=self._add_full_title_to_search)
+        self.csv_tree_menu.add_command(label="Add Secondary Keyword", command=self._add_secondary_keyword_from_csv)
+        self.csv_tree_menu.add_separator()
+        self.csv_tree_menu.add_command(label="Delete Selected Items", command=self._delete_csv_items)
+        self.csv_tree_menu.add_separator()
+        self.csv_tree_menu.add_command(label="Download Missing Images", command=self._download_missing_csv_images)
+        self.csv_tree_menu.add_separator()
+        self.csv_tree_menu.add_command(label="Search by Image on eBay (API)", command=self._search_csv_by_image_api)
+        self.csv_tree_menu.add_command(label="Search by Image on eBay (Web)", command=self._search_csv_by_image_web)
+        self.csv_items_tree.bind("<Button-3>", self._show_csv_tree_menu)
+        self.csv_items_tree.bind('<Double-1>', self._on_csv_double_click)
+
         # Comparison action buttons
         button_frame = ttk.Frame(csv_compare_frame)
         button_frame.grid(row=2, column=0, columnspan=5, sticky=tk.W, **pad)
@@ -741,6 +782,9 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         self.csv_compare_progress = ttk.Progressbar(button_frame, mode='indeterminate', length=200)
         self.csv_compare_progress.grid(row=0, column=3, sticky=tk.W, padx=(10, 5))
+
+        # Add the CSV comparison frame to the paned window
+        self.ebay_paned.add(csv_compare_frame, minsize=200)
 
         # Initialize variables
         self.browserless_image_path = None
@@ -771,20 +815,20 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         ttk.Label(advanced_frame, text="Schedule (HH:MM)").grid(row=3, column=0, sticky=tk.W, **pad)
         ttk.Entry(advanced_frame, textvariable=self.schedule_var, width=10).grid(row=3, column=1, sticky=tk.W, **pad)
 
-        # Buttons -------------------------------------------------------
-        button_frame = ttk.Frame(self)
-        button_frame.pack(fill=tk.X, padx=8, pady=6)
+        # Output settings
+        ttk.Label(advanced_frame, text="CSV Output:").grid(row=4, column=0, sticky=tk.W, **pad)
+        ttk.Entry(advanced_frame, textvariable=self.csv_path_var, width=32).grid(row=4, column=1, columnspan=2, sticky=tk.W, **pad)
+        ttk.Button(advanced_frame, text="Browse...", command=self._select_csv).grid(row=4, column=3, sticky=tk.W, **pad)
 
-        ttk.Button(button_frame, text="Load Config", command=self.load_config).pack(side=tk.LEFT, padx=4)
-        ttk.Button(button_frame, text="Save Config", command=self.save_config).pack(side=tk.LEFT, padx=4)
-        ttk.Button(button_frame, text="Run Now", command=self.run_now).pack(side=tk.LEFT, padx=4)
-        ttk.Button(button_frame, text="Schedule", command=self.schedule_run).pack(side=tk.LEFT, padx=4)
+        ttk.Label(advanced_frame, text="Image Download Folder:").grid(row=5, column=0, sticky=tk.W, **pad)
+        ttk.Entry(advanced_frame, textvariable=self.download_dir_var, width=32).grid(row=5, column=1, columnspan=2, sticky=tk.W, **pad)
+        ttk.Button(advanced_frame, text="Browse...", command=self._select_image_dir).grid(row=5, column=3, sticky=tk.W, **pad)
 
-        self.url_var = tk.StringVar(value="Search URL: (enter keyword)")
-        ttk.Label(self, textvariable=self.url_var, relief=tk.GROOVE, anchor='w', wraplength=720, justify=tk.LEFT).pack(fill=tk.X, padx=8, pady=4)
+        ttk.Label(advanced_frame, text="Thumbnail width (px):").grid(row=6, column=0, sticky=tk.W, **pad)
+        ttk.Entry(advanced_frame, textvariable=self.thumbnails_var, width=10).grid(row=6, column=1, sticky=tk.W, **pad)
 
-        self.status_var = tk.StringVar(value="Ready")
-        ttk.Label(self, textvariable=self.status_var, relief=tk.SUNKEN, anchor='w').pack(fill=tk.X, padx=8, pady=4)
+        # Restore paned window position after widgets are created
+        self.after(100, self._restore_paned_position)
 
     # ------------------------------------------------------------------
     # Event handlers
@@ -1657,6 +1701,22 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         ttk.Button(main_frame, text="Close", command=profiles_window.destroy).pack(pady=(20, 0))
 
+    def _restore_paned_position(self):
+        """Restore the paned window sash position from saved settings"""
+        try:
+            if not hasattr(self, 'ebay_paned'):
+                return
+
+            window_settings = self.settings.get_window_settings()
+            ebay_paned_pos = window_settings.get('ebay_paned_pos')
+
+            if ebay_paned_pos is not None:
+                # Set the sash position
+                self.ebay_paned.sash_place(0, 0, ebay_paned_pos)
+                print(f"[GUI] Restored eBay paned window position: {ebay_paned_pos}")
+        except Exception as e:
+            print(f"[GUI] Could not restore paned position: {e}")
+
     def _save_window_settings(self):
         """Save current window settings"""
         try:
@@ -1667,8 +1727,29 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             # Check if maximized
             maximized = self.state() == 'zoomed'
 
-            # Save window settings
-            self.settings.save_window_settings(width, height, x, y, maximized)
+            # Get paned window sash position (if it exists)
+            ebay_paned_pos = None
+            if hasattr(self, 'ebay_paned'):
+                try:
+                    # Get sash position (distance from top)
+                    sash_coords = self.ebay_paned.sash_coord(0)  # First sash
+                    if sash_coords:
+                        ebay_paned_pos = sash_coords[1]  # Y coordinate
+                except:
+                    pass
+
+            # Save window settings with paned position
+            settings_dict = {
+                'width': width,
+                'height': height,
+                'x': x,
+                'y': y,
+                'maximized': maximized
+            }
+            if ebay_paned_pos is not None:
+                settings_dict['ebay_paned_pos'] = ebay_paned_pos
+
+            self.settings.save_window_settings(**settings_dict)
             self.settings.save_settings()
 
         except Exception as e:
@@ -1690,9 +1771,6 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
     def on_closing(self):
         """Handle application closing - save settings and cleanup resources"""
         try:
-            # Save current eBay settings
-            self._save_ebay_settings()
-
             # Save window settings
             self._save_window_settings()
 
@@ -1859,15 +1937,59 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             messagebox.showerror('Error', f'Failed to save config: {exc}')
 
     def run_now(self):
-        config = self._collect_config()
-        if not config:
-            return
-        config_path = self._save_config_autoname(config)
+        # Check if a CSV is loaded - if so, use its corresponding config
+        if hasattr(self, 'csv_compare_path') and self.csv_compare_path:
+            # Try to find the matching config by CSV path
+            csv_filename = self.csv_compare_path.stem  # Get filename without extension
+            potential_config = Path('configs') / f"{csv_filename}.json"
+
+            if potential_config.exists():
+                # Use the existing config associated with the loaded CSV
+                config_path = potential_config
+                print(f"[GUI DEBUG] Using config for loaded CSV: {config_path.name}")
+                self.status_var.set(f"Re-running scraper for loaded CSV: {config_path.name}")
+            else:
+                # CSV loaded but no matching config found, use current GUI settings
+                print(f"[GUI DEBUG] No matching config for CSV, using GUI settings")
+                config = self._collect_config()
+                if not config:
+                    return
+                config_path = self._save_config_autoname(config)
+                self.status_var.set(f"Running scraper: {config_path}")
+        else:
+            # No CSV loaded, use current GUI settings
+            config = self._collect_config()
+            if not config:
+                return
+            config_path = self._save_config_autoname(config)
+            self.status_var.set(f"Running scraper: {config_path}")
+
         mimic = bool(self.mimic_var.get())
         print(f"[GUI DEBUG] Checkbox mimic value: {self.mimic_var.get()}")
         print(f"[GUI DEBUG] Bool mimic value: {mimic}")
-        self.status_var.set(f"Running scraper: {config_path}")
+        self.cancel_requested = False  # Reset cancel flag
+        self.cancel_button.config(state='normal')  # Enable cancel button
         self._start_thread(self._run_scraper, str(config_path), mimic)
+
+    def cancel_search(self):
+        """Cancel the currently running search"""
+        self.cancel_requested = True
+        if self.current_scraper:
+            # Set a flag on the scraper to stop it
+            self.current_scraper._cancel_requested = True
+        self.status_var.set("Cancellation requested...")
+        self.cancel_button.config(state='disabled')
+
+    def _open_search_url(self, event=None):
+        """Open the search URL in the default browser"""
+        url_text = self.url_var.get()
+        # Extract URL (remove any notes in parentheses)
+        url = url_text.split(" (")[0].strip()
+        if url and url.startswith("http"):
+            import webbrowser
+            webbrowser.open(url)
+        else:
+            messagebox.showinfo("No URL", "Enter search criteria to generate a URL")
 
     def schedule_run(self):
         schedule_time = self.schedule_var.get().strip()
@@ -1945,16 +2067,28 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
     def _generate_csv_filename(self, config: dict) -> str:
         """Generate CSV filename based on search parameters"""
         keyword = self._slugify(str(config.get('keyword', 'search')))
-        category = config.get('category')
-        if isinstance(category, list):
-            category = category[0] if category else ''
-        category = self._slugify(str(category or 'all'))
 
-        # Handle shop with special default to '0'
-        shop_value = config.get('shop', '0')
-        if not shop_value or shop_value.strip() == '':
-            shop_value = '0'
-        shop = self._slugify(str(shop_value))
+        # Use category name if available, otherwise use code
+        category_name = config.get('category_name')
+        if category_name:
+            category = self._slugify(str(category_name))
+        else:
+            category = config.get('category')
+            if isinstance(category, list):
+                category = category[0] if category else ''
+            category = self._slugify(str(category or 'all'))
+
+        # Use shop name if available, otherwise use code
+        shop_name = config.get('shop_name')
+        if shop_name:
+            shop = self._slugify(str(shop_name))
+        else:
+            # Handle shop with special default to '0'
+            shop_value = config.get('shop', '0')
+            if not shop_value or shop_value.strip() == '':
+                shop_value = '0'
+            shop = self._slugify(str(shop_value))
+
         return f"{keyword}_{category}_{shop}.csv"
 
     def _find_matching_csv(self, config: dict) -> Optional[Path]:
@@ -2035,15 +2169,24 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         csv_filename = self._generate_csv_filename(config)
         config['csv'] = str(results_dir / csv_filename)
 
+        # Auto-generate download_images path based on config filename
+        config_stem = path.stem  # Filename without extension
+        images_dir = Path('images') / config_stem
+        images_dir.mkdir(parents=True, exist_ok=True)
+        config['download_images'] = str(images_dir) + '/'
+
         if hasattr(self, 'csv_path_var'):
             self.csv_path_var.set(config['csv'])
+        if hasattr(self, 'download_dir_var'):
+            self.download_dir_var.set(config['download_images'])
+
         with path.open('w', encoding='utf-8') as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
         self.last_saved_path = path
         if hasattr(self, 'csv_path_var'):
             self.csv_path_var.set(config['csv'])
-        if update_tree and hasattr(self, '_load_config_tree'):
-            self._load_config_tree()
+        if update_tree and hasattr(self, '_update_tree_item'):
+            self._update_tree_item(path, config)
         self.status_var.set(f"Saved config: {path}")
 
     def _save_config_autoname(self, config: dict) -> Path:
@@ -2084,6 +2227,16 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 messagebox.showerror("Validation", "Max pages must be an integer.")
                 return None
 
+        # Results per page
+        results_per_page = self.results_per_page_var.get().strip()
+        if results_per_page:
+            try:
+                config['results_per_page'] = int(results_per_page)
+            except ValueError:
+                config['results_per_page'] = 48  # Default
+        else:
+            config['results_per_page'] = 48  # Default
+
         recent_hours = self._get_recent_hours_value()
         if recent_hours:
             config['recent_hours'] = recent_hours
@@ -2096,14 +2249,6 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             shop_name = get_store_name(shop_value, language='en')
             config['shop_name'] = shop_name
 
-        sheet_name = self.sheet_name_var.get().strip()
-        worksheet = self.worksheet_var.get().strip() or 'Sheet1'
-        if sheet_name:
-            config['google_sheets'] = {
-                'sheet_name': sheet_name,
-                'worksheet_name': worksheet,
-            }
-
         csv_path = self.csv_path_var.get().strip()
         if csv_path:
             config['csv'] = csv_path
@@ -2111,13 +2256,6 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         download_dir = self.download_dir_var.get().strip()
         if download_dir:
             config['download_images'] = download_dir
-
-        config['upload_drive'] = self.upload_drive_var.get()
-        config['upload_sheets'] = self.upload_sheets_var.get()
-        config['show_images'] = self.show_images_var.get()
-        drive_folder = self.drive_folder_var.get().strip()
-        if drive_folder:
-            config['drive_folder'] = drive_folder
 
         thumbs = self.thumbnails_var.get().strip()
         if thumbs:
@@ -2161,17 +2299,28 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 print(f"[GUI DEBUG] Keyword has {len(keyword)} characters")
 
             scraper = MandarakeScraper(str(config_path), use_mimic=use_mimic)
+            self.current_scraper = scraper  # Track scraper instance
+            scraper._cancel_requested = False  # Initialize cancel flag
             print(f"[GUI DEBUG] Scraper browser mimic enabled: {scraper.use_mimic}")
             print(f"[GUI DEBUG] Scraper browser object type: {type(scraper.browser_mimic)}")
             scraper.run()
-            self.run_queue.put(("status", "Scrape completed."))
-            self.run_queue.put(("results", str(config_path)))
+
+            # Check if cancelled
+            if self.cancel_requested:
+                self.run_queue.put(("status", "Scrape cancelled by user."))
+            else:
+                self.run_queue.put(("status", "Scrape completed."))
+                self.run_queue.put(("results", str(config_path)))
         except Exception as exc:
             import traceback
             print(f"[GUI DEBUG] Full exception traceback:")
             traceback.print_exc()
-            self.run_queue.put(("error", f"Scrape failed: {exc}"))
+            if self.cancel_requested:
+                self.run_queue.put(("status", "Scrape cancelled."))
+            else:
+                self.run_queue.put(("error", f"Scrape failed: {exc}"))
         finally:
+            self.current_scraper = None
             self.run_queue.put(("cleanup", str(config_path)))
 
     def _schedule_worker(self, config_path: str, schedule_time: str, use_mimic: bool):
@@ -2195,9 +2344,13 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 message_type, payload = self.run_queue.get_nowait()
                 if message_type == "status":
                     self.status_var.set(payload)
+                    # Disable cancel button when status indicates completion/error
+                    if any(word in payload.lower() for word in ["completed", "cancelled", "error", "failed"]):
+                        self.cancel_button.config(state='disabled')
                 elif message_type == "error":
                     messagebox.showerror("Error", payload)
                     self.status_var.set("Error")
+                    self.cancel_button.config(state='disabled')
                 elif message_type == "results":
                     config_path = Path(payload)
                     try:
@@ -2214,20 +2367,36 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                             csv_path = self._find_matching_csv(config)
 
                         if csv_path:
-                            print(f"[GUI DEBUG] Using CSV file: {csv_path}")
+                            print(f"[GUI DEBUG] Auto-loading CSV into comparison tree: {csv_path}")
+                            # Load into CSV comparison tree
+                            self.csv_compare_path = csv_path
+                            self.csv_compare_label.config(text=f"Loaded: {csv_path.name}", foreground="black")
+
+                            # Load CSV data
+                            self.csv_compare_data = []
+                            with open(csv_path, 'r', encoding='utf-8') as f:
+                                reader = csv.DictReader(f)
+                                for row in reader:
+                                    self.csv_compare_data.append(row)
+
+                            # Display with filter
+                            self.filter_csv_items()
+                            print(f"[GUI DEBUG] Loaded {len(self.csv_compare_data)} items into CSV tree")
                         else:
                             print(f"[GUI DEBUG] No CSV file found for config")
 
                     except Exception as e:
-                        print(f"[GUI DEBUG] Error loading config for results: {e}")
-                        csv_path = None
-                    self._load_results_table(csv_path)
+                        print(f"[GUI DEBUG] Error loading results: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    self.cancel_button.config(state='disabled')
                 elif message_type == "cleanup":
                     try:
                         if payload.endswith('gui_temp.json'):
                             Path(payload).unlink(missing_ok=True)
                     except Exception:
                         pass
+                    self.cancel_button.config(state='disabled')
                 elif message_type == "browserless_results":
                     self._display_browserless_results(payload)
                 elif message_type == "browserless_status":
@@ -2259,6 +2428,12 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 self.browserless_max_results.set(settings.get('ebay_max_results', "10"))
             if hasattr(self, 'browserless_max_comparisons'):
                 self.browserless_max_comparisons.set(settings.get('ebay_max_comparisons', "MAX"))
+
+            # Load CSV filter settings
+            if hasattr(self, 'csv_in_stock_only'):
+                self.csv_in_stock_only.set(settings.get('csv_in_stock_only', True))
+            if hasattr(self, 'csv_add_secondary_keyword'):
+                self.csv_add_secondary_keyword.set(settings.get('csv_add_secondary_keyword', False))
         finally:
             self._settings_loaded = True
 
@@ -2270,7 +2445,9 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             data = {
                 'mimic': bool(self.mimic_var.get()),
                 'ebay_max_results': self.browserless_max_results.get() if hasattr(self, 'browserless_max_results') else "10",
-                'ebay_max_comparisons': self.browserless_max_comparisons.get() if hasattr(self, 'browserless_max_comparisons') else "MAX"
+                'ebay_max_comparisons': self.browserless_max_comparisons.get() if hasattr(self, 'browserless_max_comparisons') else "MAX",
+                'csv_in_stock_only': bool(self.csv_in_stock_only.get()) if hasattr(self, 'csv_in_stock_only') else True,
+                'csv_add_secondary_keyword': bool(self.csv_add_secondary_keyword.get()) if hasattr(self, 'csv_add_secondary_keyword') else False
             }
             with SETTINGS_PATH.open('w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
@@ -2442,6 +2619,20 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         except Exception as exc:
             messagebox.showerror('Error', f'Failed to load results: {exc}')
 
+    def _toggle_thumbnails(self):
+        """Toggle thumbnail display in the results tree"""
+        show_images = self.show_images_var.get()
+
+        # Iterate through all items in the treeview
+        for item_id in self.result_tree.get_children():
+            if show_images:
+                # Show image if available
+                if item_id in self.result_images:
+                    self.result_tree.item(item_id, image=self.result_images[item_id])
+            else:
+                # Hide image by setting empty image
+                self.result_tree.item(item_id, image='')
+
     def _on_result_double_click(self, event=None):
         selection = self.result_tree.selection()
         if not selection:
@@ -2513,6 +2704,309 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         else:
             self.run_queue.put(("error", "Could not find results using web search."))
 
+    # CSV tree methods
+    def _show_csv_tree_menu(self, event):
+        """Show the context menu on the CSV tree"""
+        selection = self.csv_items_tree.selection()
+        if selection:
+            self.csv_tree_menu.post(event.x_root, event.y_root)
+
+    def _delete_csv_items(self):
+        """Delete selected CSV items (supports multi-select)"""
+        selection = self.csv_items_tree.selection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select items to delete")
+            return
+
+        # Confirm deletion
+        count = len(selection)
+        item_word = "item" if count == 1 else "items"
+        if not messagebox.askyesno("Confirm Delete", f"Delete {count} {item_word}?"):
+            return
+
+        try:
+            # Get the titles of selected items to identify them in csv_compare_data
+            items_to_delete = []
+            for item_id in selection:
+                values = self.csv_items_tree.item(item_id)['values']
+                if values:
+                    title = values[0]  # Title is first column
+                    items_to_delete.append(title)
+
+            # Remove from csv_compare_data by matching titles
+            original_count = len(self.csv_compare_data)
+            self.csv_compare_data = [
+                row for row in self.csv_compare_data
+                if row.get('title', '') not in items_to_delete
+            ]
+            deleted_count = original_count - len(self.csv_compare_data)
+
+            # Refresh the display
+            self._display_csv_items()
+
+            # Update status
+            self.status_var.set(f"Deleted {deleted_count} {item_word}")
+            print(f"[CSV DELETE] Removed {deleted_count} items from CSV data")
+
+            # Save updated CSV if a file is loaded
+            if hasattr(self, 'csv_compare_path') and self.csv_compare_path:
+                self._save_updated_csv()
+
+        except Exception as e:
+            messagebox.showerror("Delete Error", f"Failed to delete items: {str(e)}")
+            print(f"[CSV DELETE] Error: {e}")
+
+    def _on_csv_double_click(self, event=None):
+        """Open product link on double click"""
+        selection = self.csv_items_tree.selection()
+        if not selection:
+            return
+        item_id = selection[0]
+        try:
+            index = int(item_id) - 1
+            if 0 <= index < len(self.csv_compare_data):
+                link = self.csv_compare_data[index].get('product_url', '')
+                if link:
+                    webbrowser.open(link)
+        except Exception as e:
+            print(f"[CSV] Error opening link: {e}")
+
+    def _search_csv_by_image_api(self):
+        """Search selected CSV item by image using eBay API"""
+        selection = self.csv_items_tree.selection()
+        if not selection:
+            return
+        item_id = selection[0]
+        try:
+            index = int(item_id) - 1
+            if 0 <= index < len(self.csv_compare_data):
+                item_data = self.csv_compare_data[index]
+                local_image_path = item_data.get('local_image', '')
+                if not local_image_path or not Path(local_image_path).exists():
+                    messagebox.showerror("Error", "Local image not found for this item.")
+                    return
+
+                from mandarake_scraper import EbayAPI
+                client_id = self.client_id_var.get().strip()
+                client_secret = self.client_secret_var.get().strip()
+                ebay_api = EbayAPI(client_id, client_secret)
+
+                self.browserless_status.set("Searching by image on eBay (API)...")
+                url = ebay_api.search_by_image_api(local_image_path)
+                if url:
+                    webbrowser.open(url)
+                    self.browserless_status.set("Search by image (API) complete.")
+                else:
+                    messagebox.showerror("Error", "Could not find results using eBay API.")
+                    self.browserless_status.set("Search by image (API) failed.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Search failed: {e}")
+
+    def _search_csv_by_image_web(self):
+        """Search selected CSV item by image using web method"""
+        selection = self.csv_items_tree.selection()
+        if not selection:
+            return
+        item_id = selection[0]
+        try:
+            index = int(item_id) - 1
+            if 0 <= index < len(self.csv_compare_data):
+                item_data = self.csv_compare_data[index]
+                local_image_path = item_data.get('local_image', '')
+                if not local_image_path or not Path(local_image_path).exists():
+                    messagebox.showerror("Error", "Local image not found for this item.")
+                    return
+
+                self.browserless_status.set("Searching by image on eBay (Web)...")
+                self._start_thread(self._run_csv_web_image_search, local_image_path)
+        except Exception as e:
+            messagebox.showerror("Error", f"Search failed: {e}")
+
+    def _run_csv_web_image_search(self, image_path):
+        from ebay_image_search import run_ebay_image_search
+        url = run_ebay_image_search(image_path)
+        if "Error" not in url:
+            webbrowser.open(url)
+            self.run_queue.put(("browserless_status", "Search by image (Web) complete."))
+        else:
+            self.run_queue.put(("error", "Could not find results using web search."))
+
+    def _download_missing_csv_images(self):
+        """Download missing images from web and save them locally"""
+        if not self.csv_compare_data or not self.csv_compare_path:
+            messagebox.showwarning("No CSV", "Please load a CSV file first.")
+            return
+
+        # Count items missing local images
+        missing_count = 0
+        for row in self.csv_compare_data:
+            local_image = row.get('local_image', '')
+            image_url = row.get('image_url', '')
+            if image_url and (not local_image or not Path(local_image).exists()):
+                missing_count += 1
+
+        if missing_count == 0:
+            messagebox.showinfo("Complete", "All items already have local images!")
+            return
+
+        response = messagebox.askyesno(
+            "Download Images",
+            f"Download {missing_count} missing images from web and save them locally?\n\nThis will update the CSV file."
+        )
+
+        if not response:
+            return
+
+        # Start download in background
+        self.browserless_status.set(f"Downloading {missing_count} missing images...")
+        self._start_thread(self._download_missing_images_worker)
+
+    def _download_missing_images_worker(self):
+        """Background worker to download missing images"""
+        import requests
+        from io import BytesIO
+
+        # Create images directory from download_dir_var
+        download_dir = self.download_dir_var.get().strip()
+        if not download_dir:
+            download_dir = "images"
+
+        images_dir = Path(download_dir)
+        images_dir.mkdir(parents=True, exist_ok=True)
+
+        downloaded = 0
+        skipped = 0
+        failed = 0
+
+        try:
+            for i, row in enumerate(self.csv_compare_data, 1):
+                local_image = row.get('local_image', '')
+                image_url = row.get('image_url', '')
+
+                # Skip if already has local image
+                if local_image and Path(local_image).exists():
+                    skipped += 1
+                    continue
+
+                # Skip if no image URL
+                if not image_url:
+                    skipped += 1
+                    continue
+
+                # Download image
+                try:
+                    self.after(0, lambda i=i, total=len(self.csv_compare_data):
+                              self.browserless_status.set(f"Downloading image {i}/{total}..."))
+
+                    response = requests.get(image_url, timeout=10)
+                    response.raise_for_status()
+
+                    # Determine file extension
+                    content_type = response.headers.get('content-type', '')
+                    if 'jpeg' in content_type or 'jpg' in content_type:
+                        ext = '.jpg'
+                    elif 'png' in content_type:
+                        ext = '.png'
+                    elif 'webp' in content_type:
+                        ext = '.webp'
+                    else:
+                        ext = '.jpg'  # Default
+
+                    # Generate filename from title or index
+                    title = row.get('title', f'item_{i}')
+                    # Clean filename
+                    safe_title = "".join(c for c in title[:50] if c.isalnum() or c in (' ', '_', '-')).strip().replace(' ', '_')
+                    filename = f"{safe_title}_{i}{ext}"
+                    local_path = images_dir / filename
+
+                    # Save image
+                    with open(local_path, 'wb') as f:
+                        f.write(response.content)
+
+                    # Update row with local image path
+                    row['local_image'] = str(local_path)
+                    downloaded += 1
+
+                    print(f"[CSV IMAGES] Downloaded {i}/{len(self.csv_compare_data)}: {local_path.name}")
+
+                except Exception as e:
+                    print(f"[CSV IMAGES] Failed to download image {i}: {e}")
+                    failed += 1
+
+            # Save updated CSV
+            if downloaded > 0:
+                self._save_updated_csv()
+
+            # Update UI
+            summary = f"Downloaded {downloaded} images, {skipped} skipped, {failed} failed"
+            print(f"[CSV IMAGES] {summary}")
+            self.after(0, lambda: self.browserless_status.set(summary))
+            self.after(0, lambda: messagebox.showinfo("Download Complete", summary))
+
+            # Reload CSV to show new images
+            if downloaded > 0:
+                self.after(0, self.filter_csv_items)
+
+        except Exception as e:
+            import traceback
+            print(f"[CSV IMAGES ERROR] {e}")
+            traceback.print_exc()
+            self.after(0, lambda: messagebox.showerror("Download Error", f"Failed: {str(e)}"))
+
+    def _save_updated_csv(self):
+        """Save the updated CSV with new local_image paths"""
+        try:
+            # Get fieldnames from first row
+            if not self.csv_compare_data:
+                return
+
+            fieldnames = list(self.csv_compare_data[0].keys())
+
+            # Write to CSV
+            with open(self.csv_compare_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(self.csv_compare_data)
+
+            print(f"[CSV IMAGES] Updated CSV file: {self.csv_compare_path}")
+
+        except Exception as e:
+            print(f"[CSV IMAGES] Error saving CSV: {e}")
+            raise
+
+    def _update_tree_item(self, path: Path, config: dict):
+        """Update a specific tree item's values without reloading the entire tree"""
+        # Find the tree item that matches this path
+        for item in self.config_tree.get_children():
+            if self.config_paths.get(item) == path:
+                # Update just this item's values
+                keyword = config.get('keyword', '')
+
+                # Use category name if available, otherwise show code
+                category = config.get('category_name', config.get('category', ''))
+
+                # Use shop name if available, otherwise show code
+                shop = config.get('shop_name', config.get('shop', ''))
+
+                hide = 'Yes' if config.get('hide_sold_out') else 'No'
+
+                # Results per page (default 48)
+                results_per_page = config.get('results_per_page', 48)
+
+                # Max pages (empty if not set)
+                max_pages = config.get('max_pages', '')
+
+                # New items timeframe
+                recent_hours = config.get('recent_hours')
+                timeframe = self._label_for_recent_hours(recent_hours) if recent_hours else ''
+
+                # Language (default to english)
+                language = config.get('language', 'en')
+
+                values = (path.name, keyword, category, shop, hide, results_per_page, max_pages, timeframe, language)
+                self.config_tree.item(item, values=values)
+                break
+
     def _load_config_tree(self):
         if not hasattr(self, 'config_tree'):
             return
@@ -2524,7 +3018,36 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         if not configs_dir.exists():
             return
 
-        for cfg_path in sorted(configs_dir.glob('*.json')):
+        # Get all config files
+        config_files = list(configs_dir.glob('*.json'))
+
+        # Load custom order from metadata file
+        order_file = configs_dir / '.config_order.json'
+        custom_order = []
+        if order_file.exists():
+            try:
+                with order_file.open('r', encoding='utf-8') as f:
+                    custom_order = json.load(f)
+            except:
+                pass
+
+        # Sort: custom ordered items first, then new items by modification time
+        config_file_names = {f.name: f for f in config_files}
+        sorted_files = []
+
+        # Add files in custom order if they still exist
+        for name in custom_order:
+            if name in config_file_names:
+                sorted_files.append(config_file_names[name])
+                del config_file_names[name]
+
+        # Add any new files not in custom order (sorted by modification time, newest first)
+        new_files = sorted(config_file_names.values(), key=lambda p: p.stat().st_mtime, reverse=True)
+        sorted_files.extend(new_files)
+
+        config_files = sorted_files
+
+        for cfg_path in config_files:
             try:
                 with cfg_path.open('r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -2542,11 +3065,193 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             shop = data.get('shop_name', data.get('shop', ''))
 
             hide = 'Yes' if data.get('hide_sold_out') else 'No'
-            values = (cfg_path.name, keyword, category, shop, hide)
+
+            # Results per page (default 48)
+            results_per_page = data.get('results_per_page', 48)
+
+            # Max pages (empty if not set)
+            max_pages = data.get('max_pages', '')
+
+            # New items timeframe
+            recent_hours = data.get('recent_hours')
+            timeframe = self._label_for_recent_hours(recent_hours) if recent_hours else ''
+
+            # Language (default to english)
+            language = data.get('language', 'en')
+
+            values = (cfg_path.name, keyword, category, shop, hide, results_per_page, max_pages, timeframe, language)
             item = self.config_tree.insert('', tk.END, values=values)
             self.config_paths[item] = cfg_path
 
-    def _on_tree_double_click(self, event=None):
+    def _setup_column_drag(self, tree):
+        """Enable drag-to-reorder for treeview columns"""
+        tree._drag_data = {'column': None, 'x': 0}
+
+        def on_header_press(event):
+            region = tree.identify_region(event.x, event.y)
+            if region == 'heading':
+                col = tree.identify_column(event.x)
+                tree._drag_data['column'] = col
+                tree._drag_data['x'] = event.x
+
+        def on_header_motion(event):
+            if tree._drag_data['column']:
+                col = tree._drag_data['column']
+                # Visual feedback: change cursor
+                tree.configure(cursor='exchange')
+
+        def on_header_release(event):
+            if tree._drag_data['column']:
+                src_col = tree._drag_data['column']
+                region = tree.identify_region(event.x, event.y)
+                if region == 'heading':
+                    dst_col = tree.identify_column(event.x)
+                    if src_col != dst_col:
+                        self._reorder_columns(tree, src_col, dst_col)
+                tree.configure(cursor='')
+                tree._drag_data['column'] = None
+
+        tree.bind('<ButtonPress-1>', on_header_press, add='+')
+        tree.bind('<B1-Motion>', on_header_motion, add='+')
+        tree.bind('<ButtonRelease-1>', on_header_release, add='+')
+
+    def _reorder_columns(self, tree, src_col, dst_col):
+        """Reorder treeview columns while preserving headings and widths"""
+        # Get current column order
+        cols = list(tree['columns'])
+
+        # Convert column identifiers (#1, #2, etc.) to indices
+        src_idx = int(src_col.replace('#', '')) - 1
+        dst_idx = int(dst_col.replace('#', '')) - 1
+
+        # Save current headings and widths for all columns
+        column_info = {}
+        for col in cols:
+            column_info[col] = {
+                'heading': tree.heading(col)['text'],
+                'width': tree.column(col)['width'],
+                'minwidth': tree.column(col)['minwidth'],
+                'stretch': tree.column(col)['stretch'],
+                'anchor': tree.column(col)['anchor']
+            }
+
+        # Reorder the columns list
+        col_to_move = cols.pop(src_idx)
+        cols.insert(dst_idx, col_to_move)
+
+        # Apply new column order
+        tree['columns'] = cols
+        tree['displaycolumns'] = cols
+
+        # Restore headings and widths for all columns
+        for col in cols:
+            info = column_info[col]
+            tree.heading(col, text=info['heading'])
+            tree.column(col,
+                       width=info['width'],
+                       minwidth=info['minwidth'],
+                       stretch=info['stretch'],
+                       anchor=info['anchor'])
+
+    def _show_config_tree_menu(self, event):
+        """Show context menu on config tree"""
+        # Select the item under the cursor
+        item = self.config_tree.identify_row(event.y)
+        if item:
+            self.config_tree.selection_set(item)
+            self.config_tree_menu.post(event.x_root, event.y_root)
+
+    def _load_csv_from_config(self):
+        """Load CSV file associated with selected config"""
+        selection = self.config_tree.selection()
+        if not selection:
+            self.status_var.set("No config selected")
+            return
+
+        item = selection[0]
+        config_path = self.config_paths.get(item)
+        if not config_path:
+            self.status_var.set("Config path not found")
+            return
+
+        try:
+            # Load the config to get the CSV path
+            with config_path.open('r', encoding='utf-8') as f:
+                config = json.load(f)
+
+            # Get the CSV path from config
+            csv_path_str = config.get('csv')
+            if not csv_path_str:
+                self.status_var.set("No CSV path in config")
+                return
+
+            csv_path = Path(csv_path_str)
+            if not csv_path.exists():
+                self.status_var.set(f"CSV does not exist: {csv_path.name}")
+                return
+
+            # Load the CSV into the comparison tree
+            self.csv_compare_path = csv_path
+            self.csv_compare_label.config(text=f"Loaded: {csv_path.name}", foreground="black")
+            print(f"[CONFIG MENU] Loading CSV: {csv_path}")
+
+            # Load CSV data
+            self.csv_compare_data = []
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    self.csv_compare_data.append(row)
+
+            # Set "In-stock only" checkbox based on config's hide_sold_out setting
+            hide_sold_out = config.get('hide_sold_out', False)
+            self.csv_in_stock_only.set(hide_sold_out)
+
+            self.filter_csv_items()  # Display with filter applied
+            self.status_var.set(f"CSV loaded successfully: {len(self.csv_compare_data)} items")
+            print(f"[CONFIG MENU] Loaded {len(self.csv_compare_data)} items from CSV")
+            print(f"[CONFIG MENU] In-stock only filter set to: {hide_sold_out}")
+
+        except Exception as e:
+            self.status_var.set(f"Error loading CSV: {e}")
+            print(f"[CONFIG MENU] Error loading CSV: {e}")
+
+    def _auto_save_config(self, *args):
+        """Auto-save the current config when fields change"""
+        # Only auto-save if we have a loaded config
+        if not hasattr(self, 'last_saved_path') or not self.last_saved_path:
+            return
+
+        # Don't save during initial load
+        if not getattr(self, '_settings_loaded', False):
+            return
+
+        # Don't save while loading a config
+        if getattr(self, '_loading_config', False):
+            return
+
+        try:
+            config = self._collect_config()
+            if config:
+                # Save the current selection before updating tree
+                current_selection = self.config_tree.selection()
+
+                self._save_config_to_path(config, self.last_saved_path, update_tree=True)
+
+                # Restore the selection after tree update
+                if current_selection:
+                    # Find the item with the same path
+                    for item in self.config_tree.get_children():
+                        if self.config_paths.get(item) == self.last_saved_path:
+                            self.config_tree.selection_set(item)
+                            self.config_tree.see(item)
+                            break
+
+                print(f"[AUTO-SAVE] Saved changes to {self.last_saved_path.name}")
+        except Exception as e:
+            print(f"[AUTO-SAVE] Error: {e}")
+
+    def _on_config_selected(self, event=None):
+        """Load config when selected (single click)"""
         selection = self.config_tree.selection()
         if not selection:
             return
@@ -2555,12 +3260,19 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         if not path:
             return
         try:
+            # Temporarily disable auto-save during config loading
+            self._loading_config = True
+
             with path.open('r', encoding='utf-8') as f:
                 config = json.load(f)
             self._populate_from_config(config)
             self.last_saved_path = path
-            self.status_var.set(f"Loaded config: {path}")
+            self.status_var.set(f"Loaded config: {path.name}")
+
+            # Re-enable auto-save after loading is complete
+            self._loading_config = False
         except Exception as exc:
+            self._loading_config = False
             messagebox.showerror('Error', f'Failed to load config: {exc}')
 
     def _delete_selected_config(self):
@@ -2601,31 +3313,30 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         if not path:
             return
 
-        # Get all config files in order
-        configs_dir = Path('configs')
-        config_files = sorted(configs_dir.glob('*.json'))
+        # Get current order from treeview
+        tree_children = self.config_tree.get_children()
+        current_order = [self.config_paths.get(child).name for child in tree_children]
 
         try:
-            current_index = config_files.index(path)
+            current_index = current_order.index(path.name)
         except ValueError:
             return
 
         new_index = current_index + direction
 
         # Check bounds
-        if new_index < 0 or new_index >= len(config_files):
+        if new_index < 0 or new_index >= len(current_order):
             return
 
-        # Swap filenames by renaming
-        other_path = config_files[new_index]
+        # Swap positions in order list
+        current_order[current_index], current_order[new_index] = current_order[new_index], current_order[current_index]
 
-        # Use temporary name to avoid conflicts
-        temp_name = configs_dir / f"_temp_{path.name}"
-
+        # Save new order to metadata file
+        configs_dir = Path('configs')
+        order_file = configs_dir / '.config_order.json'
         try:
-            path.rename(temp_name)
-            other_path.rename(path)
-            temp_name.rename(other_path)
+            with order_file.open('w', encoding='utf-8') as f:
+                json.dump(current_order, f, indent=2)
 
             self._load_config_tree()  # Reload the tree
 
@@ -2643,7 +3354,7 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
     def _load_from_url(self):
         """Parse Mandarake URL and populate config fields"""
-        url = self.url_var.get().strip()
+        url = self.mandarake_url_var.get().strip()
         if not url:
             messagebox.showinfo("No URL", "Please enter a Mandarake URL")
             return
@@ -2653,6 +3364,7 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             config = parse_mandarake_url(url)
             self._populate_from_config(config)
             self.status_var.set(f"Loaded URL parameters")
+            # Don't clear the URL - keep it in the field
         except Exception as e:
             messagebox.showerror("Error", f"Failed to parse URL: {e}")
 
@@ -2690,24 +3402,17 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 self.custom_shop_var.set('')
 
         self.hide_sold_var.set(config.get('hide_sold_out', False))
-        self.language_var.set(config.get('language', 'ja'))
+        self.language_var.set(config.get('language', 'en'))
         self.fast_var.set(config.get('fast', False))
         self.resume_var.set(config.get('resume', True))
         self.debug_var.set(config.get('debug', False))
         self.client_id_var.set(config.get('client_id', ''))
         self.client_secret_var.set(config.get('client_secret', ''))
 
-        sheets = config.get('google_sheets') or {}
-        self.sheet_name_var.set(sheets.get('sheet_name', ''))
-        self.worksheet_var.set(sheets.get('worksheet_name', 'Sheet1'))
-
         self.csv_path_var.set(config.get('csv', ''))
         self.download_dir_var.set(config.get('download_images', ''))
-        self.upload_drive_var.set(config.get('upload_drive', False))
-        self.upload_sheets_var.set(config.get('upload_sheets', True))
-        self.show_images_var.set(config.get('show_images', False))
-        self.drive_folder_var.set(config.get('drive_folder', ''))
         self.thumbnails_var.set(str(config.get('thumbnails', '')))
+        self.results_per_page_var.set(str(config.get('results_per_page', '240')))
 
         self.schedule_var.set(config.get('schedule', ''))
         self._update_preview()
@@ -2753,10 +3458,21 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             messagebox.showerror("Error", "Please select a reference image first for comparison")
             return
 
-        # Start search with comparison in background thread
-        self.browserless_progress.start()
-        self.browserless_status.set("Searching eBay and comparing images...")
-        self._start_thread(self._run_scrapy_search_with_compare_worker)
+        # Check if we have cached eBay results
+        has_cached_results = hasattr(self, 'browserless_results_data') and self.browserless_results_data and len(self.browserless_results_data) > 0
+
+        if has_cached_results:
+            # State 1: Use cached results - just run comparison
+            print(f"[SCRAPY COMPARE] Using {len(self.browserless_results_data)} cached eBay results")
+            self.browserless_progress.start()
+            self.browserless_status.set("Comparing cached results with reference image...")
+            self._start_thread(self._run_cached_compare_worker)
+        else:
+            # State 2: No cached results - run full search and compare
+            print(f"[SCRAPY COMPARE] No cached results, running full eBay search")
+            self.browserless_progress.start()
+            self.browserless_status.set("Searching eBay and comparing images...")
+            self._start_thread(self._run_scrapy_search_with_compare_worker)
 
     def _run_scrapy_text_search_worker(self):
         """Worker method for Scrapy text-only search (runs in background thread)"""
@@ -2903,6 +3619,89 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         finally:
             self.after(0, self.browserless_progress.stop)
 
+    def _run_cached_compare_worker(self):
+        """Worker method to compare reference image with CACHED eBay results (State 1)"""
+        try:
+            import cv2
+            import numpy as np
+
+            query = self.browserless_query_var.get().strip()
+            max_comparisons_str = self.browserless_max_comparisons.get()
+            max_comparisons = None if max_comparisons_str == "MAX" else int(max_comparisons_str)
+
+            print(f"[CACHED COMPARE] Using cached results for: {query}")
+            print(f"[CACHED COMPARE] Cached results count: {len(self.browserless_results_data)}")
+            print(f"[CACHED COMPARE] Max comparisons: {max_comparisons or 'ALL'}")
+            print(f"[CACHED COMPARE] Reference image: {self.browserless_image_path}")
+
+            # Create debug folder
+            debug_folder = self._create_debug_folder(query)
+
+            # Load reference image
+            ref_image = cv2.imread(str(self.browserless_image_path))
+            if ref_image is None:
+                raise Exception(f"Could not load reference image: {self.browserless_image_path}")
+
+            # Save reference image to debug folder
+            ref_debug_path = debug_folder / f"REF_selected_image.jpg"
+            cv2.imwrite(str(ref_debug_path), ref_image)
+
+            # Determine how many to compare
+            items_to_compare = self.browserless_results_data if max_comparisons is None else self.browserless_results_data[:max_comparisons]
+
+            # Compare images with cached results
+            results = []
+            for i, item in enumerate(items_to_compare):
+                # Download and compare image
+                image_url = item.get('image_url', '')
+                similarity = 0.0
+
+                if image_url:
+                    try:
+                        import requests
+                        response = requests.get(image_url, timeout=5)
+                        if response.status_code == 200:
+                            img_array = np.frombuffer(response.content, np.uint8)
+                            ebay_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+                            if ebay_img is not None:
+                                # Save eBay image to debug folder
+                                title = item.get('title', 'unknown')
+                                ebay_title_safe = "".join(c for c in title[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
+                                ebay_debug_path = debug_folder / f"ebay_{i+1:02d}_{ebay_title_safe}.jpg"
+                                cv2.imwrite(str(ebay_debug_path), ebay_img)
+
+                                # Use shared comparison method
+                                similarity = self._compare_images(ref_image, ebay_img)
+                    except Exception as e:
+                        print(f"[CACHED COMPARE] Error comparing image {i+1}: {e}")
+
+                # Keep all fields from cached result, but update similarity
+                results.append({
+                    'title': item.get('title', 'N/A'),
+                    'price': item.get('price', 'N/A'),
+                    'shipping': item.get('shipping', 'N/A'),
+                    'sold_date': item.get('sold_date', 'N/A'),
+                    'similarity': f"{similarity:.1f}%" if similarity > 0 else '-',
+                    'url': item.get('url', ''),
+                    'image_url': image_url
+                })
+
+            # Sort by similarity (highest first)
+            results.sort(key=lambda x: float(x['similarity'].replace('%', '')) if x['similarity'] != '-' else 0, reverse=True)
+
+            # Update UI with results
+            self.after(0, lambda: self._display_browserless_results(results))
+            self.after(0, lambda: self.browserless_status.set(f"Compared {len(items_to_compare)} cached results"))
+
+        except Exception as e:
+            import traceback
+            print(f"[CACHED COMPARE ERROR] {e}")
+            traceback.print_exc()
+            self.after(0, lambda: messagebox.showerror("Compare Error", f"Failed to compare cached results: {str(e)}"))
+        finally:
+            self.after(0, self.browserless_progress.stop)
+
     def _run_browserless_search_worker_OLD(self):
         """OLD Worker method - DEPRECATED"""
         try:
@@ -3025,10 +3824,11 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 print(f"[CSV COMPARE ERROR] {e}")
 
     def filter_csv_items(self):
-        """Filter and display CSV items based on in-stock filter"""
-        # Clear existing items
+        """Filter and display CSV items based on in-stock filter - fast load, thumbnails loaded on demand"""
+        # Clear existing items and images
         for item in self.csv_items_tree.get_children():
             self.csv_items_tree.delete(item)
+        self.csv_images.clear()
 
         if not self.csv_compare_data:
             return
@@ -3043,18 +3843,294 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 continue
             filtered_items.append(row)
 
-        # Display filtered items
+        # Display filtered items WITHOUT thumbnails first (fast load)
+        from datetime import datetime, timedelta
+        current_time = datetime.now()
+        cutoff_time = current_time - timedelta(hours=12)
+
+        # Store NEW status for each item for thumbnail border rendering
+        self.csv_new_items = set()
+
         for i, row in enumerate(filtered_items, 1):
-            title = row.get('title', '')[:50]
+            # Calculate NEW indicator dynamically
+            first_seen_str = row.get('first_seen', '')
+            if first_seen_str:
+                try:
+                    first_seen = datetime.fromisoformat(first_seen_str)
+                    if first_seen >= cutoff_time:
+                        self.csv_new_items.add(str(i))  # Mark as new
+                except:
+                    pass
+
+            title = row.get('title', '')
             price = row.get('price_text', row.get('price', ''))
             shop = row.get('shop', row.get('shop_text', ''))
             stock_display = 'Yes' if row.get('in_stock', '').lower() in ('true', 'yes', '1') else 'No'
             category = row.get('category', '')
 
+            # Insert WITHOUT image for fast loading
             self.csv_items_tree.insert('', 'end', iid=str(i), text=str(i),
                                       values=(title, price, shop, stock_display, category))
 
         print(f"[CSV COMPARE] Displayed {len(filtered_items)} items (in-stock filter: {in_stock_only})")
+
+        # Load thumbnails in background thread
+        self._start_thread(self._load_csv_thumbnails_worker, filtered_items)
+
+    def _load_csv_thumbnails_worker(self, filtered_items):
+        """Background worker to load CSV thumbnails without blocking UI"""
+        print(f"[CSV THUMBNAILS] Loading thumbnails for {len(filtered_items)} items in background...")
+
+        for i, row in enumerate(filtered_items, 1):
+            local_image_path = row.get('local_image', '')
+            image_url = row.get('image_url', '')
+            photo = None
+
+            # Try local image first (fast)
+            if local_image_path and Path(local_image_path).exists():
+                try:
+                    pil_img = Image.open(local_image_path)
+                    pil_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
+
+                    # Add light blue border if item is NEW
+                    item_id = str(i)
+                    if item_id in self.csv_new_items:
+                        from PIL import ImageOps
+                        pil_img = ImageOps.expand(pil_img, border=3, fill='#87CEEB')  # Light blue border
+
+                    photo = ImageTk.PhotoImage(pil_img)
+                except Exception as e:
+                    print(f"[CSV THUMBNAILS] Failed to load local thumbnail {i}: {e}")
+
+            # Skip web download to keep it fast - only use local images
+            # If you want web images, uncomment below but it will be slower:
+            # if not photo and image_url:
+            #     try:
+            #         import requests
+            #         from io import BytesIO
+            #         response = requests.get(image_url, timeout=2)
+            #         response.raise_for_status()
+            #         pil_img = Image.open(BytesIO(response.content))
+            #         pil_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
+            #         photo = ImageTk.PhotoImage(pil_img)
+            #     except Exception as e:
+            #         print(f"[CSV THUMBNAILS] Failed to download thumbnail {i}: {e}")
+
+            # Update treeview with image (must be done in main thread)
+            if photo:
+                def update_image(item_id=str(i), img=photo):
+                    try:
+                        if item_id in [self.csv_items_tree.item(child)['text'] or child for child in self.csv_items_tree.get_children()]:
+                            self.csv_items_tree.item(item_id, image=img, text='')
+                            self.csv_images[item_id] = img
+                    except Exception as e:
+                        print(f"[CSV THUMBNAILS] Error updating image for {item_id}: {e}")
+
+                self.after(0, update_image)
+
+        print(f"[CSV THUMBNAILS] Finished loading {len(self.csv_images)} thumbnails")
+
+    def _on_csv_filter_changed(self):
+        """Handle CSV filter changes - filter items and save setting"""
+        self.filter_csv_items()
+        self._save_gui_settings()
+
+    def toggle_csv_thumbnails(self):
+        """Toggle visibility of thumbnails in CSV treeview"""
+        show_thumbnails = self.csv_show_thumbnails.get()
+
+        if show_thumbnails:
+            # Show thumbnails - set column width and rowheight
+            self.csv_items_tree.column('#0', width=70, stretch=False)
+            style = ttk.Style()
+            style.configure('CSV.Treeview', rowheight=70)
+        else:
+            # Hide thumbnails - set column width to 0
+            self.csv_items_tree.column('#0', width=0, stretch=False)
+            style = ttk.Style()
+            style.configure('CSV.Treeview', rowheight=25)
+
+        print(f"[CSV THUMBNAILS] Thumbnails {'shown' if show_thumbnails else 'hidden'}")
+
+    def _load_publisher_list(self):
+        """Load publisher list from file"""
+        publisher_file = Path('publishers.txt')
+        publishers = set()
+
+        # Default publishers
+        default_publishers = [
+            'Takeshobo', 'S-Digital', 'G-WALK', 'Cosplay Fetish Book',
+            'First', '1st', '2nd', '3rd', 'Book'
+        ]
+        publishers.update(default_publishers)
+
+        # Load from file if exists
+        if publisher_file.exists():
+            try:
+                with open(publisher_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        pub = line.strip()
+                        if pub:
+                            publishers.add(pub)
+                print(f"[PUBLISHERS] Loaded {len(publishers)} publishers from file")
+            except Exception as e:
+                print(f"[PUBLISHERS] Error loading file: {e}")
+
+        return publishers
+
+    def _save_publisher_list(self):
+        """Save publisher list to file"""
+        try:
+            publisher_file = Path('publishers.txt')
+            with open(publisher_file, 'w', encoding='utf-8') as f:
+                for pub in sorted(self.publisher_list):
+                    f.write(f"{pub}\n")
+            print(f"[PUBLISHERS] Saved {len(self.publisher_list)} publishers to file")
+        except Exception as e:
+            print(f"[PUBLISHERS] Error saving file: {e}")
+
+    def _show_keyword_menu(self, event):
+        """Show context menu on keyword entry"""
+        try:
+            # Always show menu - user can select text before right-clicking
+            self.keyword_menu.post(event.x_root, event.y_root)
+        except:
+            pass
+
+    def _add_to_publisher_list(self):
+        """Add selected text from keyword entry to publisher list"""
+        try:
+            if self.keyword_entry.selection_present():
+                selected_text = self.keyword_entry.selection_get().strip()
+                if selected_text and len(selected_text) > 1:
+                    self.publisher_list.add(selected_text)
+                    self._save_publisher_list()
+                    messagebox.showinfo("Publisher Added", f"'{selected_text}' has been added to the publisher list.")
+                    print(f"[PUBLISHERS] Added: {selected_text}")
+        except Exception as e:
+            print(f"[PUBLISHERS] Error adding publisher: {e}")
+
+    def _set_keyword_field(self, text):
+        """Helper function to reliably set the keyword field"""
+        # Method 1: Use StringVar
+        self.keyword_var.set(text)
+
+        # Method 2: Direct widget manipulation (more reliable)
+        self.keyword_entry.delete(0, tk.END)
+        self.keyword_entry.insert(0, text)
+
+        # Force update
+        self.keyword_entry.update_idletasks()
+
+    def _add_full_title_to_search(self):
+        """Replace eBay search query with full title from selected CSV item"""
+        selection = self.csv_items_tree.selection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select an item from the CSV tree")
+            return
+
+        item_id = selection[0]
+        try:
+            index = int(item_id) - 1
+            if 0 <= index < len(self.csv_compare_data):
+                row = self.csv_compare_data[index]
+
+                # Get the full title
+                title = row.get('title', '')
+                if title:
+                    # Update the eBay search query field
+                    self.browserless_query_var.set(title)
+                    print(f"[CSV MENU] Set eBay search query to full title: {title}")
+        except Exception as e:
+            print(f"[CSV MENU] Error setting full title: {e}")
+
+    def _add_secondary_keyword_from_csv(self):
+        """Add selected CSV item's secondary keyword to the eBay search query field"""
+        selection = self.csv_items_tree.selection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select an item from the CSV tree")
+            return
+
+        item_id = selection[0]
+        try:
+            index = int(item_id) - 1
+            if 0 <= index < len(self.csv_compare_data):
+                row = self.csv_compare_data[index]
+
+                # Get the title and primary keyword
+                title = row.get('title', '')
+                primary_keyword = row.get('keyword', '')
+
+                # Extract secondary keyword using the extraction algorithm
+                if title and primary_keyword:
+                    secondary = self._extract_secondary_keyword(title, primary_keyword)
+                elif title:
+                    # No primary keyword, use first few words of title
+                    secondary = ' '.join(title.split()[:3])
+                else:
+                    secondary = ''
+
+                if secondary:
+                    # Get current eBay search query value
+                    current_query = self.browserless_query_var.get().strip()
+
+                    # Append secondary keyword to eBay search query
+                    if current_query:
+                        new_query = f"{current_query} {secondary}"
+                    else:
+                        new_query = secondary
+
+                    # Update the eBay search query field
+                    self.browserless_query_var.set(new_query)
+                    print(f"[CSV MENU] Added secondary keyword to eBay query: {secondary}")
+        except Exception as e:
+            print(f"[CSV MENU] Error adding secondary keyword: {e}")
+
+    def _extract_secondary_keyword(self, title, primary_keyword):
+        """Extract secondary keyword from title by removing primary keyword and common terms"""
+        import re
+
+        # Make a working copy
+        secondary = title
+
+        # Remove primary keyword (case insensitive), handling name in different orders
+        # e.g., "Yura Kano" and "Kano Yura"
+        secondary = re.sub(re.escape(primary_keyword), '', secondary, flags=re.IGNORECASE).strip()
+
+        # Also remove reversed name order (split and reverse)
+        name_parts = primary_keyword.split()
+        if len(name_parts) == 2:
+            reversed_name = f"{name_parts[1]} {name_parts[0]}"
+            secondary = re.sub(re.escape(reversed_name), '', secondary, flags=re.IGNORECASE).strip()
+            # Also remove individual parts if they appear alone
+            for part in name_parts:
+                if len(part) > 2:  # Don't remove very short words
+                    secondary = re.sub(r'\b' + re.escape(part) + r'\b', '', secondary, flags=re.IGNORECASE).strip()
+
+        # Use dynamic publisher list instead of hardcoded
+        for pub in self.publisher_list:
+            secondary = re.sub(r'\b' + re.escape(pub) + r'\b', '', secondary, flags=re.IGNORECASE).strip()
+
+        # Remove generic suffixes
+        generic_terms = ['Photograph Collection', 'Photo Essay', 'Photo Collection',
+                        'Photobook', 'autographed', 'Photograph', 'Collection']
+        for term in generic_terms:
+            secondary = re.sub(r'\b' + re.escape(term) + r'\b', '', secondary, flags=re.IGNORECASE).strip()
+
+        # Remove years (e.g., "2022", "2023")
+        secondary = re.sub(r'\b(19|20)\d{2}\b', '', secondary).strip()
+
+        # Remove "Desktop" before "Calendar" to get just "Calendar"
+        secondary = re.sub(r'\bDesktop\s+Calendar\b', 'Calendar', secondary, flags=re.IGNORECASE).strip()
+
+        # Clean up extra spaces
+        secondary = re.sub(r'\s+', ' ', secondary).strip()
+
+        # If nothing left, return empty
+        if not secondary or len(secondary) < 2:
+            return ""
+
+        return secondary
 
     def on_csv_item_selected(self, event):
         """Auto-fill search query when CSV item is selected"""
@@ -3084,6 +4160,14 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
                 # Build search query: keyword + category keyword
                 search_query = f"{core_words} {category_keyword}".strip()
+
+                # Add secondary keyword if toggle is on
+                if hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get():
+                    if title and keyword:
+                        secondary = self._extract_secondary_keyword(title, keyword)
+                        if secondary:
+                            search_query = f"{search_query} {secondary}".strip()
+                            print(f"[CSV COMPARE] Added secondary keyword: {secondary}")
 
                 if search_query:
                     self.browserless_query_var.set(search_query)
@@ -3231,45 +4315,61 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
             print(f"[CSV BATCH] Comparing {len(items)} CSV items...")
 
-            # Use the search query from the browserless_query_var (user can edit it)
-            search_query = self.browserless_query_var.get().strip()
+            # Check if we have cached eBay results in the treeview
+            has_cached_results = hasattr(self, 'browserless_results_data') and self.browserless_results_data and len(self.browserless_results_data) > 0
 
-            if not search_query:
-                # Fallback to building from first item
-                title = items[0].get('title', '') if items else ''
-                category = items[0].get('category', '') if items else ''
-                core_words = ' '.join(title.split()[:3])
-                category_keyword = category.split()[0] if category else ''
-                search_query = f"{core_words} {category_keyword}".strip()
+            if has_cached_results:
+                # Use cached results from treeview
+                ebay_results = self.browserless_results_data
+                print(f"[CSV BATCH] Using {len(ebay_results)} cached eBay results from treeview")
+                self.after(0, lambda: self.browserless_status.set(f"Using {len(ebay_results)} cached eBay results..."))
 
-            if not search_query:
-                self.after(0, lambda: messagebox.showerror("Error", "Could not build search query"))
-                return
+                # Create debug folder
+                search_query = self.browserless_query_var.get().strip() or "cached_search"
+                debug_folder = self._create_debug_folder(search_query)
+            else:
+                # No cached results, need to make a new search
+                # Use the search query from the browserless_query_var (user can edit it)
+                search_query = self.browserless_query_var.get().strip()
 
-            print(f"[CSV BATCH] Using search query: '{search_query}'")
-            self.after(0, lambda: self.browserless_status.set(f"Searching eBay for '{search_query}'..."))
+                if not search_query:
+                    # Fallback to building from first item
+                    title = items[0].get('title', '') if items else ''
+                    category = items[0].get('category', '') if items else ''
+                    core_words = ' '.join(title.split()[:3])
+                    category_keyword = category.split()[0] if category else ''
+                    search_query = f"{core_words} {category_keyword}".strip()
 
-            # Create debug folder
-            debug_folder = self._create_debug_folder(search_query)
+                if not search_query:
+                    self.after(0, lambda: messagebox.showerror("Error", "Could not build search query"))
+                    return
 
-            # **ONE eBay search for all items**
-            ebay_results = run_ebay_scrapy_search(
-                query=search_query,
-                max_results=max_results,
-                sold_listings=True
-            )
+                print(f"[CSV BATCH] Using search query: '{search_query}'")
+                self.after(0, lambda: self.browserless_status.set(f"Searching eBay for '{search_query}'..."))
 
-            if not ebay_results:
-                self.after(0, lambda: messagebox.showinfo("No Results", "No eBay listings found"))
-                return
+                # Create debug folder
+                debug_folder = self._create_debug_folder(search_query)
 
-            print(f"[CSV BATCH] Found {len(ebay_results)} eBay listings")
+                # **ONE eBay search for all items**
+                ebay_results = run_ebay_scrapy_search(
+                    query=search_query,
+                    max_results=max_results,
+                    sold_listings=True
+                )
+
+                if not ebay_results:
+                    self.after(0, lambda: messagebox.showinfo("No Results", "No eBay listings found"))
+                    return
+
+                print(f"[CSV BATCH] Found {len(ebay_results)} eBay listings")
+
             self.after(0, lambda: self.browserless_status.set(f"Downloading and caching {len(ebay_results)} eBay images..."))
 
             # **Cache all eBay images at once AND save to debug folder**
             ebay_image_cache = {}
             for idx, ebay_item in enumerate(ebay_results):
-                ebay_image_url = ebay_item.get('main_image', '')
+                # Support both 'main_image' (from search) and 'image_url' (from cached browserless_results_data)
+                ebay_image_url = ebay_item.get('main_image') or ebay_item.get('image_url', '')
                 if ebay_image_url and ebay_image_url not in ebay_image_cache:
                     try:
                         response = requests.get(ebay_image_url, timeout=5)
@@ -3329,7 +4429,8 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                     for ebay_idx, ebay_item in enumerate(ebay_results):
                         similarity = 0.0
 
-                        ebay_image_url = ebay_item.get('main_image', '')
+                        # Support both 'main_image' (from search) and 'image_url' (from cached browserless_results_data)
+                        ebay_image_url = ebay_item.get('main_image') or ebay_item.get('image_url', '')
                         ebay_img = ebay_image_cache.get(ebay_image_url)
 
                         if ebay_img is not None:
@@ -3361,23 +4462,25 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                         shipping_text = ebay_item.get('shipping_cost', '0')
                         shipping_cost = self._extract_price(shipping_text)
 
-                        # Profit = eBay - Mandarake - Shipping
-                        profit = ebay_price - mandarake_price - shipping_cost
-                        profit_margin = (profit / mandarake_price * 100) if mandarake_price > 0 else 0
+                        # Profit % = ((eBay Price + Shipping) / (Mandarake Price * Exchange Rate) - 1) * 100
+                        mandarake_price_usd = mandarake_price / self.usd_jpy_rate if self.usd_jpy_rate > 0 else 0
+                        total_cost_usd = ebay_price + shipping_cost
+                        profit_margin = ((total_cost_usd / mandarake_price_usd - 1) * 100) if mandarake_price_usd > 0 else 0
 
                         comparison_results.append({
-                            'thumbnail': ebay_item.get('main_image', ''),
-                            'ebay_title': ebay_item.get('product_title', 'N/A'),
+                            'thumbnail': ebay_item.get('main_image') or ebay_item.get('image_url', ''),
+                            'ebay_title': ebay_item.get('product_title') or ebay_item.get('title', 'N/A'),
                             'mandarake_title': item.get('title', 'N/A'),
                             'mandarake_price': f"¥{mandarake_price:,.0f}",
                             'ebay_price': ebay_price_text,
                             'shipping': shipping_text,
+                            'sold_date': ebay_item.get('sold_date', ''),
                             'similarity': similarity,  # Keep as number for sorting
                             'similarity_display': f"{similarity:.1f}%" if similarity > 0 else '-',
                             'profit_margin': profit_margin,  # Keep as number for sorting
                             'profit_display': f"{profit_margin:.1f}%",
                             'mandarake_link': item.get('product_url', ''),
-                            'ebay_link': ebay_item.get('product_url', '')
+                            'ebay_link': ebay_item.get('product_url') or ebay_item.get('url', '')
                         })
 
                 except Exception as e:
@@ -3439,6 +4542,14 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 category_keyword = CATEGORY_KEYWORDS.get(category, '')
                 search_query = f"{core_words} {category_keyword}".strip()
 
+                # Add secondary keyword if toggle is on
+                if hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get():
+                    if csv_title and keyword:
+                        secondary = self._extract_secondary_keyword(csv_title, keyword)
+                        if secondary:
+                            search_query = f"{search_query} {secondary}".strip()
+                            print(f"[CSV INDIVIDUAL] Added secondary keyword: {secondary}")
+
                 if not search_query:
                     print(f"[CSV INDIVIDUAL] Skipping item {item_idx}: no search query")
                     continue
@@ -3484,7 +4595,8 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 # Download and compare with each eBay result
                 item_comparisons = []
                 for ebay_idx, ebay_item in enumerate(ebay_results):
-                    ebay_image_url = ebay_item.get('main_image', '')
+                    # Support both 'main_image' (from search) and 'image_url' (from cached browserless_results_data)
+                    ebay_image_url = ebay_item.get('main_image') or ebay_item.get('image_url', '')
                     if not ebay_image_url:
                         continue
 
@@ -3527,23 +4639,25 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                     shipping_text = ebay_item.get('shipping_cost', '0')
                     shipping_cost = self._extract_price(shipping_text)
 
-                    # Profit = eBay - Mandarake - Shipping
-                    profit = ebay_price - mandarake_price - shipping_cost
-                    profit_margin = (profit / mandarake_price * 100) if mandarake_price > 0 else 0
+                    # Profit % = ((eBay Price + Shipping) / (Mandarake Price * Exchange Rate) - 1) * 100
+                    mandarake_price_usd = mandarake_price / self.usd_jpy_rate if self.usd_jpy_rate > 0 else 0
+                    total_cost_usd = ebay_price + shipping_cost
+                    profit_margin = ((total_cost_usd / mandarake_price_usd - 1) * 100) if mandarake_price_usd > 0 else 0
 
                     comparison_results.append({
-                        'thumbnail': ebay_item.get('main_image', ''),
+                        'thumbnail': ebay_item.get('main_image') or ebay_item.get('image_url', ''),
                         'csv_title': csv_title,
-                        'ebay_title': ebay_item.get('product_title', 'N/A'),
+                        'ebay_title': ebay_item.get('product_title') or ebay_item.get('title', 'N/A'),
                         'mandarake_price': f"¥{mandarake_price:,.0f}",
                         'ebay_price': ebay_price_text,
                         'shipping': shipping_text,
+                        'sold_date': ebay_item.get('sold_date', ''),
                         'similarity': similarity,
                         'similarity_display': f"{similarity:.1f}%" if similarity > 0 else '-',
                         'profit_margin': profit_margin,
                         'profit_display': f"{profit_margin:.1f}%",
                         'mandarake_link': item.get('product_url', ''),
-                        'ebay_link': ebay_item.get('product_url', '')
+                        'ebay_link': ebay_item.get('product_url') or ebay_item.get('url', '')
                     })
 
             # Sort by similarity (highest first)
@@ -3568,6 +4682,22 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             self.after(0, lambda: messagebox.showerror("Comparison Error", f"Failed: {str(e)}"))
         finally:
             self.after(0, self.csv_compare_progress.stop)
+
+    def _fetch_exchange_rate(self):
+        """Fetch current USD to JPY exchange rate"""
+        try:
+            import requests
+            # Use exchangerate-api.com (free, no API key needed)
+            response = requests.get('https://api.exchangerate-api.com/v4/latest/USD', timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                rate = data['rates']['JPY']
+                return rate
+        except Exception as e:
+            print(f"[EXCHANGE RATE] Error fetching rate: {e}")
+
+        # Fallback to a reasonable default if fetch fails
+        return 150.0
 
     def _extract_price(self, price_text):
         """Extract numeric price from text"""
@@ -3673,7 +4803,9 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 'title': r['ebay_title'],
                 'price': r['ebay_price'],
                 'shipping': r['shipping'],
-                'sold_date': r['profit_display'],  # Show profit margin
+                'mandarake_price': r.get('mandarake_price', ''),
+                'profit_margin': r['profit_display'],
+                'sold_date': r.get('sold_date', ''),  # Keep actual sold date
                 'similarity': r['similarity_display'],
                 'url': r['ebay_link'],
                 'image_url': r['thumbnail']
@@ -3702,28 +4834,53 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             pass
 
     def _display_browserless_results(self, results):
-        """Display browserless search results in the tree view"""
-        # Clear existing results
+        """Display browserless search results in the tree view with thumbnails"""
+        # Clear existing results and images
         for item in self.browserless_tree.get_children():
             self.browserless_tree.delete(item)
+        self.browserless_images.clear()
 
         # Store results for URL opening
         self.browserless_results_data = results
 
-        # Add new results
+        # Add new results with thumbnails
         for i, result in enumerate(results, 1):
             values = (
-                result['title'][:45] + "..." if len(result['title']) > 45 else result['title'],
+                result['title'],  # Show full title, no truncation
                 result['price'],
                 result['shipping'],
-                result['sold_date'],
-                result['similarity'],
-                result['url'][:35] + "..." if len(result['url']) > 35 else result['url']
+                result.get('mandarake_price', ''),
+                result.get('profit_margin', ''),
+                result.get('sold_date', ''),
+                result.get('similarity', ''),
+                result['url']  # Show full URL, no truncation
             )
 
-            self.browserless_tree.insert('', 'end', iid=str(i), text=str(i), values=values)
+            # Try to load thumbnail
+            image_url = result.get('image_url', '')
+            photo = None
 
-        print(f"[SCRAPY SEARCH] Displayed {len(results)} results in tree view")
+            if image_url:
+                try:
+                    import requests
+                    from io import BytesIO
+                    response = requests.get(image_url, timeout=5)
+                    response.raise_for_status()
+                    pil_img = Image.open(BytesIO(response.content))
+                    pil_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
+                    photo = ImageTk.PhotoImage(pil_img)
+                except Exception as e:
+                    print(f"[SCRAPY SEARCH] Failed to load thumbnail {i}: {e}")
+                    photo = None
+
+            # Insert with or without image
+            if photo:
+                self.browserless_tree.insert('', 'end', iid=str(i), text='', values=values, image=photo)
+                self.browserless_images[str(i)] = photo  # Keep reference to prevent garbage collection
+            else:
+                self.browserless_tree.insert('', 'end', iid=str(i), text=str(i), values=values)
+
+        print(f"[SCRAPY SEARCH] Displayed {len(results)} results in tree view ({len(self.browserless_images)} with thumbnails)")
 
     def _clean_ebay_url(self, url: str) -> str:
         """Clean and validate eBay URL"""
@@ -3800,15 +4957,19 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             return f"URL Error: {url}"
 
     def _update_preview(self, *args):
+        # Also trigger auto-save when preview updates
+        self._auto_save_config()
+
         keyword = self.keyword_var.get().strip()
-        if not keyword:
-            self.url_var.set("Search URL: (enter keyword)")
-            return
 
         params: list[tuple[str, str]] = []
-        params.append(("keyword", quote(keyword)))
-
         notes: list[str] = []
+
+        # Add keyword if present
+        if keyword:
+            params.append(("keyword", quote(keyword)))
+
+        # Add category even without keyword
         categories = self._get_selected_categories()
         if categories:
             params.append(("categoryCode", categories[0]))
@@ -3830,12 +4991,14 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             params.append(("upToMinutes", str(recent_hours * 60)))
             notes.append(f"last {recent_hours}h")
 
+        # Build URL even if no params (will show base URL)
         query = '&'.join(f"{key}={value}" for key, value in params)
         url = "https://order.mandarake.co.jp/order/listPage/list"
         if query:
             url = f"{url}?{query}"
+
         note_str = f" ({'; '.join(notes)})" if notes else ''
-        self.url_var.set(f"Search URL: {url}{note_str}")
+        self.url_var.set(f"{url}{note_str}")
 
 
 def main():

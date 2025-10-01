@@ -1,0 +1,18 @@
+{
+  "keyword": "AV actress/Photograph Collection So Sweet!",
+  "hide_sold_out": false,
+  "language": "en",
+  "fast": false,
+  "resume": true,
+  "debug": false,
+  "client_id": "YOUR_EBAY_CLIENT_ID_HERE",
+  "client_secret": "YOUR_EBAY_CLIENT_SECRET_HERE",
+  "category": "050801",
+  "category_name": "AV Actress/Photograph Collection",
+  "results_per_page": 240,
+  "shop": "1",
+  "shop_name": "Nakano",
+  "csv": "results\\av_actress_photograph_collection_so_sweet_av_actress_photograph_collection_nakano.csv",
+  "download_images": "images\\hentai_kamen_all_all_stores/",
+  "thumbnails": 400
+}

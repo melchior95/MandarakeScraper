@@ -36,7 +36,7 @@ def run_ebay_scrapy_search(query: str, max_results: int = 10, sold_listings: boo
             "-a", f"max_results={max_results}",
             "-a", f"sold_listings={'True' if sold_listings else 'False'}",
             "-O", temp_output,
-            "-s", "LOG_LEVEL=ERROR"  # Suppress scrapy logs in GUI
+            "-s", "LOG_LEVEL=INFO"  # Show INFO logs to see URLs
         ]
 
         print(f"[SCRAPY] Running command: {' '.join(cmd)}")
@@ -51,9 +51,12 @@ def run_ebay_scrapy_search(query: str, max_results: int = 10, sold_listings: boo
             timeout=60  # 60 second timeout
         )
 
+        # Print spider logs (they go to stderr)
+        if result.stderr:
+            print(f"[SCRAPY LOG]\n{result.stderr}")
+
         if result.returncode != 0:
             print(f"[SCRAPY ERROR] Spider failed with code {result.returncode}")
-            print(f"[SCRAPY ERROR] stderr: {result.stderr}")
             return []
 
         # Read results from temp file

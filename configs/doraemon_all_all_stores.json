@@ -1,0 +1,15 @@
+{
+  "keyword": "hentai kamen",
+  "hide_sold_out": true,
+  "language": "ja",
+  "fast": false,
+  "resume": true,
+  "debug": true,
+  "client_id": "",
+  "client_secret": "",
+  "results_per_page": 240,
+  "shop": "0",
+  "shop_name": "All Stores",
+  "csv": "results\\hentai_kamen_all_all_stores.csv",
+  "download_images": "images\\doraemon_all_all_stores/"
+}

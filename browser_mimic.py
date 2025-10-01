@@ -402,16 +402,9 @@ class BrowserMimic:
 
     def _check_for_blocking(self, response: requests.Response):
         """Check if we're being blocked and adapt"""
-        indicators = [
-            'captcha', 'blocked', 'access denied', 'robot',
-            'too many requests', 'rate limit', 'forbidden'
-        ]
-
-        content_lower = response.text.lower()
-
-        if (response.status_code in [403, 429] or
-            any(indicator in content_lower for indicator in indicators)):
-
+        # Only check for blocking on status codes that indicate issues
+        # Don't check content for 200 responses (even with 0 results)
+        if response.status_code in [403, 429]:
             logging.warning("Potential blocking detected - adapting behavior")
 
             # Switch browser profile
@@ -431,6 +424,23 @@ class BrowserMimic:
 
             # Longer delay before next request
             time.sleep(random.uniform(10, 20))
+        elif response.status_code == 200:
+            # For 200 responses, only check for explicit blocking pages
+            content_lower = response.text.lower()
+            explicit_blocking_indicators = [
+                'access denied',
+                'you have been blocked',
+                'your access has been blocked',
+                'captcha verification',
+                'please verify you are human'
+            ]
+
+            if any(indicator in content_lower for indicator in explicit_blocking_indicators):
+                logging.warning("Explicit blocking page detected - adapting behavior")
+                # Switch browser profile
+                self.current_profile = random.choice(self.BROWSER_PROFILES)
+                self._setup_browser_headers()
+                time.sleep(random.uniform(10, 20))
 
     def close(self):
         """Clean up and save session"""

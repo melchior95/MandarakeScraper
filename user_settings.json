@@ -1,10 +1,11 @@
 {
   "window": {
-    "width": 1000,
-    "height": 951,
-    "x": 66,
-    "y": 294,
-    "maximized": false
+    "width": 1187,
+    "height": 1131,
+    "x": 183,
+    "y": 172,
+    "maximized": false,
+    "ebay_paned_pos": 432
   },
   "ebay_analysis": {
     "min_sold_items": 1,
@@ -33,7 +34,11 @@
     "status_update_interval": 1000
   },
   "recent": {
-    "config_files": [],
+    "config_files": [
+      "configs\\all_s_m_all_stores.json",
+      "configs\\minamo_050801_0.json",
+      "C:\\Python Projects\\mandarake_scraper\\configs\\hentai_kamen_all_0.json"
+    ],
     "image_analysis_path": "C:\\Python Projects\\mandarake_scraper\\images\\naruto\\thumb_product_0002.jpg",
     "last_export_directory": "",
     "last_results_save_path": ""
@@ -41,7 +46,14 @@
   "meta": {
     "version": "1.0.0",
     "first_run": false,
-    "last_updated": "2025-09-29T09:41:11.149939",
+    "last_updated": "2025-09-30T20:39:10.705422",
     "settings_version": 1
+  },
+  "ebay_text_search": {
+    "download_delay": 1.0,
+    "max_retries": 3,
+    "randomize_delay": true,
+    "rotate_user_agent": true,
+    "validate_data": true
   }
 }

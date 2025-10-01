@@ -81,7 +81,10 @@ class EbaySearchSpider(scrapy.Spider):
             self.logger.info("Searching SOLD listings only")
         
         search_url = f"{self.base_url}/sch/i.html?{urlencode(search_params)}"
-        
+
+        # Log the actual URL being requested
+        self.logger.info(f"Search URL: {search_url}")
+
         yield scrapy.Request(
             url=search_url,
             callback=self.parse_search_results,
@@ -142,7 +145,7 @@ class EbaySearchSpider(scrapy.Spider):
             self.logger.warning("No search result items found with .s-card or .s-item")
             return
 
-        self.logger.info(f"Found {len(item_containers)} item containers")
+        self.logger.info(f"eBay returned {len(item_containers)} item containers on page {response.meta.get('page', 1)}")
         
         for container in item_containers:
             if self.results_count >= self.max_results:

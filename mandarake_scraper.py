@@ -267,11 +267,14 @@ class MandarakeScraper:
         category_code = category or self.config.get('category', '')
         shop_code = shop or self.config.get('shop', '')
 
+        # Get results per page from config, default to 240 (max)
+        results_per_page = self.config.get('results_per_page', 240)
+
         params = {
             'keyword': self.config.get('keyword', ''),  # Make keyword optional
             'categoryCode': category_code,
             'shop': shop_code,
-            'dispCount': 240,  # Max items per page
+            'dispCount': results_per_page,  # Configurable items per page
             'page': page
         }
 
@@ -347,12 +350,17 @@ class MandarakeScraper:
                 response = self._make_request(url, timeout=30)
                 response.raise_for_status()
 
-                # Enhanced blocking detection from mdrscr
-                if (response.status_code == 403 or
-                    'captcha' in response.text.lower() or
-                    'access denied' in response.text.lower() or
-                    'robot' in response.text.lower() or
-                    'blocked' in response.text.lower()):
+                # Only check for explicit blocking indicators, not general keywords
+                content_lower = response.text.lower()
+                explicit_blocking = (
+                    response.status_code == 403 or
+                    'access denied' in content_lower or
+                    'you have been blocked' in content_lower or
+                    'captcha verification' in content_lower or
+                    'please verify you are human' in content_lower
+                )
+
+                if explicit_blocking:
                     logging.warning(f"Access blocking detected on attempt {attempt + 1}")
                     time.sleep(10 * (attempt + 1))  # Longer backoff
                     continue
@@ -374,11 +382,17 @@ class MandarakeScraper:
                 response = self.browser_mimic.get(url, timeout=30)
                 response.raise_for_status()
 
-                if (response.status_code == 403 or
-                    'captcha' in response.text.lower() or
-                    'access denied' in response.text.lower() or
-                    'robot' in response.text.lower() or
-                    'blocked' in response.text.lower()):
+                # Only check for explicit blocking indicators, not general keywords
+                content_lower = response.text.lower()
+                explicit_blocking = (
+                    response.status_code == 403 or
+                    'access denied' in content_lower or
+                    'you have been blocked' in content_lower or
+                    'captcha verification' in content_lower or
+                    'please verify you are human' in content_lower
+                )
+
+                if explicit_blocking:
                     logging.warning(f"Access blocking detected (mimic) on attempt {attempt + 1}")
                     time.sleep(10 * (attempt + 1))
                     continue
@@ -522,16 +536,28 @@ class MandarakeScraper:
             is_adult = product_element.find(class_='r18item') is not None
 
             # Enhanced title extraction with multiple fallbacks
-            title_elem = (product_element.find('a', class_='title') or
-                         product_element.find('h3') or
-                         product_element.find(class_='title') or
-                         product_element.find('.title a') or
-                         product_element.find('.title p'))
+            title_elem = None
+            # Try div.title > p > a (current Mandarake structure)
+            title_div = product_element.find('div', class_='title')
+            if title_div:
+                title_link = title_div.find('a')
+                if title_link:
+                    title_elem = title_link
+
+            # Fallback to other structures
+            if not title_elem:
+                title_elem = (product_element.find('a', class_='title') or
+                             product_element.find('h3') or
+                             product_element.find(class_='title'))
 
             if not title_elem:
+                logging.debug(f"No title element found in product")
                 return None
 
             title = title_elem.get_text(strip=True)
+            if not title:
+                logging.debug(f"Empty title text")
+                return None
 
             # Enhanced price extraction
             price_elem = product_element.find(class_=re.compile('price|cost'))
@@ -701,16 +727,31 @@ class MandarakeScraper:
                 logging.info(f"Found {len(products)} products using fallback selectors")
 
         page_results = []
+        none_count = 0
+        duplicate_count = 0
         for product in products:
             product_info = self._extract_product_info(product)
-            if product_info and product_info['product_url'] not in self.state['scraped_urls']:
-                # Add category and shop information to the product
-                if category:
-                    product_info['category'] = category
-                if shop:
-                    product_info['shop'] = shop
-                page_results.append(product_info)
-                self.state['scraped_urls'].add(product_info['product_url'])
+            if not product_info:
+                none_count += 1
+                continue
+            if 'product_url' not in product_info or not product_info['product_url']:
+                none_count += 1
+                continue
+            if product_info['product_url'] in self.state['scraped_urls']:
+                duplicate_count += 1
+                continue
+            # Add category and shop information to the product
+            if category:
+                product_info['category'] = category
+            if shop:
+                product_info['shop'] = shop
+            page_results.append(product_info)
+            self.state['scraped_urls'].add(product_info['product_url'])
+
+        if none_count > 0:
+            logging.warning(f"Failed to extract info from {none_count} products")
+        if duplicate_count > 0:
+            logging.info(f"Skipped {duplicate_count} duplicate products")
 
         info_parts = []
         if category:
@@ -734,7 +775,7 @@ class MandarakeScraper:
                 logging.info(f"   {i+1}. {title}{'...' if len(product.get('title', '')) > 50 else ''} - {price}")
 
         logging.info("=" * 50)
-        return page_results
+        return page_results, duplicate_count
 
     def scrape_all_pages(self):
         """Scrape all pages with progress tracking"""
@@ -812,7 +853,7 @@ class MandarakeScraper:
 
         # Initial page fetch to determine total pages
         if combo_state['total_pages'] is None:
-            initial_results = self.scrape_page(start_page, category, shop)
+            initial_results, _ = self.scrape_page(start_page, category, shop)
             self.results.extend(initial_results)
             combo_state['current_page'] = start_page + 1
             self._save_state()
@@ -832,18 +873,58 @@ class MandarakeScraper:
             logging.info(f"Max page limit reached for {combo_desc}, skipping remaining pages")
             return
 
+        # Track new vs duplicate items for smart stopping
+        consecutive_high_duplicate_pages = 0
+        DUPLICATE_THRESHOLD = 0.8  # Stop if 80% duplicates
+        CONSECUTIVE_PAGES_TO_STOP = 2  # Stop after 2 consecutive high-duplicate pages
+
         with tqdm(total=effective_total,
                  desc=f"Scraping {combo_desc}",
                  initial=min(next_page - 1, effective_total)) as pbar:
 
             for page in range(next_page, effective_total + 1):
-                page_results = self.scrape_page(page, category, shop)
+                # Check for cancellation request
+                if getattr(self, '_cancel_requested', False):
+                    logging.info(f"Cancellation requested, stopping scrape at page {page}")
+                    break
 
+                # Track items before this page
+                items_before = len(self.results)
+
+                page_results, duplicates_on_page = self.scrape_page(page, category, shop)
+
+                # Only stop on page > 1 if no results (pagination end)
+                # Page 1 with no results is legitimate (no matching items)
                 if not page_results and page > 1:
-                    logging.warning(f"No results found on page {page} for {combo_desc}, stopping")
+                    logging.warning(f"No results found on page {page} for {combo_desc}, stopping pagination")
                     break
 
                 self.results.extend(page_results)
+
+                # Calculate new items on this page
+                items_after = len(self.results)
+                new_items_this_page = items_after - items_before
+
+                # Smart stopping: if no max_pages set and we hit many duplicates
+                if not self.max_pages_limit and page > 1:
+                    # If 10 or more duplicates on this page, stop
+                    if duplicates_on_page >= 10:
+                        logging.info(f"Page {page}: Found {duplicates_on_page} duplicates - stopping early")
+                        logging.info(f"Total items collected: {len(self.results)}")
+                        break
+
+                    # Also track consecutive low-yield pages as backup
+                    if items_before > 50 and new_items_this_page < 5:
+                        consecutive_high_duplicate_pages += 1
+                        logging.info(f"Page {page}: Only {new_items_this_page} new items")
+
+                        if consecutive_high_duplicate_pages >= CONSECUTIVE_PAGES_TO_STOP:
+                            logging.info(f"Stopping early: {CONSECUTIVE_PAGES_TO_STOP} consecutive pages with <5 new items")
+                            logging.info(f"Total items collected: {len(self.results)}")
+                            break
+                    else:
+                        consecutive_high_duplicate_pages = 0  # Reset counter
+
                 combo_state['current_page'] = page + 1
                 self.state['results'] = self.results
 
@@ -887,12 +968,14 @@ class MandarakeScraper:
     def download_images(self):
         """Download product images"""
         if not self.config.get('download_images'):
+            print("[IMAGE DOWNLOAD] No download_images path configured, skipping")
             return
 
         image_dir = Path(self.config['download_images'])
-        image_dir.mkdir(exist_ok=True)
+        image_dir.mkdir(parents=True, exist_ok=True)
 
         logging.info(f"Downloading images to {image_dir}")
+        print(f"[IMAGE DOWNLOAD] Saving images to: {image_dir}")
 
         for i, product in enumerate(tqdm(self.results, desc="Downloading images")):
             if not product.get('image_url'):
@@ -922,19 +1005,29 @@ class MandarakeScraper:
     def _download_image(self, url: str, image_dir: Path, index: int) -> Optional[Path]:
         """Download a single image"""
         try:
-            response = self._make_request(url, timeout=30)
+            # Use regular session directly for images (CDN doesn't need anti-blocking delays)
+            response = self.session.get(url, timeout=30)
             response.raise_for_status()
 
-            # Determine file extension
-            content_type = response.headers.get('content-type', '')
-            if 'jpeg' in content_type:
-                ext = '.jpg'
-            elif 'png' in content_type:
-                ext = '.png'
-            else:
-                ext = '.jpg'  # Default
+            # Extract original filename from URL
+            from urllib.parse import urlparse, unquote
+            parsed_url = urlparse(url)
+            original_filename = Path(unquote(parsed_url.path)).name
 
-            filename = f"product_{index:04d}{ext}"
+            # Use original filename if available, otherwise fall back to indexed name
+            if original_filename and '.' in original_filename:
+                filename = original_filename
+            else:
+                # Determine file extension from content type
+                content_type = response.headers.get('content-type', '')
+                if 'jpeg' in content_type:
+                    ext = '.jpg'
+                elif 'png' in content_type:
+                    ext = '.png'
+                else:
+                    ext = '.jpg'  # Default
+                filename = f"product_{index:04d}{ext}"
+
             image_path = image_dir / filename
 
             with open(image_path, 'wb') as f:
@@ -962,19 +1055,26 @@ class MandarakeScraper:
 
     def save_results(self):
         """Save results to configured outputs"""
+        print(f"[SAVE DEBUG] save_results called, results count: {len(self.results)}")
         if not self.results:
             logging.warning("No results to save")
+            print(f"[SAVE DEBUG] No results to save, returning early")
             return
 
         saved_to_any = False
 
         # Save to CSV (always try this first as fallback)
-        if self.config.get('csv'):
+        csv_path = self.config.get('csv')
+        print(f"[SAVE DEBUG] CSV path from config: {csv_path}")
+        if csv_path:
             try:
+                print(f"[SAVE DEBUG] Calling _save_to_csv()")
                 self._save_to_csv()
                 saved_to_any = True
+                print(f"[SAVE DEBUG] CSV save successful")
             except Exception as e:
                 logging.error(f"Failed to save to CSV: {e}")
+                print(f"[SAVE DEBUG] CSV save failed: {e}")
 
         # Save to Google Sheets
         sheets_config = self.config.get('google_sheets') or self.config.get('sheet')
@@ -1012,19 +1112,101 @@ class MandarakeScraper:
             logging.error("Failed to save results to any output method")
 
     def _save_to_csv(self):
-        """Save results to CSV file"""
+        """Save results to CSV file, appending new items and tracking timestamps"""
         csv_path = self.config['csv']
         logging.info(f"Saving to CSV: {csv_path}")
+        print(f"[CSV SAVE DEBUG] Starting CSV save, path: {csv_path}")
+        print(f"[CSV SAVE DEBUG] Results count: {len(self.results)}")
 
         if not self.results:
+            print(f"[CSV SAVE DEBUG] No results, returning early")
             return
 
-        fieldnames = list(self.results[0].keys())
+        # Add timestamp fields to all results
+        current_time = datetime.now()
+        for result in self.results:
+            if 'first_seen' not in result:
+                result['first_seen'] = current_time.isoformat()
+            if 'last_seen' not in result:
+                result['last_seen'] = current_time.isoformat()
 
+        print(f"[CSV SAVE DEBUG] Timestamps added to {len(self.results)} results")
+
+        # Check if CSV exists
+        existing_items = {}
+        csv_exists = os.path.exists(csv_path)
+
+        if csv_exists:
+            # Load existing items (keyed by product_url for deduplication)
+            try:
+                with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        url = row.get('product_url', '')
+                        if url:
+                            existing_items[url] = row
+                logging.info(f"Found {len(existing_items)} existing items in CSV")
+                print(f"[CSV SAVE DEBUG] Loaded {len(existing_items)} existing items from CSV")
+            except Exception as e:
+                logging.warning(f"Could not read existing CSV: {e}")
+                print(f"[CSV SAVE DEBUG] Failed to load existing CSV: {e}")
+                existing_items = {}
+
+        # Merge new results with existing items
+        new_count = 0
+        updated_count = 0
+        merged_items = {}
+
+        # First, add all existing items
+        for url, item in existing_items.items():
+            merged_items[url] = item
+
+        # Then add/update with new results
+        for result in self.results:
+            url = result.get('product_url', '')
+            if not url:
+                print(f"[CSV SAVE DEBUG] Skipping result with no product_url: {result.get('title', 'No title')[:50]}")
+                continue
+
+            if url in existing_items:
+                # Update last_seen but keep first_seen from existing
+                result['first_seen'] = existing_items[url].get('first_seen', result['first_seen'])
+                result['last_seen'] = current_time.isoformat()
+                updated_count += 1
+            else:
+                # New item
+                new_count += 1
+
+            merged_items[url] = result
+
+        # Ensure fieldnames include timestamp fields at the beginning
+        print(f"[CSV SAVE DEBUG] Merged items count: {len(merged_items)}")
+        if merged_items:
+            sample_item = next(iter(merged_items.values()))
+            fieldnames = ['first_seen', 'last_seen'] + [k for k in sample_item.keys() if k not in ['first_seen', 'last_seen']]
+            print(f"[CSV SAVE DEBUG] Fieldnames: {len(fieldnames)} fields")
+        else:
+            fieldnames = list(self.results[0].keys()) if self.results else []
+            print(f"[CSV SAVE DEBUG] No merged items, using fallback fieldnames")
+
+        # Write merged results
+        print(f"[CSV SAVE DEBUG] Opening CSV file for writing: {csv_path}")
         with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
             writer.writeheader()
-            writer.writerows(self.results)
+            print(f"[CSV SAVE DEBUG] Header written")
+            # Sort by first_seen (newest first)
+            sorted_items = sorted(merged_items.values(),
+                                key=lambda x: x.get('first_seen', ''),
+                                reverse=True)
+            print(f"[CSV SAVE DEBUG] Sorted {len(sorted_items)} items, writing to CSV")
+            writer.writerows(sorted_items)
+            print(f"[CSV SAVE DEBUG] Rows written to CSV")
+
+        logging.info(f"CSV saved: {len(merged_items)} total items ({new_count} new, {updated_count} updated)")
+        print(f"[CSV SAVE DEBUG] CSV save completed: {len(merged_items)} total items")
+        if new_count > 0:
+            logging.info(f"⭐ {new_count} NEW items added!")
 
     def _save_to_sheets(self):
         """Save results to Google Sheets with local image upload"""
@@ -1070,7 +1252,15 @@ class MandarakeScraper:
             self.scrape_all_pages()
 
             if not self.results:
-                logging.warning("No products found")
+                logging.info("=" * 60)
+                logging.info("SCRAPING COMPLETED - NO MATCHING PRODUCTS")
+                logging.info("=" * 60)
+                logging.info("The search completed successfully, but no products matched your criteria.")
+                logging.info("This is normal if:")
+                logging.info("  - Your search keyword has no matching items")
+                logging.info("  - The category/shop combination has no products")
+                logging.info("  - All matching items are sold out (with hide_sold_out enabled)")
+                logging.info("=" * 60)
                 return
 
             # Enhance with eBay data

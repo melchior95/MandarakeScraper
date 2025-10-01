@@ -1,0 +1,15 @@
+{
+  "keyword": "",
+  "hide_sold_out": false,
+  "language": "en",
+  "fast": false,
+  "resume": true,
+  "debug": false,
+  "client_id": "",
+  "client_secret": "",
+  "results_per_page": 240,
+  "shop": "0",
+  "shop_name": "All Stores",
+  "csv": "results\\all_all_all_stores.csv",
+  "download_images": "images\\av_actress_photograph_collection_av_actress_photograph_collection_unknown_store_nakano/"
+}
