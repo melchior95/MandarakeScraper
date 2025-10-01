@@ -25,48 +25,16 @@ from mandarake_codes import (
     STORE_SLUG_TO_NAME,
 )
 
-STORE_OPTIONS = [
-    (code, info['en'])
-    for code, info in sorted(
-        MANDARAKE_STORES.items(),
-        key=lambda item: int(item[0]) if item[0].lstrip('-').isdigit() else item[0],
-    )
-]
-
-MAIN_CATEGORY_OPTIONS = [
-    (code, data['en']) for code, data in sorted(MANDARAKE_MAIN_CATEGORIES.items())
-]
-
-RECENT_OPTIONS = [
-    ("All (default)", None),
-    ("Last 6 hours", 6),
-    ("Last 12 hours", 12),
-    ("Last 24 hours", 24),
-    ("Last 72 hours", 72),
-]
-
-SETTINGS_PATH = Path('configs/gui_settings.json')
-
-# Category keyword mapping for eBay searches
-CATEGORY_KEYWORDS = {
-    '05': 'Photobook',
-    '050801': 'Photobook',
-    '0501': 'Photobook',
-    '050101': 'Photobook',
-    '050102': 'Photobook',
-    '050103': 'Bromide',
-    '050230': 'Photobook',
-    '0502': 'Goods',
-    '0503': 'Video',
-    '0504': 'Music',
-    '06': 'Card',
-    '0601': 'Trading Card',
-    '060101': 'Pokemon Card',
-    '060102': 'Yu-Gi-Oh Card',
-    '060103': 'Magic Card',
-    '060104': 'One Piece Card',
-    '060105': 'Dragon Ball Card',
-}
+# Import refactored modules
+from gui.constants import (
+    STORE_OPTIONS,
+    MAIN_CATEGORY_OPTIONS,
+    RECENT_OPTIONS,
+    SETTINGS_PATH,
+    CATEGORY_KEYWORDS,
+)
+from gui import utils
+from gui import workers
 
 
 class ScraperGUI(tk.Tk):
@@ -79,7 +47,7 @@ class ScraperGUI(tk.Tk):
         self.settings = get_settings_manager()
 
         # Fetch current USD/JPY exchange rate
-        self.usd_jpy_rate = self._fetch_exchange_rate()
+        self.usd_jpy_rate = utils.fetch_exchange_rate()
         print(f"[EXCHANGE RATE] USD/JPY: {self.usd_jpy_rate}")
 
         self.title("Mandarake Scraper GUI")
@@ -526,6 +494,10 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         self.config_tree.configure(yscrollcommand=tree_scroll.set)
         # Single click to load config
         self.config_tree.bind('<<TreeviewSelect>>', self._on_config_selected)
+        # Prevent space from affecting tree selection when it has focus
+        # Space key handled globally via bind_class
+        # Allow deselect by clicking empty area
+        self.config_tree.bind("<Button-1>", lambda e: self._deselect_if_empty(e, self.config_tree))
 
         # Add right-click context menu for config tree
         self.config_tree_menu = tk.Menu(self.config_tree, tearoff=0)
@@ -538,6 +510,7 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         # Config management buttons
         config_buttons_frame = ttk.Frame(basic_frame)
         config_buttons_frame.grid(row=10, column=0, columnspan=5, sticky=tk.W, **pad)
+        ttk.Button(config_buttons_frame, text="New Config", command=self._new_config).pack(side=tk.LEFT, padx=5)
         ttk.Button(config_buttons_frame, text="Delete Selected", command=self._delete_selected_config).pack(side=tk.LEFT, padx=5)
         ttk.Button(config_buttons_frame, text="Move Up", command=lambda: self._move_config(-1)).pack(side=tk.LEFT, padx=5)
         ttk.Button(config_buttons_frame, text="Move Down", command=lambda: self._move_config(1)).pack(side=tk.LEFT, padx=5)
@@ -654,6 +627,10 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         # Bind double-click to open URL
         self.browserless_tree.bind('<Double-1>', self.open_browserless_url)
+        # Prevent space from affecting tree selection when it has focus
+        # Space key handled globally via bind_class
+        # Allow deselect by clicking empty area
+        self.browserless_tree.bind("<Button-1>", lambda e: self._deselect_if_empty(e, self.browserless_tree))
 
         # Enable column drag-to-reorder for browserless tree
         self._setup_column_drag(self.browserless_tree)
@@ -709,7 +686,7 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         # CSV items treeview
         csv_items_frame = ttk.Frame(csv_compare_frame)
-        csv_items_frame.grid(row=1, column=0, columnspan=5, sticky=tk.NSEW, **pad)
+        csv_items_frame.grid(row=1, column=0, columnspan=7, sticky=tk.NSEW, **pad)
         csv_compare_frame.rowconfigure(1, weight=1)
         csv_compare_frame.columnconfigure(0, weight=1)
 
@@ -748,6 +725,10 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         csv_v_scroll.grid(row=0, column=1, sticky=tk.NS)
         self.csv_items_tree.configure(yscrollcommand=csv_v_scroll.set)
 
+        csv_h_scroll = ttk.Scrollbar(csv_items_frame, orient=tk.HORIZONTAL, command=self.csv_items_tree.xview)
+        csv_h_scroll.grid(row=1, column=0, sticky=tk.EW)
+        self.csv_items_tree.configure(xscrollcommand=csv_h_scroll.set)
+
         # Bind selection to auto-fill search query
         self.csv_items_tree.bind('<<TreeviewSelect>>', self.on_csv_item_selected)
 
@@ -767,10 +748,14 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         self.csv_tree_menu.add_command(label="Search by Image on eBay (Web)", command=self._search_csv_by_image_web)
         self.csv_items_tree.bind("<Button-3>", self._show_csv_tree_menu)
         self.csv_items_tree.bind('<Double-1>', self._on_csv_double_click)
+        # Prevent space from affecting tree selection when it has focus
+        # Space key handled globally via bind_class
+        # Allow deselect by clicking empty area
+        self.csv_items_tree.bind("<Button-1>", lambda e: self._deselect_if_empty(e, self.csv_items_tree))
 
         # Comparison action buttons
         button_frame = ttk.Frame(csv_compare_frame)
-        button_frame.grid(row=2, column=0, columnspan=5, sticky=tk.W, **pad)
+        button_frame.grid(row=2, column=0, columnspan=7, sticky=tk.W, **pad)
 
         ttk.Label(button_frame, text="Single Search:", font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
         ttk.Button(button_frame, text="Compare Selected", command=self.compare_selected_csv_item).grid(row=0, column=1, sticky=tk.W, **pad)
@@ -842,6 +827,10 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             self.custom_shop_entry.configure(state="disabled")
             self.custom_shop_var.set('')
         self._update_preview()
+
+        # Global space key handler - must be at end of __init__
+        # Bind to all widgets to intercept before widget-specific handlers
+        self.bind_all("<space>", self._global_space_handler)
 
     def _select_csv(self):
         filename = filedialog.asksaveasfilename(defaultextension='.csv', filetypes=[('CSV files', '*.csv'), ('All files', '*.*')])
@@ -1003,448 +992,84 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
     def _run_image_analysis_worker(self):
         """Worker method for image analysis (runs in background thread)"""
-        try:
-            search_method = self.image_search_method.get()
-            enhancement_level = self.image_enhancement.get()
-
-            self.ebay_status.set("Preprocessing image...")
-            self.ebay_progress['value'] = 10
-
-            # Step 1: Preprocess the image
-            from image_processor import optimize_image_for_search
-            processed_image = optimize_image_for_search(str(self.image_analysis_path), enhancement_level)
-
-            self.ebay_status.set(f"Searching using {search_method} method...")
-            self.ebay_progress['value'] = 30
-
-            # Step 2: Perform the search based on selected method
-            if search_method == "direct":
-                # Direct eBay image search
-                from ebay_image_search import run_sold_listings_image_search
-                try:
-                    days_back = int(self.ebay_days_back.get())
-                except (ValueError, AttributeError):
-                    days_back = 90
-
-                lazy_search = self.lazy_search_enabled.get()
-                search_result = run_sold_listings_image_search(processed_image, days_back, lazy_search)
-
-            else:  # lens method
-                # Google Lens + eBay search
-                from google_lens_search import search_ebay_with_lens_sync
-                try:
-                    days_back = int(self.ebay_days_back.get())
-                except (ValueError, AttributeError):
-                    days_back = 90
-
-                lazy_search = self.lazy_search_enabled.get()
-                search_result = search_ebay_with_lens_sync(processed_image, days_back, headless=True, lazy_search=lazy_search)
-
-            self.ebay_progress['value'] = 80
-
-            # Step 3: Process results for display
-            if search_result.get('error'):
-                self.ebay_status.set(f"Search failed: {search_result['error']}")
-                self.ebay_progress['value'] = 0
-                return
-
-            if search_result['sold_count'] == 0:
-                self.ebay_status.set("No sold listings found for this image")
-                self.ebay_progress['value'] = 100
-                return
-
-            # Step 4: Convert image search results to analysis format
-            self.ebay_status.set("Processing results...")
-            analysis_results = self._convert_image_results_to_analysis(search_result)
-
-            # Step 5: Display results
-            self._display_ebay_results(analysis_results)
-            self.ebay_progress['value'] = 100
-            self.ebay_status.set(f"Image analysis complete: {len(analysis_results)} profitable items found")
-
-        except Exception as e:
-            self.ebay_status.set(f"Image analysis failed: {e}")
-            print(f"[IMAGE ANALYSIS] Error: {e}")
-            self.ebay_progress['value'] = 0
-
-    def _run_ai_smart_search_worker(self):
-        """Worker method for AI smart search (runs in background thread)"""
-        try:
-            from image_analysis_engine import ImageAnalysisEngine
-
-            enhancement_level = self.image_enhancement.get()
-            lazy_search = self.lazy_search_enabled.get()
-            ai_confirmation = self.ai_confirmation_enabled.get()
-
-            try:
-                days_back = int(self.ebay_days_back.get())
-            except (ValueError, AttributeError):
-                days_back = 90
-
-            try:
-                usd_jpy_rate = float(self.usd_jpy_rate.get())
-            except (ValueError, AttributeError):
-                usd_jpy_rate = 150
-
-            # Configure analysis engine
-            config = {
-                'usd_jpy_rate': usd_jpy_rate,
-                'min_profit_margin': 20,
-                'ebay_fees_percent': 0.13,
-                'shipping_cost': 5.0
-            }
-
-            engine = ImageAnalysisEngine(config)
-
-            self.ebay_status.set("Running comprehensive AI analysis...")
-            self.ebay_progress['value'] = 20
-
-            # Use comprehensive analysis with multiple methods
-            methods = ["direct_ebay", "google_lens"] if lazy_search else ["direct_ebay"]
-            enhancement_levels = [enhancement_level]
-
-            if ai_confirmation:
-                # Try multiple enhancement levels for better matching
-                enhancement_levels = ["light", "medium", "aggressive"]
-                self.ebay_status.set("AI confirmation enabled - trying multiple enhancement levels...")
-
-            analysis_result = engine.analyze_image_comprehensive(
-                str(self.image_analysis_path),
-                methods=methods,
-                enhancement_levels=enhancement_levels,
-                days_back=days_back
-            )
-
-            self.ebay_progress['value'] = 80
-
-            if ai_confirmation and analysis_result.get('results'):
-                self.ebay_status.set("AI analyzing results for best match...")
-                # Use AI to select the best result based on confidence and data quality
-                best_result = self._ai_select_best_result(analysis_result['results'])
-                if best_result:
-                    analysis_result['results'] = [best_result]
-                    analysis_result['ai_selected'] = True
-
-            # Convert to display format
-            self.ebay_status.set("Processing AI results...")
-            display_results = self._convert_ai_results_to_analysis(analysis_result)
-
-            # Display results
-            self._display_ebay_results(display_results)
-
-            self.ebay_progress['value'] = 100
-
-            result_count = len(display_results)
-            ai_note = " (AI-confirmed best match)" if analysis_result.get('ai_selected') else ""
-            self.ebay_status.set(f"AI Smart Search complete: {result_count} results found{ai_note}")
-
-        except Exception as e:
-            self.ebay_status.set(f"AI Smart Search failed: {e}")
-            print(f"[AI SMART SEARCH] Error: {e}")
-            self.ebay_progress['value'] = 0
-
-    def _ai_select_best_result(self, results: list) -> dict:
-        """Use AI logic to select the best result from multiple search attempts"""
-        if not results:
-            return None
-
-        # Score each result based on multiple factors
-        def score_result(result):
-            score = 0
-
-            # Factor 1: Number of sold items (more is better)
-            sold_count = result.get('sold_count', 0)
-            score += min(sold_count * 2, 50)  # Cap at 50 points
-
-            # Factor 2: Price consistency (lower std dev is better)
-            prices = result.get('prices', [])
-            if len(prices) > 1:
-                import statistics
-                try:
-                    median_price = statistics.median(prices)
-                    std_dev = statistics.stdev(prices)
-                    consistency_score = max(0, 30 - (std_dev / median_price * 100))
-                    score += consistency_score
-                except:
-                    pass
-
-            # Factor 3: Search method confidence
-            if result.get('search_method') == 'google_lens':
-                lens_confidence = result.get('lens_results', {}).get('confidence', 0)
-                score += lens_confidence * 0.2  # Up to 20 points
-
-            # Factor 4: Enhancement level effectiveness
-            enhancement = result.get('enhancement_level', 'medium')
-            if enhancement == 'medium':
-                score += 10  # Medium is usually best balance
-            elif enhancement == 'light':
-                score += 5
-            # aggressive gets 0 bonus (last resort)
-
-            # Factor 5: Reasonable price range (not too cheap/expensive outliers)
-            median_price = result.get('median_price', 0)
-            if 5 <= median_price <= 500:  # Reasonable range for most collectibles
-                score += 15
-            elif 1 <= median_price <= 1000:
-                score += 10
-
-            return score
-
-        # Score all results and pick the best
-        scored_results = [(score_result(result), result) for result in results]
-        scored_results.sort(key=lambda x: x[0], reverse=True)
-
-        best_score, best_result = scored_results[0]
-
-        print(f"[AI SELECTION] Selected result with score {best_score:.1f} - {best_result.get('sold_count', 0)} items, ${best_result.get('median_price', 0):.2f} median")
-
-        return best_result
-
-    def _convert_ai_results_to_analysis(self, analysis_result: dict) -> list:
-        """Convert AI analysis results to display format"""
-        results = []
-
-        if not analysis_result.get('results'):
-            return results
+        search_method = self.image_search_method.get()
+        enhancement_level = self.image_enhancement.get()
 
         try:
-            usd_to_jpy = float(self.usd_jpy_rate.get())
-            min_profit = float(self.min_profit_margin.get())
+            days_back = int(self.ebay_days_back.get())
         except (ValueError, AttributeError):
-            usd_to_jpy = 150
-            min_profit = 20
+            days_back = 90
 
-        for search_result in analysis_result['results']:
-            if search_result['sold_count'] == 0:
-                continue
+        lazy_search = self.lazy_search_enabled.get()
 
-            median_price_usd = search_result['median_price']
-            avg_price_usd = search_result['avg_price']
+        def update_callback(status, progress):
+            self.ebay_status.set(status)
+            self.ebay_progress['value'] = progress
 
-            # Generate profit scenarios
-            estimated_mandarake_prices = [
-                median_price_usd * usd_to_jpy * 0.3,  # Conservative
-                median_price_usd * usd_to_jpy * 0.5,  # Moderate
-                median_price_usd * usd_to_jpy * 0.7,  # Aggressive
-            ]
+        def display_callback(search_result):
+            analysis_results = self._convert_image_results_to_analysis(search_result)
+            self._display_ebay_results(analysis_results)
 
-            for i, mandarake_price_jpy in enumerate(estimated_mandarake_prices):
-                mandarake_usd = mandarake_price_jpy / usd_to_jpy
-                estimated_fees = median_price_usd * 0.15 + 5
-                net_proceeds = median_price_usd - estimated_fees
-                profit_margin = ((net_proceeds - mandarake_usd) / mandarake_usd) * 100 if mandarake_usd > 0 else 0
-
-                if profit_margin > min_profit:
-                    # Create descriptive title
-                    search_method = search_result.get('search_method', 'unknown')
-                    search_term = search_result.get('search_term_used', 'AI Search Result')
-                    scenario_names = ['Conservative', 'Moderate', 'Aggressive']
-
-                    title = f"{search_term} ({scenario_names[i]} - {search_method})"
-                    if analysis_result.get('ai_selected'):
-                        title += " ⭐"  # Star for AI-selected results
-
-                    results.append({
-                        'title': title,
-                        'mandarake_price': int(mandarake_price_jpy),
-                        'ebay_sold_count': search_result['sold_count'],
-                        'ebay_median_price': median_price_usd,
-                        'ebay_avg_price': avg_price_usd,
-                        'profit_margin': profit_margin,
-                        'estimated_profit': net_proceeds - mandarake_usd
-                    })
-
-        return results
+        workers.run_image_analysis_worker(
+            self.image_analysis_path,
+            search_method,
+            enhancement_level,
+            days_back,
+            lazy_search,
+            update_callback,
+            display_callback
+        )
 
     def _run_ebay_image_comparison_worker(self):
         """Worker method for eBay image comparison (runs in background thread)"""
+        # Get search term from image analysis or prompt user
+        search_term = self._get_search_term_for_comparison()
+        if not search_term:
+            self.ebay_status.set("eBay image comparison cancelled")
+            self.ebay_progress['value'] = 0
+            return
+
+        # Get configuration settings
         try:
+            days_back = int(self.ebay_days_back.get())
+        except (ValueError, AttributeError):
+            days_back = 90
 
-            self.ebay_status.set("Initializing computer vision matcher...")
-            self.ebay_progress['value'] = 10
+        try:
+            similarity_threshold = float(self.similarity_threshold.get()) / 100.0
+        except (ValueError, AttributeError):
+            similarity_threshold = 0.7
 
-            # Get search term from image analysis or prompt user
-            search_term = self._get_search_term_for_comparison()
-            if not search_term:
-                self.ebay_status.set("eBay image comparison cancelled")
-                self.ebay_progress['value'] = 0
-                return
+        try:
+            max_images = int(self.max_images.get())
+        except (ValueError, AttributeError):
+            max_images = 5
 
-            self.ebay_status.set(f"Searching for sold listings: {search_term}")
-            self.ebay_progress['value'] = 30
+        show_browser = getattr(self, 'show_browser_choice', False)
 
-            # Get configuration settings
-            try:
-                days_back = int(self.ebay_days_back.get())
-            except (ValueError, AttributeError):
-                days_back = 90
+        def update_callback(status, progress):
+            self.ebay_status.set(status)
+            self.ebay_progress['value'] = progress
 
-            try:
-                similarity_threshold = float(self.similarity_threshold.get()) / 100.0  # Convert percentage to decimal
-            except (ValueError, AttributeError):
-                similarity_threshold = 0.7  # Default 70%
-
-            try:
-                max_images = int(self.max_images.get())
-            except (ValueError, AttributeError):
-                max_images = 5  # Default 5 images
-
-            self.ebay_status.set("Analyzing sold listing images...")
-            self.ebay_progress['value'] = 50
-
-            # Use the browser choice made in the main thread
-            show_browser = getattr(self, 'show_browser_choice', False)
-
-            import os
-            from datetime import datetime
-
-            # Create debug output directory
-            debug_dir = os.path.join("debug_images", f"comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-
-            self.ebay_status.set(f"Images will be saved to: {debug_dir}")
-
-            if show_browser:
-                # Use Playwright version with visible browser
-                from sold_listing_matcher import SoldListingMatcher
-                self.ebay_status.set("Initializing visible browser...")
-                matcher = SoldListingMatcher(
-                    headless=False,  # Show browser window
-                    similarity_threshold=similarity_threshold,
-                    debug_output_dir=debug_dir
-                )
-                # Track this matcher for cleanup
-                self._active_playwright_matchers.append(matcher)
-                self.ebay_status.set("Browser ready - starting eBay search...")
-            else:
-                # Use requests-based matcher (faster, hidden)
-                from sold_listing_matcher_requests import SoldListingMatcherRequests
-                matcher = SoldListingMatcherRequests(
-                    similarity_threshold=similarity_threshold,
-                    debug_output_dir=debug_dir
-                )
-
-            try:
-                if show_browser:
-                    # Playwright version needs async handling
-                    import asyncio
-                    print(f"[DEBUG] Using Playwright matcher: {type(matcher)}")
-                    print(f"[DEBUG] Matcher file: {matcher.__class__.__module__}")
-                    print(f"[DEBUG] Feature detector: {type(matcher.feature_detector)}")
-                    print(f"[DEBUG] Image size: {matcher.image_size}")
-
-                    result = asyncio.run(matcher.find_matching_sold_listings(
-                        reference_image_path=str(self.image_analysis_path),
-                        search_term=search_term,
-                        max_results=max_images,
-                        days_back=days_back
-                    ))
-                    print(f"[DEBUG] Result obtained: {type(result)}")
-                    print(f"[DEBUG] Matches found: {result.matches_found}")
-                    if result.matches_found > 0:
-                        print(f"[DEBUG] Best match type: {type(result.best_match)}")
-                        print(f"[DEBUG] Best match similarity: {result.best_match.image_similarity} ({type(result.best_match.image_similarity)})")
-                else:
-                    # Requests version is synchronous
-                    result = matcher.find_matching_sold_listings(
-                        reference_image_path=str(self.image_analysis_path),
-                        search_term=search_term,
-                        max_results=max_images,
-                        days_back=days_back
-                    )
-
-                # Update status to show where images were saved
-                print("[DEBUG] Starting result processing...")
-                if os.path.exists(debug_dir):
-                    print("[DEBUG] Debug directory exists")
-                    image_count = len([f for f in os.listdir(debug_dir) if f.endswith('.jpg')])
-                    print(f"[DEBUG] Image count: {image_count}")
-                    self.ebay_status.set(f"Analysis complete! {image_count} images saved to: {debug_dir}")
-                    print(f"[DEBUG] Images saved to: {os.path.abspath(debug_dir)}")
-
-                    # Show popup to make debug location obvious
-                    import tkinter.messagebox as messagebox
-                    messagebox.showinfo(
-                        "Images Saved",
-                        f"Comparison images have been saved!\n\n"
-                        f"Location: {os.path.abspath(debug_dir)}\n\n"
-                        f"Files saved:\n"
-                        f"• Your reference image\n"
-                        f"• listing_01.jpg to listing_{image_count:02d}.jpg (eBay images)\n\n"
-                        f"Images were saved immediately as they were found!\n"
-                        f"You can inspect these images to see what was compared."
-                    )
-
-            finally:
-                # Handle cleanup for both sync and async versions
-                if show_browser:
-                    # Playwright version has async cleanup
-                    import asyncio
-                    try:
-                        asyncio.run(matcher.cleanup())
-                        # Remove from active matchers list
-                        if matcher in self._active_playwright_matchers:
-                            self._active_playwright_matchers.remove(matcher)
-                    except Exception as cleanup_error:
-                        logging.warning("Error during Playwright cleanup: %s", str(cleanup_error))
-                else:
-                    # Requests version has sync cleanup
-                    try:
-                        matcher.cleanup()
-                    except Exception as cleanup_error:
-                        logging.warning("Error during cleanup: %s", str(cleanup_error))
-
-            self.ebay_status.set("Processing image comparison results...")
-            self.ebay_progress['value'] = 80
-
-            # Convert results to display format
-            print("[DEBUG] Converting results to display format...")
-            try:
-                display_results = self._convert_image_comparison_results(result, search_term)
-                print("[DEBUG] Results converted successfully")
-            except Exception as convert_error:
-                print(f"[DEBUG] Error in result conversion: {convert_error}")
-                raise
-
-            # Display results
+        def display_callback(result):
+            display_results = self._convert_image_comparison_results(result, search_term)
             self._display_ebay_results(display_results)
 
-            self.ebay_progress['value'] = 100
+        def show_message_callback(title, message):
+            from tkinter import messagebox
+            messagebox.showinfo(title, message)
 
-            if result.matches_found > 0:
-                confidence_text = f" ({result.confidence} confidence)" if result.confidence != "error" else ""
-                self.ebay_status.set(f"Image comparison complete: {result.matches_found} matches found{confidence_text}")
-            else:
-                self.ebay_status.set("No visual matches found in sold listings")
-
-        except Exception as e:
-            error_message = str(e)
-
-            # Skip format string errors - they're cosmetic and don't affect functionality
-            if "Cannot specify" in error_message and "with 's'" in error_message:
-                print("[DEBUG] Ignoring cosmetic format string error - functionality worked correctly")
-                return
-
-            # Provide user-friendly error messages
-            if "timeout" in error_message.lower() or "navigation" in error_message.lower():
-                self.ebay_status.set("eBay blocked request - this is normal. Try again in a few minutes.")
-                print("[EBAY IMAGE COMPARISON] eBay blocking detected:", str(e))
-
-                # Show helpful dialog
-                from tkinter import messagebox
-                messagebox.showinfo(
-                    "eBay Access Temporarily Blocked",
-                    "eBay has temporarily blocked automated access. This is normal behavior.\n\n"
-                    "Solutions:\n"
-                    "• Wait 2-5 minutes and try again\n"
-                    "• Try a different search term\n"
-                    "• Check your internet connection\n\n"
-                    "eBay actively blocks automated browsing to protect their servers."
-                )
-            else:
-                self.ebay_status.set("eBay image comparison failed: " + error_message)
-                print("[EBAY IMAGE COMPARISON] Error:", str(e))
-
-            self.ebay_progress['value'] = 0
+        workers.run_ebay_image_comparison_worker(
+            self.image_analysis_path,
+            search_term,
+            days_back,
+            similarity_threshold,
+            max_images,
+            show_browser,
+            update_callback,
+            display_callback,
+            show_message_callback
+        )
 
     def _get_search_term_for_comparison(self):
         """Get search term for image comparison"""
@@ -2040,139 +1665,28 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         return value or 'all'
 
     def _suggest_config_filename(self, config: dict) -> str:
-        keyword = self._slugify(str(config.get('keyword', 'search')))
-
-        # Use category name if available, otherwise use code
-        category_name = config.get('category_name', '')
-        if category_name:
-            category = self._slugify(category_name)
-        else:
-            category = config.get('category')
-            if isinstance(category, list):
-                category = category[0] if category else ''
-            category = self._slugify(str(category or 'all'))
-
-        # Use shop name if available, otherwise use code
-        shop_name = config.get('shop_name', '')
-        if shop_name:
-            shop = self._slugify(shop_name)
-        else:
-            shop_value = config.get('shop', '0')
-            if not shop_value or shop_value.strip() == '':
-                shop_value = '0'
-            shop = self._slugify(str(shop_value))
-
-        return f"{keyword}_{category}_{shop}.json"
+        return utils.suggest_config_filename(config)
 
     def _generate_csv_filename(self, config: dict) -> str:
         """Generate CSV filename based on search parameters"""
-        keyword = self._slugify(str(config.get('keyword', 'search')))
-
-        # Use category name if available, otherwise use code
-        category_name = config.get('category_name')
-        if category_name:
-            category = self._slugify(str(category_name))
-        else:
-            category = config.get('category')
-            if isinstance(category, list):
-                category = category[0] if category else ''
-            category = self._slugify(str(category or 'all'))
-
-        # Use shop name if available, otherwise use code
-        shop_name = config.get('shop_name')
-        if shop_name:
-            shop = self._slugify(str(shop_name))
-        else:
-            # Handle shop with special default to '0'
-            shop_value = config.get('shop', '0')
-            if not shop_value or shop_value.strip() == '':
-                shop_value = '0'
-            shop = self._slugify(str(shop_value))
-
-        return f"{keyword}_{category}_{shop}.csv"
+        return utils.generate_csv_filename(config)
 
     def _find_matching_csv(self, config: dict) -> Optional[Path]:
         """Find existing CSV files that match the search parameters"""
-        results_dir = Path('results')
-        if not results_dir.exists():
-            return None
-
-        # Generate the expected filename with new system
-        expected_filename = self._generate_csv_filename(config)
-        expected_path = results_dir / expected_filename
-
-        if expected_path.exists():
-            print(f"[GUI DEBUG] Found exact CSV match: {expected_path}")
-            return expected_path
-
-        # Get slugified components for searching
-        keyword = self._slugify(str(config.get('keyword', 'search')))
-        category = config.get('category')
-        if isinstance(category, list):
-            category = category[0] if category else ''
-        category = self._slugify(str(category or 'all'))
-
-        # Handle shop with special default to '0'
-        shop_value = config.get('shop', '0')
-        if not shop_value or shop_value.strip() == '':
-            shop_value = '0'
-        shop = self._slugify(str(shop_value))
-
-        # Search for files with same keyword and category but different shop
-        pattern_base = f"{keyword}_{category}_"
-        for csv_file in results_dir.glob('*.csv'):
-            if csv_file.name.startswith(pattern_base):
-                print(f"[GUI DEBUG] Found similar CSV match: {csv_file}")
-                return csv_file
-
-        # Search for files with same keyword but different category/shop
-        pattern_keyword = f"{keyword}_"
-        for csv_file in results_dir.glob('*.csv'):
-            if csv_file.name.startswith(pattern_keyword):
-                print(f"[GUI DEBUG] Found keyword CSV match: {csv_file}")
-                return csv_file
-
-        # BACKWARD COMPATIBILITY: Search using old slugify method (Japanese -> 'all')
-        # This handles cases where Japanese keywords were previously saved as 'all'
-        original_keyword = str(config.get('keyword', 'search')).strip()
-        if not original_keyword.isascii() and original_keyword:
-            print(f"[GUI DEBUG] Trying backward compatibility for non-ASCII keyword")
-
-            # Look for pattern 'all_category_shop' which is how old system handled Japanese
-            old_pattern_exact = f"all_{category}_{shop}.csv"
-            old_path = results_dir / old_pattern_exact
-            if old_path.exists():
-                print(f"[GUI DEBUG] Found backward compatible exact match: {old_path}")
-                return old_path
-
-            # Look for pattern 'all_category_*'
-            old_pattern_base = f"all_{category}_"
-            for csv_file in results_dir.glob('*.csv'):
-                if csv_file.name.startswith(old_pattern_base):
-                    print(f"[GUI DEBUG] Found backward compatible category match: {csv_file}")
-                    return csv_file
-
-            # Look for any file starting with 'all_'
-            for csv_file in results_dir.glob('all_*.csv'):
-                print(f"[GUI DEBUG] Found backward compatible fallback: {csv_file}")
-                return csv_file
-
-        print(f"[GUI DEBUG] No matching CSV found for: {expected_filename}")
-        return None
+        return utils.find_matching_csv(config)
 
     def _save_config_to_path(self, config: dict, path: Path, update_tree: bool = True):
         path.parent.mkdir(parents=True, exist_ok=True)
-        results_dir = Path('results')
-        results_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate flexible CSV filename based on search parameters
+        # Generate paths for CSV and images, but DON'T create folders yet
+        # Folders will be created when scraper actually runs
+        results_dir = Path('results')
         csv_filename = self._generate_csv_filename(config)
         config['csv'] = str(results_dir / csv_filename)
 
         # Auto-generate download_images path based on config filename
         config_stem = path.stem  # Filename without extension
         images_dir = Path('images') / config_stem
-        images_dir.mkdir(parents=True, exist_ok=True)
         config['download_images'] = str(images_dir) + '/'
 
         if hasattr(self, 'csv_path_var'):
@@ -2324,12 +1838,7 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             self.run_queue.put(("cleanup", str(config_path)))
 
     def _schedule_worker(self, config_path: str, schedule_time: str, use_mimic: bool):
-        try:
-            schedule_scraper(config_path, schedule_time, use_mimic=use_mimic)
-        except Exception as exc:
-            self.run_queue.put(("error", f"Schedule failed: {exc}"))
-        finally:
-            self.run_queue.put(("cleanup", config_path))
+        workers.schedule_worker(config_path, schedule_time, use_mimic, self.run_queue)
 
     def _start_thread(self, target, *args):
         if self.run_thread and self.run_thread.is_alive():
@@ -2484,9 +1993,14 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 self.detail_code_map.append(code)
 
     def _on_main_category_selected(self, event=None):
-        code = self._extract_code(self.main_category_var.get())
+        code = utils.extract_code(self.main_category_var.get())
         self._populate_detail_categories(code)
-        self.detail_listbox.selection_clear(0, tk.END)
+
+        # Auto-select the first detail category (the main category itself)
+        if self.detail_listbox.size() > 0:
+            self.detail_listbox.selection_clear(0, tk.END)
+            self.detail_listbox.selection_set(0)
+
         self._update_preview()
 
     def _extract_code(self, label: str | None):
@@ -2511,18 +2025,34 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             self._populate_detail_categories()
             return
 
+        # Select main category
         first_code = categories[0]
-        main_code = self._match_main_code(first_code)
+        main_code = utils.match_main_code(first_code)
         if main_code:
-            label = f"{MANDARAKE_MAIN_CATEGORIES[main_code]['en']} ({main_code})"
-            self.main_category_var.set(label)
+            # Find the exact matching value from the combobox list
+            # This ensures the value matches the dropdown format exactly
+            for code, name in MAIN_CATEGORY_OPTIONS:
+                if code == main_code:
+                    label = f"{name} ({code})"
+                    self.main_category_var.set(label)
+                    break
         else:
             self.main_category_var.set('')
-        self._populate_detail_categories(self._extract_code(self.main_category_var.get()))
 
+        # Populate detail categories based on main category
+        self._populate_detail_categories(utils.extract_code(self.main_category_var.get()))
+
+        # Select detail categories and scroll to first selected
+        first_selected_idx = None
         for idx, code in enumerate(self.detail_code_map):
             if code in categories:
                 self.detail_listbox.selection_set(idx)
+                if first_selected_idx is None:
+                    first_selected_idx = idx
+
+        # Scroll to make the first selected category visible
+        if first_selected_idx is not None:
+            self.detail_listbox.see(first_selected_idx)
 
     def _get_selected_categories(self):
         indices = self.detail_listbox.curselection()
@@ -2863,95 +2393,24 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
     def _download_missing_images_worker(self):
         """Background worker to download missing images"""
-        import requests
-        from io import BytesIO
-
-        # Create images directory from download_dir_var
         download_dir = self.download_dir_var.get().strip()
-        if not download_dir:
-            download_dir = "images"
 
-        images_dir = Path(download_dir)
-        images_dir.mkdir(parents=True, exist_ok=True)
+        def update_callback(message):
+            self.after(0, lambda: self.browserless_status.set(message))
 
-        downloaded = 0
-        skipped = 0
-        failed = 0
+        def save_callback():
+            self._save_updated_csv()
 
-        try:
-            for i, row in enumerate(self.csv_compare_data, 1):
-                local_image = row.get('local_image', '')
-                image_url = row.get('image_url', '')
+        def reload_callback():
+            self.after(0, self.filter_csv_items)
 
-                # Skip if already has local image
-                if local_image and Path(local_image).exists():
-                    skipped += 1
-                    continue
-
-                # Skip if no image URL
-                if not image_url:
-                    skipped += 1
-                    continue
-
-                # Download image
-                try:
-                    self.after(0, lambda i=i, total=len(self.csv_compare_data):
-                              self.browserless_status.set(f"Downloading image {i}/{total}..."))
-
-                    response = requests.get(image_url, timeout=10)
-                    response.raise_for_status()
-
-                    # Determine file extension
-                    content_type = response.headers.get('content-type', '')
-                    if 'jpeg' in content_type or 'jpg' in content_type:
-                        ext = '.jpg'
-                    elif 'png' in content_type:
-                        ext = '.png'
-                    elif 'webp' in content_type:
-                        ext = '.webp'
-                    else:
-                        ext = '.jpg'  # Default
-
-                    # Generate filename from title or index
-                    title = row.get('title', f'item_{i}')
-                    # Clean filename
-                    safe_title = "".join(c for c in title[:50] if c.isalnum() or c in (' ', '_', '-')).strip().replace(' ', '_')
-                    filename = f"{safe_title}_{i}{ext}"
-                    local_path = images_dir / filename
-
-                    # Save image
-                    with open(local_path, 'wb') as f:
-                        f.write(response.content)
-
-                    # Update row with local image path
-                    row['local_image'] = str(local_path)
-                    downloaded += 1
-
-                    print(f"[CSV IMAGES] Downloaded {i}/{len(self.csv_compare_data)}: {local_path.name}")
-
-                except Exception as e:
-                    print(f"[CSV IMAGES] Failed to download image {i}: {e}")
-                    failed += 1
-
-            # Save updated CSV
-            if downloaded > 0:
-                self._save_updated_csv()
-
-            # Update UI
-            summary = f"Downloaded {downloaded} images, {skipped} skipped, {failed} failed"
-            print(f"[CSV IMAGES] {summary}")
-            self.after(0, lambda: self.browserless_status.set(summary))
-            self.after(0, lambda: messagebox.showinfo("Download Complete", summary))
-
-            # Reload CSV to show new images
-            if downloaded > 0:
-                self.after(0, self.filter_csv_items)
-
-        except Exception as e:
-            import traceback
-            print(f"[CSV IMAGES ERROR] {e}")
-            traceback.print_exc()
-            self.after(0, lambda: messagebox.showerror("Download Error", f"Failed: {str(e)}"))
+        workers.download_missing_images_worker(
+            self.csv_compare_data,
+            download_dir,
+            update_callback,
+            save_callback,
+            reload_callback
+        )
 
     def _save_updated_csv(self):
         """Save the updated CSV with new local_image paths"""
@@ -3153,6 +2612,33 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                        stretch=info['stretch'],
                        anchor=info['anchor'])
 
+    def _global_space_handler(self, event):
+        """Global space key handler to prevent treeview selection toggle when typing.
+
+        When an Entry field has focus, we want space to insert a space character.
+        When a Treeview/Listbox has focus, we want to prevent selection toggle.
+        """
+        focus_widget = self.focus_get()
+
+        # If an Entry widget has focus, allow space to work normally
+        if isinstance(focus_widget, (tk.Entry, ttk.Entry)):
+            return None  # Let space work in entry
+
+        # If a Treeview or Listbox has focus, block space to prevent toggle
+        if isinstance(focus_widget, (ttk.Treeview, tk.Listbox)):
+            return "break"  # Prevent selection toggle
+
+        # For any other widget, allow default behavior
+        return None
+
+    def _deselect_if_empty(self, event, tree):
+        """Deselect tree items if clicking on empty area"""
+        # Check if click is on an item
+        item = tree.identify_row(event.y)
+        if not item:
+            # Clicked on empty area, deselect all
+            tree.selection_remove(tree.selection())
+
     def _show_config_tree_menu(self, event):
         """Show context menu on config tree"""
         # Select the item under the cursor
@@ -3216,7 +2702,7 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             print(f"[CONFIG MENU] Error loading CSV: {e}")
 
     def _auto_save_config(self, *args):
-        """Auto-save the current config when fields change"""
+        """Auto-save the current config when fields change (with debounce)"""
         # Only auto-save if we have a loaded config
         if not hasattr(self, 'last_saved_path') or not self.last_saved_path:
             return
@@ -3229,11 +2715,56 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         if getattr(self, '_loading_config', False):
             return
 
+        # Cancel any pending auto-save
+        if hasattr(self, '_auto_save_timer') and self._auto_save_timer:
+            self.after_cancel(self._auto_save_timer)
+
+        # Schedule auto-save after 500ms of inactivity (debounce)
+        self._auto_save_timer = self.after(500, self._do_auto_save)
+
+    def _do_auto_save(self):
+        """Actually perform the auto-save (called after debounce delay)"""
         try:
             config = self._collect_config()
             if config:
                 # Save the current selection before updating tree
                 current_selection = self.config_tree.selection()
+
+                # Check if filename should be updated based on config changes
+                # Strip trailing spaces from keyword for filename generation
+                keyword_for_filename = config.get('keyword', '').rstrip()
+                filename_config = config.copy()
+                filename_config['keyword'] = keyword_for_filename
+
+                suggested_filename = utils.suggest_config_filename(filename_config)
+                current_filename = self.last_saved_path.name
+
+                # Track the old path before renaming
+                old_path = self.last_saved_path
+
+                # If the suggested filename is different, rename the file
+                if suggested_filename != current_filename:
+                    new_path = self.last_saved_path.parent / suggested_filename
+
+                    # Only rename if new path doesn't exist or is the same file
+                    if not new_path.exists() or new_path == self.last_saved_path:
+                        try:
+                            # Find the tree item with the old path and update its mapping
+                            for item in self.config_tree.get_children():
+                                if self.config_paths.get(item) == old_path:
+                                    # Update the path mapping to the new path
+                                    self.config_paths[item] = new_path
+                                    break
+
+                            # Delete old file if renaming
+                            if new_path != self.last_saved_path and self.last_saved_path.exists():
+                                self.last_saved_path.unlink()
+
+                            # Update the path
+                            self.last_saved_path = new_path
+                            # Silently renamed (no console spam)
+                        except Exception as e:
+                            print(f"[AUTO-RENAME] Error renaming: {e}")
 
                 self._save_config_to_path(config, self.last_saved_path, update_tree=True)
 
@@ -3246,7 +2777,7 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                             self.config_tree.see(item)
                             break
 
-                print(f"[AUTO-SAVE] Saved changes to {self.last_saved_path.name}")
+                # Silently saved (no console spam)
         except Exception as e:
             print(f"[AUTO-SAVE] Error: {e}")
 
@@ -3275,31 +2806,128 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             self._loading_config = False
             messagebox.showerror('Error', f'Failed to load config: {exc}')
 
+    def _new_config(self):
+        """Create a new config from current form values"""
+        import time
+
+        # Check if there's a keyword entered
+        has_keyword = bool(self.keyword_var.get().strip())
+
+        if has_keyword:
+            # Collect current form values
+            config = self._collect_config()
+            if not config:
+                # If collection failed, use minimal defaults
+                config = {
+                    'keyword': self.keyword_var.get().strip(),
+                    'hide_sold_out': False,
+                    'language': 'en',
+                    'fast': False,
+                    'resume': True,
+                    'debug': False,
+                    'client_id': '',
+                    'client_secret': '',
+                }
+        else:
+            # No keyword - create empty config
+            config = {
+                'keyword': '',
+                'hide_sold_out': False,
+                'language': 'en',
+                'fast': False,
+                'resume': True,
+                'debug': False,
+                'client_id': '',
+                'client_secret': '',
+            }
+
+        # Generate filename based on current values
+        timestamp = int(time.time())
+        configs_dir = Path('configs')
+        configs_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use auto-generated filename based on settings, or timestamp if no keyword
+        if has_keyword:
+            suggested_filename = utils.suggest_config_filename(config)
+            path = configs_dir / suggested_filename
+            # If filename already exists, add timestamp
+            if path.exists():
+                keyword_part = config.get('keyword', 'new').replace(' ', '_') or 'new'
+                filename = f"{keyword_part}_{timestamp}.json"
+                path = configs_dir / filename
+        else:
+            # No keyword - use timestamp-based filename
+            filename = f'new_config_{timestamp}.json'
+            path = configs_dir / filename
+
+        # Save the config
+        self._save_config_to_path(config, path, update_tree=False)
+
+        # Add to tree at the end with correct values
+        keyword = config.get('keyword', '')
+        category = config.get('category_name', config.get('category', ''))
+        shop = config.get('shop_name', config.get('shop', ''))
+        hide = 'Yes' if config.get('hide_sold_out') else 'No'
+        results_per_page = config.get('results_per_page', 48)
+        max_pages = config.get('max_pages', '')
+        recent_hours = config.get('recent_hours')
+        timeframe = self._label_for_recent_hours(recent_hours) if recent_hours else ''
+        language = config.get('language', 'en')
+
+        values = (path.name, keyword, category, shop, hide, results_per_page, max_pages, timeframe, language)
+        item = self.config_tree.insert('', tk.END, values=values)
+        self.config_paths[item] = path
+
+        # Select the new item
+        self.config_tree.selection_set(item)
+        self.config_tree.see(item)
+
+        # Set this as the current config for auto-save
+        self.last_saved_path = path
+
+        # Set status
+        self.status_var.set(f"New config created: {path.name}")
+
+        # Focus keyword entry for immediate typing
+        self.keyword_entry.focus()
+
     def _delete_selected_config(self):
-        """Delete the selected config file"""
+        """Delete the selected config file(s)"""
         selection = self.config_tree.selection()
         if not selection:
             messagebox.showinfo("No Selection", "Please select a config file to delete")
             return
 
-        item = selection[0]
-        path = self.config_paths.get(item)
-        if not path:
+        # Get all selected paths
+        paths = [self.config_paths.get(item) for item in selection if self.config_paths.get(item)]
+        if not paths:
             return
 
         # Confirm deletion
-        response = messagebox.askyesno(
-            "Confirm Delete",
-            f"Are you sure you want to delete:\n{path.name}?"
-        )
+        if len(paths) == 1:
+            message = f"Are you sure you want to delete:\n{paths[0].name}?"
+        else:
+            file_list = '\n'.join(p.name for p in paths)
+            message = f"Are you sure you want to delete {len(paths)} configs?\n\n{file_list}"
+
+        response = messagebox.askyesno("Confirm Delete", message)
 
         if response:
-            try:
-                path.unlink()  # Delete the file
-                self._load_config_tree()  # Reload the tree
-                self.status_var.set(f"Deleted: {path.name}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to delete file: {e}")
+            deleted_count = 0
+            errors = []
+            for path in paths:
+                try:
+                    path.unlink()  # Delete the file
+                    deleted_count += 1
+                except Exception as e:
+                    errors.append(f"{path.name}: {e}")
+
+            self._load_config_tree()  # Reload the tree
+
+            if errors:
+                messagebox.showerror("Errors", f"Failed to delete:\n" + '\n'.join(errors))
+
+            self.status_var.set(f"Deleted {deleted_count} config(s)")
 
     def _move_config(self, direction):
         """Move selected config up (-1) or down (1) in the list"""
@@ -3387,10 +3015,22 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         matched = False
         for code, name in STORE_OPTIONS:
             label = f"{name} ({code})"
-            if shop_value == code or shop_value == label:
+            # Match by code (primary) or by full label
+            if str(shop_value) == str(code) or shop_value == label:
                 self.shop_var.set(label)
                 matched = True
                 break
+
+        # If not matched, try matching by name from shop_name field
+        if not matched and config.get('shop_name'):
+            shop_name = config.get('shop_name')
+            for code, name in STORE_OPTIONS:
+                label = f"{name} ({code})"
+                if shop_name == name or shop_name == label:
+                    self.shop_var.set(label)
+                    matched = True
+                    break
+
         if not matched:
             if shop_value:
                 self.shop_var.set('Custom...')
@@ -3476,316 +3116,86 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
     def _run_scrapy_text_search_worker(self):
         """Worker method for Scrapy text-only search (runs in background thread)"""
-        try:
-            from ebay_scrapy_search import run_ebay_scrapy_search
+        query = self.browserless_query_var.get().strip()
+        max_results = int(self.browserless_max_results.get())
 
-            query = self.browserless_query_var.get().strip()
-            max_results = int(self.browserless_max_results.get())
+        def update_callback(message):
+            self.after(0, lambda: self.browserless_status.set(message))
 
-            print(f"[SCRAPY SEARCH] Starting search for: {query}")
-            print(f"[SCRAPY SEARCH] Max results: {max_results}")
-
-            # Run Scrapy spider
-            scrapy_results = run_ebay_scrapy_search(
-                query=query,
-                max_results=max_results,
-                sold_listings=True
-            )
-
-            if not scrapy_results:
-                self.after(0, lambda: messagebox.showinfo("No Results", "No eBay listings found"))
-                return
-
-            print(f"[SCRAPY SEARCH] Found {len(scrapy_results)} results")
-
-            # Convert to display format (no similarity since no image comparison)
-            results = []
-            for item in scrapy_results:
-                results.append({
-                    'title': item.get('product_title', 'N/A'),
-                    'price': item.get('current_price', 'N/A'),
-                    'shipping': item.get('shipping_cost', 'N/A'),
-                    'sold_date': item.get('sold_date', 'N/A'),
-                    'similarity': '-',  # No comparison
-                    'url': item.get('product_url', ''),
-                    'image_url': item.get('main_image', '')
-                })
-
-            # Update UI with results
+        def display_callback(results):
             self.after(0, lambda: self._display_browserless_results(results))
-            self.after(0, lambda: self.browserless_status.set(f"Found {len(results)} eBay sold listings"))
-
-        except Exception as e:
-            import traceback
-            print(f"[SCRAPY SEARCH ERROR] {e}")
-            traceback.print_exc()
-            self.after(0, lambda: messagebox.showerror("Search Error", f"Failed to search eBay: {str(e)}"))
-        finally:
             self.after(0, self.browserless_progress.stop)
+
+        def show_message_callback(title, message):
+            self.after(0, lambda: messagebox.showinfo(title, message))
+            self.after(0, self.browserless_progress.stop)
+
+        workers.run_scrapy_text_search_worker(
+            query, max_results,
+            update_callback,
+            display_callback,
+            show_message_callback
+        )
 
     def _run_scrapy_search_with_compare_worker(self):
         """Worker method for Scrapy search WITH image comparison (runs in background thread)"""
-        try:
-            from ebay_scrapy_search import run_ebay_scrapy_search
-            import cv2
-            import numpy as np
+        query = self.browserless_query_var.get().strip()
+        max_results = int(self.browserless_max_results.get())
+        max_comparisons_str = self.browserless_max_comparisons.get()
+        max_comparisons = None if max_comparisons_str == "MAX" else int(max_comparisons_str)
 
-            query = self.browserless_query_var.get().strip()
-            max_results = int(self.browserless_max_results.get())
-            max_comparisons_str = self.browserless_max_comparisons.get()
-            max_comparisons = None if max_comparisons_str == "MAX" else int(max_comparisons_str)
+        def update_callback(message):
+            self.after(0, lambda: self.browserless_status.set(message))
 
-            print(f"[SCRAPY COMPARE] Starting search for: {query}")
-            print(f"[SCRAPY COMPARE] Max results: {max_results}")
-            print(f"[SCRAPY COMPARE] Max comparisons: {max_comparisons or 'ALL'}")
-            print(f"[SCRAPY COMPARE] Reference image: {self.browserless_image_path}")
-
-            # Run Scrapy spider
-            scrapy_results = run_ebay_scrapy_search(
-                query=query,
-                max_results=max_results,
-                sold_listings=True
-            )
-
-            if not scrapy_results:
-                self.after(0, lambda: messagebox.showinfo("No Results", "No eBay listings found"))
-                return
-
-            print(f"[SCRAPY COMPARE] Found {len(scrapy_results)} results, comparing images...")
-
-            # Create debug folder
-            debug_folder = self._create_debug_folder(query)
-
-            # Load reference image
-            ref_image = cv2.imread(str(self.browserless_image_path))
-            if ref_image is None:
-                raise Exception(f"Could not load reference image: {self.browserless_image_path}")
-
-            # Save reference image to debug folder
-            ref_debug_path = debug_folder / f"REF_selected_image.jpg"
-            cv2.imwrite(str(ref_debug_path), ref_image)
-
-            # Determine how many to compare
-            items_to_compare = scrapy_results if max_comparisons is None else scrapy_results[:max_comparisons]
-
-            # Simple image comparison using template matching
-            results = []
-            for i, item in enumerate(items_to_compare):
-                # Download and compare image
-                image_url = item.get('main_image', '')
-                similarity = 0.0
-
-                if image_url:
-                    try:
-                        import requests
-                        response = requests.get(image_url, timeout=5)
-                        if response.status_code == 200:
-                            img_array = np.frombuffer(response.content, np.uint8)
-                            ebay_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
-                            if ebay_img is not None:
-                                # Save eBay image to debug folder
-                                ebay_title_safe = "".join(c for c in item.get('product_title', 'unknown')[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
-                                ebay_debug_path = debug_folder / f"ebay_{i+1:02d}_{ebay_title_safe}.jpg"
-                                cv2.imwrite(str(ebay_debug_path), ebay_img)
-
-                                # Use shared comparison method
-                                similarity = self._compare_images(ref_image, ebay_img)
-                    except Exception as e:
-                        print(f"[SCRAPY COMPARE] Error comparing image {i+1}: {e}")
-
-                results.append({
-                    'title': item.get('product_title', 'N/A'),
-                    'price': item.get('current_price', 'N/A'),
-                    'shipping': item.get('shipping_cost', 'N/A'),
-                    'sold_date': item.get('sold_date', 'N/A'),
-                    'similarity': f"{similarity:.1f}%" if similarity > 0 else '-',
-                    'url': item.get('product_url', ''),
-                    'image_url': image_url
-                })
-
-            # Sort by similarity (highest first)
-            results.sort(key=lambda x: float(x['similarity'].replace('%', '')) if x['similarity'] != '-' else 0, reverse=True)
-
-            # Update UI with results
+        def display_callback(results):
             self.after(0, lambda: self._display_browserless_results(results))
-            self.after(0, lambda: self.browserless_status.set(f"Found {len(results)} results, compared {len(items_to_compare)} images"))
-
-        except Exception as e:
-            import traceback
-            print(f"[SCRAPY COMPARE ERROR] {e}")
-            traceback.print_exc()
-            self.after(0, lambda: messagebox.showerror("Search Error", f"Failed to search/compare: {str(e)}"))
-        finally:
             self.after(0, self.browserless_progress.stop)
+
+        def show_message_callback(title, message):
+            self.after(0, lambda: messagebox.showinfo(title, message))
+            self.after(0, self.browserless_progress.stop)
+
+        def create_debug_folder_callback(query):
+            return self._create_debug_folder(query)
+
+        workers.run_scrapy_search_with_compare_worker(
+            query, max_results, max_comparisons,
+            self.browserless_image_path,
+            update_callback,
+            display_callback,
+            show_message_callback,
+            create_debug_folder_callback
+        )
 
     def _run_cached_compare_worker(self):
         """Worker method to compare reference image with CACHED eBay results (State 1)"""
-        try:
-            import cv2
-            import numpy as np
+        query = self.browserless_query_var.get().strip()
+        max_comparisons_str = self.browserless_max_comparisons.get()
+        max_comparisons = None if max_comparisons_str == "MAX" else int(max_comparisons_str)
 
-            query = self.browserless_query_var.get().strip()
-            max_comparisons_str = self.browserless_max_comparisons.get()
-            max_comparisons = None if max_comparisons_str == "MAX" else int(max_comparisons_str)
+        def update_callback(message):
+            self.after(0, lambda: self.browserless_status.set(message))
 
-            print(f"[CACHED COMPARE] Using cached results for: {query}")
-            print(f"[CACHED COMPARE] Cached results count: {len(self.browserless_results_data)}")
-            print(f"[CACHED COMPARE] Max comparisons: {max_comparisons or 'ALL'}")
-            print(f"[CACHED COMPARE] Reference image: {self.browserless_image_path}")
-
-            # Create debug folder
-            debug_folder = self._create_debug_folder(query)
-
-            # Load reference image
-            ref_image = cv2.imread(str(self.browserless_image_path))
-            if ref_image is None:
-                raise Exception(f"Could not load reference image: {self.browserless_image_path}")
-
-            # Save reference image to debug folder
-            ref_debug_path = debug_folder / f"REF_selected_image.jpg"
-            cv2.imwrite(str(ref_debug_path), ref_image)
-
-            # Determine how many to compare
-            items_to_compare = self.browserless_results_data if max_comparisons is None else self.browserless_results_data[:max_comparisons]
-
-            # Compare images with cached results
-            results = []
-            for i, item in enumerate(items_to_compare):
-                # Download and compare image
-                image_url = item.get('image_url', '')
-                similarity = 0.0
-
-                if image_url:
-                    try:
-                        import requests
-                        response = requests.get(image_url, timeout=5)
-                        if response.status_code == 200:
-                            img_array = np.frombuffer(response.content, np.uint8)
-                            ebay_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
-                            if ebay_img is not None:
-                                # Save eBay image to debug folder
-                                title = item.get('title', 'unknown')
-                                ebay_title_safe = "".join(c for c in title[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
-                                ebay_debug_path = debug_folder / f"ebay_{i+1:02d}_{ebay_title_safe}.jpg"
-                                cv2.imwrite(str(ebay_debug_path), ebay_img)
-
-                                # Use shared comparison method
-                                similarity = self._compare_images(ref_image, ebay_img)
-                    except Exception as e:
-                        print(f"[CACHED COMPARE] Error comparing image {i+1}: {e}")
-
-                # Keep all fields from cached result, but update similarity
-                results.append({
-                    'title': item.get('title', 'N/A'),
-                    'price': item.get('price', 'N/A'),
-                    'shipping': item.get('shipping', 'N/A'),
-                    'sold_date': item.get('sold_date', 'N/A'),
-                    'similarity': f"{similarity:.1f}%" if similarity > 0 else '-',
-                    'url': item.get('url', ''),
-                    'image_url': image_url
-                })
-
-            # Sort by similarity (highest first)
-            results.sort(key=lambda x: float(x['similarity'].replace('%', '')) if x['similarity'] != '-' else 0, reverse=True)
-
-            # Update UI with results
+        def display_callback(results):
             self.after(0, lambda: self._display_browserless_results(results))
-            self.after(0, lambda: self.browserless_status.set(f"Compared {len(items_to_compare)} cached results"))
-
-        except Exception as e:
-            import traceback
-            print(f"[CACHED COMPARE ERROR] {e}")
-            traceback.print_exc()
-            self.after(0, lambda: messagebox.showerror("Compare Error", f"Failed to compare cached results: {str(e)}"))
-        finally:
             self.after(0, self.browserless_progress.stop)
 
-    def _run_browserless_search_worker_OLD(self):
-        """OLD Worker method - DEPRECATED"""
-        try:
-            import asyncio
-            from sold_listing_matcher import match_product_with_sold_listings
+        def show_message_callback(title, message):
+            self.after(0, lambda: messagebox.showerror(title, message))
+            self.after(0, self.browserless_progress.stop)
 
-            query = self.browserless_query_var.get().strip()
-            max_results = int(self.browserless_max_results.get())
+        def create_debug_folder_callback(query):
+            return self._create_debug_folder(query)
 
-            print(f"[OLD BROWSERLESS SEARCH] Starting search for: {query}")
-            print(f"[OLD BROWSERLESS SEARCH] Max results: {max_results}")
-            print(f"[OLD BROWSERLESS SEARCH] Reference image: {self.browserless_image_path}")
-
-            # Run the async matcher function
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-            try:
-                match_result = loop.run_until_complete(
-                    match_product_with_sold_listings(
-                        reference_image_path=str(self.browserless_image_path),
-                        search_term=query,
-                        headless=True,  # Use headless mode for background operation
-                        max_results=max_results
-                    )
-                )
-
-                print(f"[OLD BROWSERLESS SEARCH] Found {match_result.matches_found} matches")
-
-                # Convert match results to display format
-                results = []
-
-                for listing in match_result.all_matches:
-                    # Clean and validate the eBay URL
-                    clean_url = self._clean_ebay_url(listing.listing_url)
-
-                    # Format price with currency
-                    if listing.price > 0:
-                        if listing.currency == 'USD':
-                            price_display = f"${listing.price:.2f}"
-                        elif listing.currency == 'GBP':
-                            price_display = f"£{listing.price:.2f}"
-                        elif listing.currency == 'EUR':
-                            price_display = f"€{listing.price:.2f}"
-                        else:
-                            price_display = f"{listing.currency} {listing.price:.2f}"
-                    else:
-                        price_display = 'Price not found'
-
-                    # Debug logging for title verification
-                    print(f"[BROWSERLESS SEARCH] Item title: {listing.title[:80]}...")
-                    print(f"[BROWSERLESS SEARCH] Item price: {price_display}")
-
-                    results.append({
-                        'title': listing.title,
-                        'price': price_display,
-                        'similarity': f"{listing.image_similarity:.1f}%",
-                        'images': '1',  # Each listing has one image
-                        'url': clean_url
-                    })
-
-                # Create summary for status area instead of treeview
-                if match_result.matches_found > 0:
-                    summary_text = f"Found {match_result.matches_found} matches | Avg Price: ${match_result.average_price:.2f} | Range: ${match_result.price_range[0]:.2f}-${match_result.price_range[1]:.2f} | Confidence: {match_result.confidence}"
-                    self.run_queue.put(("browserless_status", summary_text))
-                else:
-                    self.run_queue.put(("browserless_status", "No matches found"))
-
-                # Update UI with results (without summary row)
-                self.browserless_results_data = results
-                self.run_queue.put(("browserless_results", results))
-
-            finally:
-                loop.close()
-
-        except Exception as e:
-            print(f"[BROWSERLESS SEARCH] Error: {e}")
-            import traceback
-            traceback.print_exc()
-            self.run_queue.put(("error", f"Search failed: {str(e)}"))
-
-        finally:
-            # Stop progress bar
-            self.run_queue.put(("browserless_progress_stop", ""))
+        workers.run_cached_compare_worker(
+            query, max_comparisons,
+            self.browserless_image_path,
+            self.browserless_results_data,
+            update_callback,
+            display_callback,
+            show_message_callback,
+            create_debug_folder_callback
+        )
 
     def clear_browserless_results(self):
         """Clear browserless search results"""
@@ -3879,56 +3289,22 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
     def _load_csv_thumbnails_worker(self, filtered_items):
         """Background worker to load CSV thumbnails without blocking UI"""
-        print(f"[CSV THUMBNAILS] Loading thumbnails for {len(filtered_items)} items in background...")
-
-        for i, row in enumerate(filtered_items, 1):
-            local_image_path = row.get('local_image', '')
-            image_url = row.get('image_url', '')
-            photo = None
-
-            # Try local image first (fast)
-            if local_image_path and Path(local_image_path).exists():
+        def update_image_callback(item_id, img):
+            def update_image():
                 try:
-                    pil_img = Image.open(local_image_path)
-                    pil_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
-
-                    # Add light blue border if item is NEW
-                    item_id = str(i)
-                    if item_id in self.csv_new_items:
-                        from PIL import ImageOps
-                        pil_img = ImageOps.expand(pil_img, border=3, fill='#87CEEB')  # Light blue border
-
-                    photo = ImageTk.PhotoImage(pil_img)
+                    if item_id in [self.csv_items_tree.item(child)['text'] or child for child in self.csv_items_tree.get_children()]:
+                        self.csv_items_tree.item(item_id, image=img, text='')
+                        self.csv_images[item_id] = img
                 except Exception as e:
-                    print(f"[CSV THUMBNAILS] Failed to load local thumbnail {i}: {e}")
+                    print(f"[CSV THUMBNAILS] Error updating image for {item_id}: {e}")
+            self.after(0, update_image)
 
-            # Skip web download to keep it fast - only use local images
-            # If you want web images, uncomment below but it will be slower:
-            # if not photo and image_url:
-            #     try:
-            #         import requests
-            #         from io import BytesIO
-            #         response = requests.get(image_url, timeout=2)
-            #         response.raise_for_status()
-            #         pil_img = Image.open(BytesIO(response.content))
-            #         pil_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
-            #         photo = ImageTk.PhotoImage(pil_img)
-            #     except Exception as e:
-            #         print(f"[CSV THUMBNAILS] Failed to download thumbnail {i}: {e}")
-
-            # Update treeview with image (must be done in main thread)
-            if photo:
-                def update_image(item_id=str(i), img=photo):
-                    try:
-                        if item_id in [self.csv_items_tree.item(child)['text'] or child for child in self.csv_items_tree.get_children()]:
-                            self.csv_items_tree.item(item_id, image=img, text='')
-                            self.csv_images[item_id] = img
-                    except Exception as e:
-                        print(f"[CSV THUMBNAILS] Error updating image for {item_id}: {e}")
-
-                self.after(0, update_image)
-
-        print(f"[CSV THUMBNAILS] Finished loading {len(self.csv_images)} thumbnails")
+        workers.load_csv_thumbnails_worker(
+            filtered_items,
+            self.csv_new_items,
+            self.csv_images,
+            update_image_callback
+        )
 
     def _on_csv_filter_changed(self):
         """Handle CSV filter changes - filter items and save setting"""
@@ -4303,385 +3679,73 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
     def _compare_csv_items_worker(self, items):
         """Worker to compare CSV items with eBay - OPTIMIZED with caching (runs in background thread)"""
-        try:
-            from ebay_scrapy_search import run_ebay_scrapy_search
-            import cv2
-            import numpy as np
-            import requests
-            from datetime import datetime
-            import os
+        max_results = int(self.browserless_max_results.get())
+        search_query = self.browserless_query_var.get().strip()
 
-            max_results = int(self.browserless_max_results.get())
+        def update_callback(message):
+            self.after(0, lambda: self.browserless_status.set(message))
 
-            print(f"[CSV BATCH] Comparing {len(items)} CSV items...")
-
-            # Check if we have cached eBay results in the treeview
-            has_cached_results = hasattr(self, 'browserless_results_data') and self.browserless_results_data and len(self.browserless_results_data) > 0
-
-            if has_cached_results:
-                # Use cached results from treeview
-                ebay_results = self.browserless_results_data
-                print(f"[CSV BATCH] Using {len(ebay_results)} cached eBay results from treeview")
-                self.after(0, lambda: self.browserless_status.set(f"Using {len(ebay_results)} cached eBay results..."))
-
-                # Create debug folder
-                search_query = self.browserless_query_var.get().strip() or "cached_search"
-                debug_folder = self._create_debug_folder(search_query)
-            else:
-                # No cached results, need to make a new search
-                # Use the search query from the browserless_query_var (user can edit it)
-                search_query = self.browserless_query_var.get().strip()
-
-                if not search_query:
-                    # Fallback to building from first item
-                    title = items[0].get('title', '') if items else ''
-                    category = items[0].get('category', '') if items else ''
-                    core_words = ' '.join(title.split()[:3])
-                    category_keyword = category.split()[0] if category else ''
-                    search_query = f"{core_words} {category_keyword}".strip()
-
-                if not search_query:
-                    self.after(0, lambda: messagebox.showerror("Error", "Could not build search query"))
-                    return
-
-                print(f"[CSV BATCH] Using search query: '{search_query}'")
-                self.after(0, lambda: self.browserless_status.set(f"Searching eBay for '{search_query}'..."))
-
-                # Create debug folder
-                debug_folder = self._create_debug_folder(search_query)
-
-                # **ONE eBay search for all items**
-                ebay_results = run_ebay_scrapy_search(
-                    query=search_query,
-                    max_results=max_results,
-                    sold_listings=True
-                )
-
-                if not ebay_results:
-                    self.after(0, lambda: messagebox.showinfo("No Results", "No eBay listings found"))
-                    return
-
-                print(f"[CSV BATCH] Found {len(ebay_results)} eBay listings")
-
-            self.after(0, lambda: self.browserless_status.set(f"Downloading and caching {len(ebay_results)} eBay images..."))
-
-            # **Cache all eBay images at once AND save to debug folder**
-            ebay_image_cache = {}
-            for idx, ebay_item in enumerate(ebay_results):
-                # Support both 'main_image' (from search) and 'image_url' (from cached browserless_results_data)
-                ebay_image_url = ebay_item.get('main_image') or ebay_item.get('image_url', '')
-                if ebay_image_url and ebay_image_url not in ebay_image_cache:
-                    try:
-                        response = requests.get(ebay_image_url, timeout=5)
-                        if response.status_code == 200:
-                            img_array = np.frombuffer(response.content, np.uint8)
-                            ebay_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-                            if ebay_img is not None:
-                                ebay_image_cache[ebay_image_url] = ebay_img
-
-                                # Save debug image
-                                ebay_title_safe = "".join(c for c in ebay_item.get('product_title', 'unknown')[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
-                                debug_path = debug_folder / f"ebay_{idx+1:02d}_{ebay_title_safe}.jpg"
-                                cv2.imwrite(str(debug_path), ebay_img)
-                                print(f"[CSV BATCH] Cached & saved eBay image {idx+1}/{len(ebay_results)}: {debug_path.name}")
-                    except Exception as e:
-                        print(f"[CSV BATCH] Error downloading eBay image {idx+1}: {e}")
-
-            print(f"[CSV BATCH] Cached {len(ebay_image_cache)} eBay images")
-
-            # **Now compare each CSV item with cached eBay images**
-            comparison_results = []
-
-            for item_idx, item in enumerate(items, 1):
-                try:
-                    self.after(0, lambda i=item_idx: self.browserless_status.set(f"Comparing CSV item {i}/{len(items)}..."))
-
-                    csv_title = item.get('title', 'unknown')
-                    print(f"\n[CSV BATCH] === Processing CSV item {item_idx}/{len(items)}: {csv_title[:50]} ===")
-
-                    # Load CSV item image
-                    item_image_url = item.get('image_url', '')
-                    ref_image = None
-
-                    if item_image_url:
-                        try:
-                            response = requests.get(item_image_url, timeout=5)
-                            if response.status_code == 200:
-                                img_array = np.frombuffer(response.content, np.uint8)
-                                ref_image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
-                                if ref_image is not None:
-                                    # Save CSV reference image to debug folder
-                                    csv_title_safe = "".join(c for c in csv_title[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
-                                    csv_debug_path = debug_folder / f"CSV_{item_idx:02d}_REF_{csv_title_safe}.jpg"
-                                    cv2.imwrite(str(csv_debug_path), ref_image)
-                                    print(f"[CSV BATCH] Saved CSV reference image: {csv_debug_path.name}")
-                                    print(f"[CSV BATCH] CSV image shape: {ref_image.shape}")
-                        except Exception as e:
-                            print(f"[CSV BATCH] Error loading CSV item {item_idx} image: {e}")
-
-                    if ref_image is None:
-                        print(f"[CSV BATCH] WARNING: No reference image for CSV item {item_idx}, skipping comparisons")
-                        continue
-
-                    # Compare with all cached eBay images
-                    item_comparisons = []
-                    for ebay_idx, ebay_item in enumerate(ebay_results):
-                        similarity = 0.0
-
-                        # Support both 'main_image' (from search) and 'image_url' (from cached browserless_results_data)
-                        ebay_image_url = ebay_item.get('main_image') or ebay_item.get('image_url', '')
-                        ebay_img = ebay_image_cache.get(ebay_image_url)
-
-                        if ebay_img is not None:
-                            try:
-                                # Use shared comparison method
-                                similarity = self._compare_images(ref_image, ebay_img)
-                                item_comparisons.append((similarity, ebay_idx, ebay_item.get('product_title', 'unknown')[:50]))
-
-                            except Exception as e:
-                                print(f"[CSV BATCH] Error comparing with eBay item {ebay_idx+1}: {e}")
-
-                    # Sort by similarity and show top 5
-                    item_comparisons.sort(reverse=True)
-                    print(f"[CSV BATCH] Top 5 matches for '{csv_title[:40]}':")
-                    for rank, (sim, idx, title) in enumerate(item_comparisons[:5], 1):
-                        print(f"  {rank}. {sim:.1f}% - {title}")
-
-                    # Add all comparisons to results
-                    for similarity, ebay_idx, _ in item_comparisons:
-                        ebay_item = ebay_results[ebay_idx]
-
-                        # Calculate profit margin
-                        mandarake_price_text = item.get('price_text', item.get('price', '0'))
-                        mandarake_price = self._extract_price(mandarake_price_text)
-
-                        ebay_price_text = ebay_item.get('current_price', '0')
-                        ebay_price = self._extract_price(ebay_price_text)
-
-                        shipping_text = ebay_item.get('shipping_cost', '0')
-                        shipping_cost = self._extract_price(shipping_text)
-
-                        # Profit % = ((eBay Price + Shipping) / (Mandarake Price * Exchange Rate) - 1) * 100
-                        mandarake_price_usd = mandarake_price / self.usd_jpy_rate if self.usd_jpy_rate > 0 else 0
-                        total_cost_usd = ebay_price + shipping_cost
-                        profit_margin = ((total_cost_usd / mandarake_price_usd - 1) * 100) if mandarake_price_usd > 0 else 0
-
-                        comparison_results.append({
-                            'thumbnail': ebay_item.get('main_image') or ebay_item.get('image_url', ''),
-                            'ebay_title': ebay_item.get('product_title') or ebay_item.get('title', 'N/A'),
-                            'mandarake_title': item.get('title', 'N/A'),
-                            'mandarake_price': f"¥{mandarake_price:,.0f}",
-                            'ebay_price': ebay_price_text,
-                            'shipping': shipping_text,
-                            'sold_date': ebay_item.get('sold_date', ''),
-                            'similarity': similarity,  # Keep as number for sorting
-                            'similarity_display': f"{similarity:.1f}%" if similarity > 0 else '-',
-                            'profit_margin': profit_margin,  # Keep as number for sorting
-                            'profit_display': f"{profit_margin:.1f}%",
-                            'mandarake_link': item.get('product_url', ''),
-                            'ebay_link': ebay_item.get('product_url') or ebay_item.get('url', '')
-                        })
-
-                except Exception as e:
-                    print(f"[CSV BATCH] Error processing CSV item {item_idx}: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    continue
-
-            # Sort by similarity (highest first)
-            comparison_results.sort(key=lambda x: x['similarity'], reverse=True)
-
-            print(f"\n[CSV BATCH] ========================================")
-            print(f"[CSV BATCH] Generated {len(comparison_results)} comparison results")
-            print(f"[CSV BATCH] Debug images saved to: {debug_folder.absolute()}")
-            print(f"[CSV BATCH] - {len(ebay_image_cache)} eBay images")
-            print(f"[CSV BATCH] - {len(items)} CSV reference images")
-            print(f"[CSV BATCH] ========================================\n")
-
-            # Store unfiltered results for filtering
+        def display_callback(comparison_results):
             self.all_comparison_results = comparison_results
-
-            # Apply filters and display
             self.after(0, lambda: self._display_csv_comparison_results(comparison_results))
-            self.after(0, lambda: self.browserless_status.set(f"Compared {len(items)} CSV items with {len(ebay_results)} eBay listings - {len(comparison_results)} total matches"))
-
-        except Exception as e:
-            import traceback
-            print(f"[CSV BATCH ERROR] {e}")
-            traceback.print_exc()
-            self.after(0, lambda: messagebox.showerror("Comparison Error", f"Failed: {str(e)}"))
-        finally:
             self.after(0, self.csv_compare_progress.stop)
+
+        def show_message_callback(title, message, msg_type='info'):
+            if msg_type == 'error':
+                self.after(0, lambda: messagebox.showerror(title, message))
+            else:
+                self.after(0, lambda: messagebox.showinfo(title, message))
+            self.after(0, self.csv_compare_progress.stop)
+
+        def create_debug_folder_callback(query):
+            return self._create_debug_folder(query)
+
+        workers.compare_csv_items_worker(
+            items,
+            max_results,
+            search_query,
+            self.browserless_results_data if hasattr(self, 'browserless_results_data') else [],
+            self.usd_jpy_rate,
+            update_callback,
+            display_callback,
+            show_message_callback,
+            create_debug_folder_callback
+        )
 
     def _compare_csv_items_individually_worker(self, items):
         """Worker to compare CSV items individually - each item gets its own eBay search"""
-        try:
-            from ebay_scrapy_search import run_ebay_scrapy_search
-            import cv2
-            import numpy as np
-            import requests
+        max_results = int(self.browserless_max_results.get())
+        add_secondary = hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get()
 
-            max_results = int(self.browserless_max_results.get())
-            comparison_results = []
+        def update_callback(message):
+            self.after(0, lambda: self.browserless_status.set(message))
 
-            print(f"\n[CSV INDIVIDUAL] Starting individual comparisons for {len(items)} items")
-            print(f"[CSV INDIVIDUAL] Each item will get its own eBay search with keyword + category")
-
-            for item_idx, item in enumerate(items, 1):
-                csv_title = item.get('title', 'Unknown')
-                keyword = item.get('keyword', '')
-                category = item.get('category', '')
-
-                # Build search query for this specific item
-                if keyword:
-                    core_words = keyword
-                else:
-                    core_words = ' '.join(csv_title.split()[:3])
-
-                category_keyword = CATEGORY_KEYWORDS.get(category, '')
-                search_query = f"{core_words} {category_keyword}".strip()
-
-                # Add secondary keyword if toggle is on
-                if hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get():
-                    if csv_title and keyword:
-                        secondary = self._extract_secondary_keyword(csv_title, keyword)
-                        if secondary:
-                            search_query = f"{search_query} {secondary}".strip()
-                            print(f"[CSV INDIVIDUAL] Added secondary keyword: {secondary}")
-
-                if not search_query:
-                    print(f"[CSV INDIVIDUAL] Skipping item {item_idx}: no search query")
-                    continue
-
-                print(f"\n[CSV INDIVIDUAL] Item {item_idx}/{len(items)}: {csv_title[:50]}")
-                print(f"[CSV INDIVIDUAL] Search query: '{search_query}'")
-
-                self.after(0, lambda q=search_query, idx=item_idx: self.browserless_status.set(
-                    f"Item {idx}/{len(items)}: Searching eBay for '{q}'..."))
-
-                # Create debug folder for this item
-                debug_folder = self._create_debug_folder(f"{search_query}_item{item_idx}")
-
-                # Run eBay search for this specific item
-                ebay_results = run_ebay_scrapy_search(
-                    query=search_query,
-                    max_results=max_results,
-                    sold_listings=True
-                )
-
-                if not ebay_results:
-                    print(f"[CSV INDIVIDUAL] No eBay results for item {item_idx}")
-                    continue
-
-                print(f"[CSV INDIVIDUAL] Found {len(ebay_results)} eBay listings")
-
-                # Load CSV item image
-                csv_image_path = item.get('local_image', '')
-                if not csv_image_path or not Path(csv_image_path).exists():
-                    print(f"[CSV INDIVIDUAL] No image for item {item_idx}, skipping visual comparison")
-                    continue
-
-                ref_image = cv2.imread(str(csv_image_path))
-                if ref_image is None:
-                    print(f"[CSV INDIVIDUAL] Failed to load image for item {item_idx}")
-                    continue
-
-                # Save reference image to debug folder
-                csv_title_safe = "".join(c for c in csv_title[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
-                csv_debug_path = debug_folder / f"CSV_REF_{csv_title_safe}.jpg"
-                cv2.imwrite(str(csv_debug_path), ref_image)
-
-                # Download and compare with each eBay result
-                item_comparisons = []
-                for ebay_idx, ebay_item in enumerate(ebay_results):
-                    # Support both 'main_image' (from search) and 'image_url' (from cached browserless_results_data)
-                    ebay_image_url = ebay_item.get('main_image') or ebay_item.get('image_url', '')
-                    if not ebay_image_url:
-                        continue
-
-                    try:
-                        response = requests.get(ebay_image_url, timeout=5)
-                        if response.status_code == 200:
-                            img_array = np.frombuffer(response.content, np.uint8)
-                            ebay_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
-                            if ebay_img is not None:
-                                # Save eBay image to debug folder
-                                ebay_title_safe = "".join(c for c in ebay_item.get('product_title', 'unknown')[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
-                                ebay_debug_path = debug_folder / f"ebay_{ebay_idx+1:02d}_{ebay_title_safe}.jpg"
-                                cv2.imwrite(str(ebay_debug_path), ebay_img)
-
-                                # Use shared comparison method
-                                similarity = self._compare_images(ref_image, ebay_img)
-                                item_comparisons.append((similarity, ebay_idx, ebay_item.get('product_title', 'unknown')[:50]))
-
-                    except Exception as e:
-                        print(f"[CSV INDIVIDUAL] Error comparing with eBay item {ebay_idx+1}: {e}")
-
-                # Sort by similarity and show top 5
-                item_comparisons.sort(reverse=True)
-                print(f"[CSV INDIVIDUAL] Top 5 matches for '{csv_title[:40]}':")
-                for rank, (sim, idx, title) in enumerate(item_comparisons[:5], 1):
-                    print(f"  {rank}. {sim:.1f}% - {title}")
-
-                # Add all comparisons to results
-                for similarity, ebay_idx, _ in item_comparisons:
-                    ebay_item = ebay_results[ebay_idx]
-
-                    # Calculate profit margin
-                    mandarake_price_text = item.get('price_text', item.get('price', '0'))
-                    mandarake_price = self._extract_price(mandarake_price_text)
-
-                    ebay_price_text = ebay_item.get('current_price', '0')
-                    ebay_price = self._extract_price(ebay_price_text)
-
-                    shipping_text = ebay_item.get('shipping_cost', '0')
-                    shipping_cost = self._extract_price(shipping_text)
-
-                    # Profit % = ((eBay Price + Shipping) / (Mandarake Price * Exchange Rate) - 1) * 100
-                    mandarake_price_usd = mandarake_price / self.usd_jpy_rate if self.usd_jpy_rate > 0 else 0
-                    total_cost_usd = ebay_price + shipping_cost
-                    profit_margin = ((total_cost_usd / mandarake_price_usd - 1) * 100) if mandarake_price_usd > 0 else 0
-
-                    comparison_results.append({
-                        'thumbnail': ebay_item.get('main_image') or ebay_item.get('image_url', ''),
-                        'csv_title': csv_title,
-                        'ebay_title': ebay_item.get('product_title') or ebay_item.get('title', 'N/A'),
-                        'mandarake_price': f"¥{mandarake_price:,.0f}",
-                        'ebay_price': ebay_price_text,
-                        'shipping': shipping_text,
-                        'sold_date': ebay_item.get('sold_date', ''),
-                        'similarity': similarity,
-                        'similarity_display': f"{similarity:.1f}%" if similarity > 0 else '-',
-                        'profit_margin': profit_margin,
-                        'profit_display': f"{profit_margin:.1f}%",
-                        'mandarake_link': item.get('product_url', ''),
-                        'ebay_link': ebay_item.get('product_url') or ebay_item.get('url', '')
-                    })
-
-            # Sort by similarity (highest first)
-            comparison_results.sort(key=lambda x: x['similarity'], reverse=True)
-
-            print(f"\n[CSV INDIVIDUAL] ========================================")
-            print(f"[CSV INDIVIDUAL] Completed {len(items)} individual searches")
-            print(f"[CSV INDIVIDUAL] Generated {len(comparison_results)} comparison results")
-            print(f"[CSV INDIVIDUAL] ========================================\n")
-
-            # Store unfiltered results for filtering
+        def display_callback(comparison_results):
             self.all_comparison_results = comparison_results
-
-            # Apply filters and display
             self.after(0, lambda: self._display_csv_comparison_results(comparison_results))
-            self.after(0, lambda: self.browserless_status.set(f"Completed {len(items)} individual searches - {len(comparison_results)} total matches"))
-
-        except Exception as e:
-            import traceback
-            print(f"[CSV INDIVIDUAL ERROR] {e}")
-            traceback.print_exc()
-            self.after(0, lambda: messagebox.showerror("Comparison Error", f"Failed: {str(e)}"))
-        finally:
             self.after(0, self.csv_compare_progress.stop)
+
+        def show_message_callback(title, message):
+            self.after(0, lambda: messagebox.showerror(title, message))
+            self.after(0, self.csv_compare_progress.stop)
+
+        def create_debug_folder_callback(query):
+            return self._create_debug_folder(query)
+
+        def extract_secondary_callback(title, keyword):
+            return self._extract_secondary_keyword(title, keyword)
+
+        workers.compare_csv_items_individually_worker(
+            items,
+            max_results,
+            add_secondary,
+            self.usd_jpy_rate,
+            update_callback,
+            display_callback,
+            show_message_callback,
+            create_debug_folder_callback,
+            extract_secondary_callback
+        )
 
     def _fetch_exchange_rate(self):
         """Fetch current USD to JPY exchange rate"""

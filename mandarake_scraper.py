@@ -1122,6 +1122,10 @@ class MandarakeScraper:
             print(f"[CSV SAVE DEBUG] No results, returning early")
             return
 
+        # Create results directory if it doesn't exist
+        csv_path_obj = Path(csv_path)
+        csv_path_obj.parent.mkdir(parents=True, exist_ok=True)
+
         # Add timestamp fields to all results
         current_time = datetime.now()
         for result in self.results:

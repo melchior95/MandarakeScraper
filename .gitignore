@@ -59,6 +59,9 @@ images/
 *.csv
 *.xlsx
 
+# GUI settings (user-specific)
+.mandarake/
+
 # Temporary files
 *.tmp
 *.temp
