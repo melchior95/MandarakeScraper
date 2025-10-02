@@ -134,15 +134,26 @@ class EbaySearchSpider(scrapy.Spider):
         """Parse eBay search results page"""
         self.logger.info(f"Parsing search results from: {response.url}")
 
-        # Extract search result items - eBay now uses .s-card instead of .s-item
-        item_containers = response.css('li.s-card')
+        # Extract search result items - eBay now uses .s-card class within .srp-river-results
+        # Updated selector to match new eBay HTML structure (changed from .s-item to .s-card)
+        item_containers = response.css('.srp-river-results li.s-card')
+        self.logger.info(f"Found {len(item_containers)} items with .srp-river-results li.s-card")
 
         if not item_containers:
-            # Fallback to old selector
-            item_containers = response.css('.s-item')
+            # Fallback to broader selectors
+            item_containers = response.css('li.s-card')
+            self.logger.info(f"Fallback - Found {len(item_containers)} items with li.s-card")
 
         if not item_containers:
-            self.logger.warning("No search result items found with .s-card or .s-item")
+            # Try old selector in case eBay reverts
+            item_containers = response.css('li.s-item')
+            self.logger.info(f"Fallback - Found {len(item_containers)} items with li.s-item")
+
+        if not item_containers:
+            # Save HTML for debugging
+            with open('debug_ebay_response.html', 'wb') as f:
+                f.write(response.body)
+            self.logger.warning("No search result items found. HTML saved to debug_ebay_response.html")
             return
 
         self.logger.info(f"eBay returned {len(item_containers)} item containers on page {response.meta.get('page', 1)}")
@@ -185,14 +196,12 @@ class EbaySearchSpider(scrapy.Spider):
         try:
             item = EbaySearchItem()
 
-            # Product title and URL - support both new .s-card and old .s-item
-            # Try new .s-card format first (title is nested in span)
-            title_elem = container.css('.s-card__title span::text').get()
-            if not title_elem:
-                title_elem = container.css('.s-card__title::text').get()
+            # Product title and URL - eBay now uses .s-card format
+            # First try new .s-card selectors
+            title_elem = container.css('.s-card__title ::text').get()
             link_elem = container.css('a[href*="/itm/"]::attr(href)').get()
 
-            # Fallback to old .s-item format
+            # Fallback to old .s-item selectors if needed
             if not title_elem or not link_elem:
                 title_link = container.css('h3.s-item__title a')
                 if not title_link:
@@ -201,6 +210,9 @@ class EbaySearchSpider(scrapy.Spider):
                 if title_link:
                     title_elem = title_link.css('::text').get('')
                     link_elem = title_link.css('::attr(href)').get('')
+                else:
+                    title_elem = title_elem or container.css('.s-item__title::text').get()
+                    link_elem = link_elem or container.css('a[href*="/itm/"]::attr(href)').get()
 
             if title_elem and link_elem:
                 item['product_title'] = title_elem.strip()
@@ -228,15 +240,13 @@ class EbaySearchSpider(scrapy.Spider):
             # Clean title
             item['product_title'] = self._clean_title(item['product_title'])
 
-            # Current price - try new .s-card format first
+            # Current price - try new .s-card__price first, then fall back to .s-item__price
             price_text = container.css('.s-card__price::text').get()
             if not price_text:
-                # Try old .s-item format
                 price_element = container.css('.s-item__price .notranslate')
                 if price_element:
                     price_text = price_element.css('::text').get('')
                 else:
-                    # Alternative price selectors
                     price_text = container.css('.s-item__price::text').get('')
 
             item['current_price'] = price_text.strip() if price_text else ''
@@ -283,14 +293,14 @@ class EbaySearchSpider(scrapy.Spider):
 
             item['sold_date'] = sold_date_text.strip() if sold_date_text else ''
             
-            # Seller information
-            seller_element = container.css('.s-item__seller-info-text')
-            if seller_element:
-                seller_text = seller_element.css('::text').get('')
-                if seller_text:
-                    item['seller_name'] = seller_text.strip()
-            else:
-                item['seller_name'] = ''
+            # Seller information - try both new and old selectors
+            seller_text = container.css('.s-card__subtitle::text').get()
+            if not seller_text:
+                seller_element = container.css('.s-item__seller-info-text')
+                if seller_element:
+                    seller_text = seller_element.css('::text').get('')
+
+            item['seller_name'] = seller_text.strip() if seller_text else ''
             
             # Location
             location_element = container.css('.s-item__location')
@@ -308,12 +318,14 @@ class EbaySearchSpider(scrapy.Spider):
             else:
                 item['condition'] = ''
             
-            # Main image - try both .s-card and .s-item formats
+            # Main image - try new .s-card__image first, then fall back to .s-item__image
             image_url = container.css('.s-card__image::attr(src)').get()
             if not image_url:
                 image_url = container.css('.s-item__image img::attr(src)').get()
             if not image_url:
-                # Try any img tag
+                image_url = container.css('.s-item__image::attr(src)').get()
+            if not image_url:
+                # Try any img tag as final fallback
                 image_url = container.css('img::attr(src)').get()
 
             item['main_image'] = image_url if image_url else ''

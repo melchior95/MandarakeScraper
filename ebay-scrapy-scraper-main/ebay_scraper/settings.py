@@ -19,16 +19,14 @@ ROBOTSTXT_OBEY = False
 SCRAPEOPS_API_KEY = 'f3106dda-ac3c-4a67-badf-e95985d50a73'  # Get your ScrapeOps API key from https://scrapeops.io/app/register/main/
 SCRAPEOPS_PROXY_ENABLED = True
 
-# Try without JS rendering first (faster and cheaper)
-SCRAPEOPS_RENDER_JS = False
-
-# Residential proxies for better success
+# Enable JS rendering and bot detection bypass via ScrapeOps proxy settings
+# render_js: Uses headless browser to handle JavaScript and bot detection
+# bypass: Enables generic level 2 bypass for additional bot detection circumvention
 SCRAPEOPS_PROXY_SETTINGS = {
     'country': 'us',
+    'render_js': True,
+    'bypass': 'generic_level_2',
 }
-
-# Don't use bypass for now - may not be available on free tier
-# SCRAPEOPS_BYPASS = 'generic_level_2'
 
 # Configure a delay for requests for the same website (default: 0)
 # See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay

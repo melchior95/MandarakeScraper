@@ -50,14 +50,20 @@ class ScrapyEbayRunner:
                 '-s', 'DOWNLOAD_DELAY=1'
             ]
 
-            # Run subprocess
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120,  # 2 minute timeout
-                cwd=os.path.dirname(__file__)
-            )
+            # Run subprocess with window suppression on Windows
+            kwargs = {
+                'capture_output': True,
+                'text': True,
+                'timeout': 120,  # 2 minute timeout
+                'cwd': os.path.dirname(__file__)
+            }
+
+            # Windows-specific: prevent console window from appearing
+            import platform
+            if platform.system() == 'Windows':
+                kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+
+            result = subprocess.run(cmd, **kwargs)
 
             if result.returncode != 0:
                 self.logger.error(f"Spider subprocess failed with return code {result.returncode}")
