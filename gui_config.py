@@ -35,6 +35,7 @@ from gui.constants import (
 )
 from gui import utils
 from gui import workers
+from gui.alert_tab import AlertTab
 
 
 class ScraperGUI(tk.Tk):
@@ -127,11 +128,6 @@ class ScraperGUI(tk.Tk):
         settings_menu.add_command(label="Export Settings", command=self._export_settings)
         settings_menu.add_command(label="Import Settings", command=self._import_settings)
 
-        # Tools menu
-        tools_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Tools", menu=tools_menu)
-        tools_menu.add_command(label="Research & Optimize", command=self.start_category_research)
-        tools_menu.add_command(label="View Optimization Profiles", command=self.view_optimization_profiles)
 
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -243,37 +239,19 @@ IMAGE SEARCH HELP
 
 🎯 QUICK START:
 1. Click "Select Image..." to upload a product photo
-2. Choose your search method (Direct eBay or Google Lens)
-3. Select enhancement level (light/medium/aggressive)
-4. Enable "Lazy Search" for better keyword matching
-5. Enable "AI Search Confirmation" for best results
-6. Click "AI Smart Search" for comprehensive analysis
-
-🧠 LAZY SEARCH:
-- Automatically optimizes search terms for better results
-- Handles Japanese name variations (e.g., "Yura Kano" vs "Yuraka no")
-- Tries multiple keyword combinations if initial search fails
-- Uses research-based optimization profiles
-
-⭐ AI SMART SEARCH:
-- Combines multiple search methods
-- Tries different enhancement levels automatically
-- Uses AI to select the best matching results
-- Provides highest accuracy for market analysis
+2. Use the search functionality to find similar items
 
 📊 RESULTS:
 - Shows sold item counts and price ranges
 - Calculates profit margins with different scenarios
 - Estimates fees and shipping costs
 - Provides market recommendations
-
-For detailed documentation, see IMAGE_SEARCH_README.md
         """
 
         # Create help window
         help_window = tk.Toplevel(self)
         help_window.title("Image Search Help")
-        help_window.geometry("500x600")
+        help_window.geometry("500x400")
         help_window.transient(self)
 
         text_frame = ttk.Frame(help_window)
@@ -300,9 +278,7 @@ A comprehensive tool for analyzing Mandarake listings
 and comparing prices with eBay sold listings.
 
 Features:
-• Advanced image search with AI optimization
-• Lazy search with intelligent keyword matching
-• Category-specific research and optimization
+• Advanced image search with comparison methods
 • Profit margin calculations and market analysis
 • Persistent settings and window preferences
 
@@ -312,13 +288,48 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         messagebox.showinfo("About Mandarake Scraper", about_text)
 
+    def _show_ransac_info(self):
+        """Show RANSAC information dialog"""
+        info_text = """
+RANSAC GEOMETRIC VERIFICATION
+
+What it does:
+• Verifies that matched image features have consistent spatial relationships
+• Uses RANSAC (Random Sample Consensus) algorithm to detect true matches
+• Adds ~40-50% processing time but significantly improves accuracy
+
+When to use:
+✓ When you need maximum accuracy for difficult matches
+✓ When comparing similar-looking items that are different editions
+✓ When false positives are costly (e.g., expensive items)
+
+When to skip:
+• For quick exploratory searches
+• When processing large batches (hundreds of items)
+• When visual similarity is good enough
+
+Current algorithm (without RANSAC):
+• Template matching: 60% weight
+• Feature matching: 25% weight
+• SSIM: 10% weight
+• Histogram: 5% weight
+• Consistency bonus: up to 25% boost
+
+With RANSAC enabled:
+• Adds geometric coherence verification (15-20% weight)
+• Penalizes random/scattered feature matches
+• Increases match confidence scores
+        """
+
+        messagebox.showinfo("RANSAC Geometric Verification", info_text)
+
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
     def _build_widgets(self):
         pad = {"padx": 8, "pady": 4}
 
-        # Create status bar first (will pack at bottom)
+        # Create status bar
         self.status_var = tk.StringVar(value="Ready")
         status_label = ttk.Label(self, textvariable=self.status_var, relief=tk.SUNKEN, anchor='w')
         status_label.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=4)
@@ -330,15 +341,6 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         self.url_label.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=4)
         self.url_label.bind("<Button-1>", self._open_search_url)
 
-        # Create button frame (pack at bottom, above URL)
-        button_frame = ttk.Frame(self)
-        button_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=6)
-
-        ttk.Button(button_frame, text="Run Now", command=self.run_now).pack(side=tk.LEFT, padx=4)
-        self.cancel_button = ttk.Button(button_frame, text="Cancel Search", command=self.cancel_search, state='disabled')
-        self.cancel_button.pack(side=tk.LEFT, padx=4)
-        ttk.Button(button_frame, text="Schedule", command=self.schedule_run).pack(side=tk.LEFT, padx=4)
-
         # Now create notebook (will fill remaining space)
         notebook = ttk.Notebook(self)
         notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
@@ -347,8 +349,13 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         browserless_frame = ttk.Frame(notebook)
         advanced_frame = ttk.Frame(notebook)
 
-        notebook.add(basic_frame, text="Search")
+        notebook.add(basic_frame, text="Mandarake")
         notebook.add(browserless_frame, text="eBay Search & CSV")
+
+        # Alert/Review tab
+        self.alert_tab = AlertTab(notebook)
+        notebook.add(self.alert_tab, text="Review/Alerts")
+
         notebook.add(advanced_frame, text="Advanced")
 
         # Search tab ----------------------------------------------------
@@ -364,6 +371,12 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         self.keyword_entry = ttk.Entry(basic_frame, textvariable=self.keyword_var, width=42)
         self.keyword_entry.grid(row=1, column=1, columnspan=3, sticky=tk.W, **pad)
         self.keyword_var.trace_add("write", self._update_preview)
+
+        # Commit/trim keyword when focus leaves the field
+        self.keyword_entry.bind("<FocusOut>", self._commit_keyword_changes)
+
+        # Autosave with new filename when Enter is pressed
+        self.keyword_entry.bind("<Return>", self._save_config_on_enter)
 
         # Add right-click context menu to keyword entry
         self.keyword_menu = tk.Menu(self.keyword_entry, tearoff=0)
@@ -382,14 +395,22 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         self.main_category_combo.grid(row=2, column=1, columnspan=3, sticky=tk.W, **pad)
         self.main_category_combo.bind("<<ComboboxSelected>>", self._on_main_category_selected)
 
-        ttk.Label(basic_frame, text="Detailed categories:").grid(row=3, column=0, sticky=tk.W, **pad)
-        detail_frame = ttk.Frame(basic_frame)
-        detail_frame.grid(row=4, column=0, columnspan=4, sticky=tk.W, **pad)
+        # Create labels row for both listboxes
+        labels_frame = ttk.Frame(basic_frame)
+        labels_frame.grid(row=3, column=0, columnspan=7, sticky=(tk.W, tk.E), **pad)
+        ttk.Label(labels_frame, text="Detailed categories:").pack(side=tk.LEFT)
+        ttk.Label(labels_frame, text="Shop:", anchor='e').pack(side=tk.RIGHT, padx=(0, 50))
+
+        # Create PanedWindow for resizable listboxes
+        self.listbox_paned = tk.PanedWindow(basic_frame, orient=tk.HORIZONTAL, sashrelief=tk.RAISED, sashwidth=5)
+        self.listbox_paned.grid(row=4, column=0, columnspan=7, sticky=(tk.W, tk.E, tk.N, tk.S), **pad)
+
+        # Left pane: Detailed categories
+        detail_frame = ttk.Frame(self.listbox_paned)
         self.detail_listbox = tk.Listbox(
             detail_frame,
             selectmode=tk.SINGLE,
             height=10,
-            width=68,
             exportselection=False,
         )
         self.detail_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -398,43 +419,45 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         self.detail_listbox.configure(yscrollcommand=detail_scroll.set)
         self.detail_listbox.bind("<<ListboxSelect>>", lambda _: self._update_preview())
         self._populate_detail_categories()
+        self.listbox_paned.add(detail_frame, minsize=200)
 
-        self.shop_var = tk.StringVar()
-        ttk.Label(basic_frame, text="Shop:").grid(row=5, column=0, sticky=tk.W, **pad)
-        shop_combo = ttk.Combobox(
-            basic_frame,
-            textvariable=self.shop_var,
-            state="readonly",
-            width=37,
-            values=[f"{name} ({code})" for code, name in STORE_OPTIONS] + ["Custom..."],
+        # Right pane: Shop listbox
+        shop_frame = ttk.Frame(self.listbox_paned)
+        self.shop_listbox = tk.Listbox(
+            shop_frame,
+            selectmode=tk.SINGLE,
+            height=10,
+            exportselection=False,
         )
-        shop_combo.grid(row=5, column=1, columnspan=2, sticky=tk.W, **pad)
-        shop_combo.bind("<<ComboboxSelected>>", self._handle_shop_selection)
-        self.shop_var.trace_add("write", self._update_preview)
+        self.shop_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        shop_scroll = ttk.Scrollbar(shop_frame, orient=tk.VERTICAL, command=self.shop_listbox.yview)
+        shop_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.shop_listbox.configure(yscrollcommand=shop_scroll.set)
+        self.shop_listbox.bind("<<ListboxSelect>>", self._on_shop_selected)
+        self._populate_shop_list()
+        self.listbox_paned.add(shop_frame, minsize=150)
 
+        # Restore listbox paned position after widgets are created and window is sized
+        self.after(200, self._restore_listbox_paned_position)
+
+        # Also restore when the paned window is resized (only once)
+        self._listbox_paned_restored = False
+        self.listbox_paned.bind('<Configure>', self._on_listbox_paned_configure)
+
+        # Custom shop entry (below listboxes)
         self.custom_shop_var = tk.StringVar()
-        ttk.Label(basic_frame, text="Custom shop code/slug:").grid(row=5, column=3, sticky=tk.W, **pad)
-        self.custom_shop_entry = ttk.Entry(basic_frame, textvariable=self.custom_shop_var, width=20, state="disabled")
-        self.custom_shop_entry.grid(row=5, column=4, sticky=tk.W, **pad)
+        ttk.Label(basic_frame, text="Custom shop code/slug:").grid(row=5, column=0, sticky=tk.W, **pad)
+        self.custom_shop_entry = ttk.Entry(basic_frame, textvariable=self.custom_shop_var, width=30, state="disabled")
+        self.custom_shop_entry.grid(row=5, column=1, columnspan=2, sticky=tk.W, **pad)
         self.custom_shop_var.trace_add("write", self._update_preview)
 
+        # --- URL Options (affect Mandarake search) - All in one row ---
         self.hide_sold_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(basic_frame, text="Hide sold-out listings", variable=self.hide_sold_var,
+        ttk.Checkbutton(basic_frame, text="Hide sold", variable=self.hide_sold_var,
                         command=self._update_preview).grid(row=6, column=0, sticky=tk.W, **pad)
 
-        self.language_var = tk.StringVar(value="en")
-        ttk.Label(basic_frame, text="Language:").grid(row=6, column=1, sticky=tk.W, **pad)
-        lang_combo = ttk.Combobox(basic_frame, textvariable=self.language_var, values=["en", "ja"], width=6, state="readonly")
-        lang_combo.grid(row=6, column=2, sticky=tk.W, **pad)
-        self.language_var.trace_add("write", self._update_preview)
-
-        self.max_pages_var = tk.StringVar()
-        ttk.Label(basic_frame, text="Max pages:").grid(row=7, column=0, sticky=tk.W, **pad)
-        ttk.Entry(basic_frame, textvariable=self.max_pages_var, width=8).grid(row=7, column=1, sticky=tk.W, **pad)
-
-        # Results per page dropdown
         self.results_per_page_var = tk.StringVar(value="48")
-        ttk.Label(basic_frame, text="Results/page:").grid(row=8, column=0, sticky=tk.W, **pad)
+        ttk.Label(basic_frame, text="Results/page:").grid(row=6, column=1, sticky=tk.W, **pad)
         results_per_page_combo = ttk.Combobox(
             basic_frame,
             textvariable=self.results_per_page_var,
@@ -442,56 +465,98 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             width=6,
             values=["48", "120", "240"]
         )
-        results_per_page_combo.grid(row=8, column=1, sticky=tk.W, **pad)
+        results_per_page_combo.grid(row=6, column=2, sticky=tk.W, **pad)
         self.results_per_page_var.trace_add("write", self._update_preview)
 
+        self.max_pages_var = tk.StringVar()
+        ttk.Label(basic_frame, text="Max pages:").grid(row=6, column=3, sticky=tk.W, **pad)
+        ttk.Entry(basic_frame, textvariable=self.max_pages_var, width=8).grid(row=6, column=4, sticky=tk.W, **pad)
+        self.max_pages_var.trace_add("write", self._auto_save_config)
+
         self.recent_hours_var = tk.StringVar(value=RECENT_OPTIONS[0][0])
-        ttk.Label(basic_frame, text="New items timeframe:").grid(row=7, column=2, sticky=tk.W, **pad)
+        ttk.Label(basic_frame, text="Latest:").grid(row=6, column=5, sticky=tk.W, **pad)
         self.recent_combo = ttk.Combobox(
             basic_frame,
             textvariable=self.recent_hours_var,
             state="readonly",
-            width=20,
+            width=15,
             values=[label for label, _ in RECENT_OPTIONS],
         )
-        self.recent_combo.grid(row=7, column=3, columnspan=2, sticky=tk.W, **pad)
+        self.recent_combo.grid(row=6, column=6, sticky=tk.W, **pad)
         self.recent_hours_var.trace_add("write", self._update_preview)
+        self.recent_hours_var.trace_add("write", self._on_recent_hours_changed)
+
+        # --- CSV Options - All in one row ---
+        ttk.Label(basic_frame, text="CSV Options:", font=('TkDefaultFont', 9,)).grid(row=7, column=0, sticky=tk.W, **pad)
+
+        # Initialize CSV variables if not already done
+        if not hasattr(self, 'csv_in_stock_only'):
+            self.csv_in_stock_only = tk.BooleanVar(value=True)
+        if not hasattr(self, 'csv_add_secondary_keyword'):
+            self.csv_add_secondary_keyword = tk.BooleanVar(value=False)
+
+        # Add trace for auto-save
+        self.csv_in_stock_only.trace_add("write", self._auto_save_config)
+        self.csv_add_secondary_keyword.trace_add("write", self._auto_save_config)
+
+        ttk.Checkbutton(basic_frame, text="Show in-stock", variable=self.csv_in_stock_only,
+                        command=self._on_csv_filter_changed).grid(row=7, column=1, sticky=tk.W, **pad)
+
+        ttk.Checkbutton(basic_frame, text="2nd keyword", variable=self.csv_add_secondary_keyword).grid(row=7, column=2, sticky=tk.W, **pad)
+
+        # --- Language (rarely used) - Same row ---
+        self.language_var = tk.StringVar(value="en")
+        ttk.Label(basic_frame, text="Language:").grid(row=7, column=5, sticky=tk.W, **pad)
+        lang_combo = ttk.Combobox(basic_frame, textvariable=self.language_var, values=["en", "ja"], width=6, state="readonly")
+        lang_combo.grid(row=7, column=6, sticky=tk.W, **pad)
+        self.language_var.trace_add("write", self._update_preview)
 
         # Saved configs tree
         tree_frame = ttk.Frame(basic_frame)
-        tree_frame.grid(row=9, column=0, columnspan=5, sticky=tk.NSEW, **pad)
-        columns = ('file', 'keyword', 'category', 'shop', 'hide', 'results_per_page', 'max_pages', 'timeframe', 'language')
+        tree_frame.grid(row=8, column=0, columnspan=7, sticky=tk.NSEW, **pad)
+        columns = ('file', 'keyword', 'category', 'shop', 'hide_sold', 'results_per_page', 'max_pages', 'csv_show_in_stock', 'csv_secondary', 'latest_additions', 'language')
         self.config_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=6)
         headings = {
             'file': 'File',
             'keyword': 'Keyword',
             'category': 'Category',
             'shop': 'Shop',
-            'hide': 'Hide Sold Out',
+            'hide_sold': 'Hide Sold',
             'results_per_page': 'Results/Page',
             'max_pages': 'Max Pages',
-            'timeframe': 'New Items',
+            'csv_show_in_stock': 'Show In-Stock',
+            'csv_secondary': '2nd KW',
+            'latest_additions': 'Latest',
             'language': 'Lang',
         }
         widths = {
-            'file': 220,
-            'keyword': 130,
-            'category': 130,
-            'shop': 130,
-            'hide': 100,
-            'results_per_page': 90,
-            'max_pages': 80,
-            'timeframe': 100,
+            'file': 200,
+            'keyword': 120,
+            'category': 120,
+            'shop': 120,
+            'hide_sold': 80,
+            'results_per_page': 80,
+            'max_pages': 70,
+            'csv_show_in_stock': 90,
+            'csv_secondary': 70,
+            'latest_additions': 70,
             'language': 50,
         }
         for col, heading in headings.items():
             self.config_tree.heading(col, text=heading)
             width = widths.get(col, 100)
             self.config_tree.column(col, width=width, stretch=False)
+
+        # Add vertical scrollbar
+        tree_scroll_y = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.config_tree.yview)
+        tree_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Add horizontal scrollbar
+        tree_scroll_x = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=self.config_tree.xview)
+        tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+
         self.config_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tree_scroll = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.config_tree.yview)
-        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.config_tree.configure(yscrollcommand=tree_scroll.set)
+        self.config_tree.configure(yscrollcommand=tree_scroll_y.set, xscrollcommand=tree_scroll_x.set)
         # Single click to load config
         self.config_tree.bind('<<TreeviewSelect>>', self._on_config_selected)
         # Prevent space from affecting tree selection when it has focus
@@ -515,8 +580,16 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         ttk.Button(config_buttons_frame, text="Move Up", command=lambda: self._move_config(-1)).pack(side=tk.LEFT, padx=5)
         ttk.Button(config_buttons_frame, text="Move Down", command=lambda: self._move_config(1)).pack(side=tk.LEFT, padx=5)
 
+        # Action buttons for Mandarake scraper
+        action_buttons_frame = ttk.Frame(basic_frame)
+        action_buttons_frame.grid(row=11, column=0, columnspan=5, sticky=tk.W, **pad)
+        ttk.Button(action_buttons_frame, text="Search Mandarake", command=self.run_now).pack(side=tk.LEFT, padx=5)
+        self.cancel_button = ttk.Button(action_buttons_frame, text="Cancel Search", command=self.cancel_search, state='disabled')
+        self.cancel_button.pack(side=tk.LEFT, padx=5)
+        ttk.Button(action_buttons_frame, text="Schedule", command=self.schedule_run).pack(side=tk.LEFT, padx=5)
+
         self._load_config_tree()
-        basic_frame.rowconfigure(9, weight=1)
+        basic_frame.rowconfigure(8, weight=1)
         basic_frame.columnconfigure(0, weight=1)
         basic_frame.columnconfigure(1, weight=1)
         basic_frame.columnconfigure(2, weight=1)
@@ -539,35 +612,20 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         max_results_combo.grid(row=1, column=4, sticky=tk.W, **pad)
         max_results_combo.bind("<<ComboboxSelected>>", lambda e: self._save_gui_settings())
 
-        # Reference image selection (for image comparison)
-        ttk.Label(browserless_frame, text="Reference image:").grid(row=2, column=0, sticky=tk.W, **pad)
-        ttk.Button(browserless_frame, text="Select Image...", command=self.select_browserless_image).grid(row=2, column=1, sticky=tk.W, **pad)
-        self.browserless_image_label = ttk.Label(browserless_frame, text="No image selected (optional)", foreground="gray")
-        self.browserless_image_label.grid(row=2, column=2, columnspan=2, sticky=tk.W, **pad)
-
-        # Max comparisons setting (only used when image is selected)
-        ttk.Label(browserless_frame, text="Max comparisons:").grid(row=2, column=3, sticky=tk.W, **pad)
-        self.browserless_max_comparisons = tk.StringVar(value="MAX")
-        max_comp_combo = ttk.Combobox(browserless_frame, textvariable=self.browserless_max_comparisons,
-                                     values=["1", "2", "3", "5", "7", "10", "MAX"], width=5, state="readonly")
-        max_comp_combo.grid(row=2, column=4, sticky=tk.W, **pad)
-        max_comp_combo.bind("<<ComboboxSelected>>", lambda e: self._save_gui_settings())
-
         # Action buttons
-        ttk.Button(browserless_frame, text="Search", command=self.run_scrapy_text_search).grid(row=3, column=0, sticky=tk.W, **pad)
-        ttk.Button(browserless_frame, text="Search & Compare", command=self.run_scrapy_search_with_compare).grid(row=3, column=1, sticky=tk.W, **pad)
-        ttk.Button(browserless_frame, text="Clear Results", command=self.clear_browserless_results).grid(row=3, column=2, sticky=tk.W, **pad)
+        ttk.Button(browserless_frame, text="Search", command=self.run_scrapy_text_search).grid(row=2, column=0, sticky=tk.W, **pad)
+        ttk.Button(browserless_frame, text="Clear Results", command=self.clear_browserless_results).grid(row=2, column=1, sticky=tk.W, **pad)
 
         # Progress bar
         self.browserless_progress = ttk.Progressbar(browserless_frame, mode='indeterminate')
-        self.browserless_progress.grid(row=3, column=3, columnspan=2, sticky=tk.EW, **pad)
+        self.browserless_progress.grid(row=2, column=3, columnspan=2, sticky=tk.EW, **pad)
 
         # Create PanedWindow to split eBay results and CSV comparison sections
         self.ebay_paned = tk.PanedWindow(browserless_frame, orient=tk.VERTICAL, sashwidth=5, sashrelief=tk.RAISED)
-        self.ebay_paned.grid(row=4, column=0, columnspan=5, sticky=tk.NSEW, **pad)
+        self.ebay_paned.grid(row=3, column=0, columnspan=5, sticky=tk.NSEW, **pad)
 
         # Configure grid weights for proper resizing
-        browserless_frame.rowconfigure(4, weight=1)
+        browserless_frame.rowconfigure(3, weight=1)
         browserless_frame.columnconfigure(2, weight=1)
 
         # Results section (top pane)
@@ -644,14 +702,19 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         similarity_entry = ttk.Entry(filters_frame, textvariable=self.min_similarity_var, width=5)
         similarity_entry.pack(side=tk.LEFT, padx=5)
         similarity_entry.bind('<Return>', lambda e: self.apply_results_filter())
+        # Auto-apply filter when value changes
+        self.min_similarity_var.trace_add("write", lambda *args: self._debounced_filter())
 
         ttk.Label(filters_frame, text="Min Profit %:").pack(side=tk.LEFT, padx=5)
         self.min_profit_var = tk.StringVar(value="0")
         profit_entry = ttk.Entry(filters_frame, textvariable=self.min_profit_var, width=5)
         profit_entry.pack(side=tk.LEFT, padx=5)
         profit_entry.bind('<Return>', lambda e: self.apply_results_filter())
+        # Auto-apply filter when value changes
+        self.min_profit_var.trace_add("write", lambda *args: self._debounced_filter())
 
         ttk.Button(filters_frame, text="Apply Filters", command=self.apply_results_filter).pack(side=tk.LEFT, padx=5)
+        ttk.Button(filters_frame, text="→ Send to Alerts", command=self.send_comparison_to_alerts).pack(side=tk.LEFT, padx=5)
 
         # Status area for browserless search (below filters)
         self.browserless_status = tk.StringVar(value="Ready for eBay text search")
@@ -667,18 +730,13 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         csv_compare_frame.columnconfigure(0, weight=1)
 
         # CSV loader
-        ttk.Label(csv_compare_frame, text="Load Mandarake CSV:").grid(row=0, column=0, sticky=tk.W, **pad)
+        ttk.Label(csv_compare_frame, text="Load CSV:").grid(row=0, column=0, sticky=tk.W, **pad)
         ttk.Button(csv_compare_frame, text="Load CSV...", command=self.load_csv_for_comparison).grid(row=0, column=1, sticky=tk.W, **pad)
         self.csv_compare_label = ttk.Label(csv_compare_frame, text="No file loaded", foreground="gray")
         self.csv_compare_label.grid(row=0, column=2, columnspan=2, sticky=tk.W, **pad)
 
-        # Filter option
-        self.csv_in_stock_only = tk.BooleanVar(value=True)
+        # Filter option (already created in Search tab, just add the widgets here)
         ttk.Checkbutton(csv_compare_frame, text="In-stock only", variable=self.csv_in_stock_only, command=self._on_csv_filter_changed).grid(row=0, column=4, sticky=tk.W, **pad)
-
-        # Add 2nd keyword toggle
-        self.csv_add_secondary_keyword = tk.BooleanVar(value=False)
-        ttk.Checkbutton(csv_compare_frame, text="Add 2nd keyword", variable=self.csv_add_secondary_keyword).grid(row=0, column=5, sticky=tk.W, **pad)
 
         # Thumbnail toggle
         self.csv_show_thumbnails = tk.BooleanVar(value=True)
@@ -732,6 +790,9 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         # Bind selection to auto-fill search query
         self.csv_items_tree.bind('<<TreeviewSelect>>', self.on_csv_item_selected)
 
+        # Bind column resize to reload thumbnails with new size
+        self.csv_items_tree.bind('<ButtonRelease-1>', self._on_csv_column_resize)
+
         # Enable column drag-to-reorder for CSV items tree
         self._setup_column_drag(self.csv_items_tree)
 
@@ -757,16 +818,24 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         button_frame = ttk.Frame(csv_compare_frame)
         button_frame.grid(row=2, column=0, columnspan=7, sticky=tk.W, **pad)
 
-        ttk.Label(button_frame, text="Single Search:", font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
-        ttk.Button(button_frame, text="Compare Selected", command=self.compare_selected_csv_item).grid(row=0, column=1, sticky=tk.W, **pad)
-        ttk.Button(button_frame, text="Compare All", command=self.compare_all_csv_items).grid(row=0, column=2, sticky=tk.W, **pad)
+        # Add 2nd keyword toggle before compare buttons
+        ttk.Checkbutton(button_frame, text="2nd keyword", variable=self.csv_add_secondary_keyword).grid(row=0, column=0, sticky=tk.W, padx=(0, 15))
 
-        ttk.Label(button_frame, text="Individual Searches:", font=('TkDefaultFont', 9, 'bold')).grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
-        ttk.Button(button_frame, text="Compare Selected Individually", command=self.compare_selected_csv_item_individually).grid(row=1, column=1, sticky=tk.W, padx=(5, 5), pady=(5, 0))
-        ttk.Button(button_frame, text="Compare All Individually", command=self.compare_all_csv_items_individually).grid(row=1, column=2, sticky=tk.W, padx=(5, 5), pady=(5, 0))
+        # RANSAC toggle before compare buttons
+        self.ransac_var = tk.BooleanVar(value=False)
+        ransac_check = ttk.Checkbutton(button_frame, text="RANSAC", variable=self.ransac_var)
+        ransac_check.grid(row=0, column=1, sticky=tk.W, padx=(0, 5))
+
+        # Info label for RANSAC
+        ransac_info = ttk.Label(button_frame, text="ℹ️", foreground="blue", cursor="hand2")
+        ransac_info.grid(row=0, column=2, sticky=tk.W, padx=(0, 15))
+        ransac_info.bind("<Button-1>", lambda e: self._show_ransac_info())
+
+        ttk.Button(button_frame, text="Compare Selected", command=self.compare_selected_csv_item).grid(row=0, column=3, sticky=tk.W, **pad)
+        ttk.Button(button_frame, text="Compare All", command=self.compare_all_csv_items).grid(row=0, column=4, sticky=tk.W, **pad)
 
         self.csv_compare_progress = ttk.Progressbar(button_frame, mode='indeterminate', length=200)
-        self.csv_compare_progress.grid(row=0, column=3, sticky=tk.W, padx=(10, 5))
+        self.csv_compare_progress.grid(row=0, column=5, sticky=tk.W, padx=(10, 5))
 
         # Add the CSV comparison frame to the paned window
         self.ebay_paned.add(csv_compare_frame, minsize=200)
@@ -779,68 +848,93 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         self.csv_compare_path = None
 
         # Advanced tab --------------------------------------------------
+        current_row = 0
+
+        # Scraper Options Section
+        ttk.Label(advanced_frame, text="Scraper Options", font=('TkDefaultFont', 9, 'bold')).grid(
+            row=current_row, column=0, columnspan=4, sticky=tk.W, padx=5, pady=(0, 5))
+        current_row += 1
+
         self.fast_var = tk.BooleanVar(value=False)
         self.resume_var = tk.BooleanVar(value=True)
         self.debug_var = tk.BooleanVar(value=False)
         self.mimic_var = tk.BooleanVar(value=True)  # Enable by default for Unicode support
-        ttk.Checkbutton(advanced_frame, text="Fast mode (skip eBay)", variable=self.fast_var).grid(row=0, column=0, sticky=tk.W, **pad)
-        ttk.Checkbutton(advanced_frame, text="Resume interrupted runs", variable=self.resume_var).grid(row=0, column=1, sticky=tk.W, **pad)
-        ttk.Checkbutton(advanced_frame, text="Debug logging", variable=self.debug_var).grid(row=0, column=2, sticky=tk.W, **pad)
-        ttk.Checkbutton(advanced_frame, text="Use browser mimic (recommended for Japanese text)", variable=self.mimic_var).grid(row=0, column=3, sticky=tk.W, **pad)
-        self.mimic_var.trace_add('write', self._on_mimic_changed)
 
-        self.client_id_var = tk.StringVar()
-        self.client_secret_var = tk.StringVar()
-        ttk.Label(advanced_frame, text="eBay Client ID:").grid(row=1, column=0, sticky=tk.W, **pad)
-        ttk.Entry(advanced_frame, textvariable=self.client_id_var, width=52).grid(row=1, column=1, columnspan=3, sticky=tk.W, **pad)
-        ttk.Label(advanced_frame, text="Client Secret:").grid(row=2, column=0, sticky=tk.W, **pad)
-        ttk.Entry(advanced_frame, textvariable=self.client_secret_var, show='*', width=52).grid(row=2, column=1, columnspan=3, sticky=tk.W, **pad)
+        ttk.Checkbutton(advanced_frame, text="Fast mode (skip eBay)", variable=self.fast_var).grid(
+            row=current_row, column=0, sticky=tk.W, **pad)
+        ttk.Checkbutton(advanced_frame, text="Resume interrupted runs", variable=self.resume_var).grid(
+            row=current_row, column=1, sticky=tk.W, **pad)
+        current_row += 1
+
+        ttk.Checkbutton(advanced_frame, text="Debug logging", variable=self.debug_var).grid(
+            row=current_row, column=0, sticky=tk.W, **pad)
+        ttk.Checkbutton(advanced_frame, text="Use browser mimic (recommended for Japanese text)",
+                       variable=self.mimic_var).grid(row=current_row, column=1, columnspan=2, sticky=tk.W, **pad)
+        self.mimic_var.trace_add('write', self._on_mimic_changed)
+        current_row += 1
+
+        # Separator
+        ttk.Separator(advanced_frame, orient='horizontal').grid(
+            row=current_row, column=0, columnspan=4, sticky='ew', pady=10)
+        current_row += 1
+
+        # Scheduling Section
+        ttk.Label(advanced_frame, text="Scheduling", font=('TkDefaultFont', 9, 'bold')).grid(
+            row=current_row, column=0, columnspan=4, sticky=tk.W, padx=5, pady=(0, 5))
+        current_row += 1
 
         self.schedule_var = tk.StringVar()
-        ttk.Label(advanced_frame, text="Schedule (HH:MM)").grid(row=3, column=0, sticky=tk.W, **pad)
-        ttk.Entry(advanced_frame, textvariable=self.schedule_var, width=10).grid(row=3, column=1, sticky=tk.W, **pad)
+        ttk.Label(advanced_frame, text="Schedule (HH:MM):").grid(
+            row=current_row, column=0, sticky=tk.W, **pad)
+        ttk.Entry(advanced_frame, textvariable=self.schedule_var, width=10).grid(
+            row=current_row, column=1, sticky=tk.W, **pad)
+        ttk.Label(advanced_frame, text="(Daily run time)", foreground='gray').grid(
+            row=current_row, column=2, sticky=tk.W, padx=(5, 0))
+        current_row += 1
 
-        # Output settings
-        ttk.Label(advanced_frame, text="CSV Output:").grid(row=4, column=0, sticky=tk.W, **pad)
-        ttk.Entry(advanced_frame, textvariable=self.csv_path_var, width=32).grid(row=4, column=1, columnspan=2, sticky=tk.W, **pad)
-        ttk.Button(advanced_frame, text="Browse...", command=self._select_csv).grid(row=4, column=3, sticky=tk.W, **pad)
+        # Separator
+        ttk.Separator(advanced_frame, orient='horizontal').grid(
+            row=current_row, column=0, columnspan=4, sticky='ew', pady=10)
+        current_row += 1
 
-        ttk.Label(advanced_frame, text="Image Download Folder:").grid(row=5, column=0, sticky=tk.W, **pad)
-        ttk.Entry(advanced_frame, textvariable=self.download_dir_var, width=32).grid(row=5, column=1, columnspan=2, sticky=tk.W, **pad)
-        ttk.Button(advanced_frame, text="Browse...", command=self._select_image_dir).grid(row=5, column=3, sticky=tk.W, **pad)
+        # Output Settings Section
+        ttk.Label(advanced_frame, text="Output Settings", font=('TkDefaultFont', 9, 'bold')).grid(
+            row=current_row, column=0, columnspan=4, sticky=tk.W, padx=5, pady=(0, 5))
+        current_row += 1
 
-        ttk.Label(advanced_frame, text="Thumbnail width (px):").grid(row=6, column=0, sticky=tk.W, **pad)
-        ttk.Entry(advanced_frame, textvariable=self.thumbnails_var, width=10).grid(row=6, column=1, sticky=tk.W, **pad)
+        ttk.Label(advanced_frame, text="CSV Output:").grid(
+            row=current_row, column=0, sticky=tk.W, **pad)
+        ttk.Entry(advanced_frame, textvariable=self.csv_path_var, width=32, state='readonly').grid(
+            row=current_row, column=1, columnspan=2, sticky=tk.W, **pad)
+        ttk.Label(advanced_frame, text="(Auto-generated)", foreground='gray').grid(
+            row=current_row, column=3, sticky=tk.W, padx=(5, 0))
+        current_row += 1
+
+        ttk.Label(advanced_frame, text="Image Download Folder:").grid(
+            row=current_row, column=0, sticky=tk.W, **pad)
+        ttk.Entry(advanced_frame, textvariable=self.download_dir_var, width=32, state='readonly').grid(
+            row=current_row, column=1, columnspan=2, sticky=tk.W, **pad)
+        ttk.Label(advanced_frame, text="(Auto-generated)", foreground='gray').grid(
+            row=current_row, column=3, sticky=tk.W, padx=(5, 0))
+        current_row += 1
+
+        ttk.Label(advanced_frame, text="Thumbnail width (px):").grid(
+            row=current_row, column=0, sticky=tk.W, **pad)
+        ttk.Entry(advanced_frame, textvariable=self.thumbnails_var, width=10).grid(
+            row=current_row, column=1, sticky=tk.W, **pad)
+        current_row += 1
 
         # Restore paned window position after widgets are created
         self.after(100, self._restore_paned_position)
-
-    # ------------------------------------------------------------------
-    # Event handlers
-    # ------------------------------------------------------------------
-    def _handle_shop_selection(self, event=None):
-        value = self.shop_var.get()
-        if value == "Custom...":
-            self.custom_shop_entry.configure(state="normal")
-            self.custom_shop_var.set('')
-        else:
-            self.custom_shop_entry.configure(state="disabled")
-            self.custom_shop_var.set('')
-        self._update_preview()
 
         # Global space key handler - must be at end of __init__
         # Bind to all widgets to intercept before widget-specific handlers
         self.bind_all("<space>", self._global_space_handler)
 
-    def _select_csv(self):
-        filename = filedialog.asksaveasfilename(defaultextension='.csv', filetypes=[('CSV files', '*.csv'), ('All files', '*.*')])
-        if filename:
-            self.csv_path_var.set(filename)
+    # ------------------------------------------------------------------
+    # Event handlers
+    # ------------------------------------------------------------------
 
-    def _select_image_dir(self):
-        directory = filedialog.askdirectory()
-        if directory:
-            self.download_dir_var.set(directory)
 
     def load_csv_file(self):
         """Load a CSV file and display results with thumbnails"""
@@ -990,341 +1084,6 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 )
                 self.ebay_results_tree.insert('', tk.END, values=values)
 
-    def _run_image_analysis_worker(self):
-        """Worker method for image analysis (runs in background thread)"""
-        search_method = self.image_search_method.get()
-        enhancement_level = self.image_enhancement.get()
-
-        try:
-            days_back = int(self.ebay_days_back.get())
-        except (ValueError, AttributeError):
-            days_back = 90
-
-        lazy_search = self.lazy_search_enabled.get()
-
-        def update_callback(status, progress):
-            self.ebay_status.set(status)
-            self.ebay_progress['value'] = progress
-
-        def display_callback(search_result):
-            analysis_results = self._convert_image_results_to_analysis(search_result)
-            self._display_ebay_results(analysis_results)
-
-        workers.run_image_analysis_worker(
-            self.image_analysis_path,
-            search_method,
-            enhancement_level,
-            days_back,
-            lazy_search,
-            update_callback,
-            display_callback
-        )
-
-    def _run_ebay_image_comparison_worker(self):
-        """Worker method for eBay image comparison (runs in background thread)"""
-        # Get search term from image analysis or prompt user
-        search_term = self._get_search_term_for_comparison()
-        if not search_term:
-            self.ebay_status.set("eBay image comparison cancelled")
-            self.ebay_progress['value'] = 0
-            return
-
-        # Get configuration settings
-        try:
-            days_back = int(self.ebay_days_back.get())
-        except (ValueError, AttributeError):
-            days_back = 90
-
-        try:
-            similarity_threshold = float(self.similarity_threshold.get()) / 100.0
-        except (ValueError, AttributeError):
-            similarity_threshold = 0.7
-
-        try:
-            max_images = int(self.max_images.get())
-        except (ValueError, AttributeError):
-            max_images = 5
-
-        show_browser = getattr(self, 'show_browser_choice', False)
-
-        def update_callback(status, progress):
-            self.ebay_status.set(status)
-            self.ebay_progress['value'] = progress
-
-        def display_callback(result):
-            display_results = self._convert_image_comparison_results(result, search_term)
-            self._display_ebay_results(display_results)
-
-        def show_message_callback(title, message):
-            from tkinter import messagebox
-            messagebox.showinfo(title, message)
-
-        workers.run_ebay_image_comparison_worker(
-            self.image_analysis_path,
-            search_term,
-            days_back,
-            similarity_threshold,
-            max_images,
-            show_browser,
-            update_callback,
-            display_callback,
-            show_message_callback
-        )
-
-    def _get_search_term_for_comparison(self):
-        """Get search term for image comparison"""
-        # Create a simple dialog to get search term
-        dialog = tk.Toplevel(self)
-        dialog.title("eBay Image Comparison - Search Term")
-        dialog.geometry("400x200")
-        dialog.transient(self)
-        dialog.grab_set()
-
-        # Center the dialog
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
-        y = (dialog.winfo_screenheight() // 2) - (200 // 2)
-        dialog.geometry(f"+{x}+{y}")
-
-        result = {'search_term': None}
-
-        # Instructions
-        ttk.Label(dialog, text="Enter search term for eBay sold listing comparison:",
-                 font=('TkDefaultFont', 10)).pack(pady=10)
-
-        ttk.Label(dialog, text="Examples: 'Yura Kano photobook', 'Pokemon card Charizard'",
-                 font=('TkDefaultFont', 8), foreground='gray').pack(pady=(0, 10))
-
-        # Entry field
-        search_var = tk.StringVar()
-        entry = ttk.Entry(dialog, textvariable=search_var, width=40, font=('TkDefaultFont', 10))
-        entry.pack(pady=10)
-        entry.focus()
-
-        # Buttons
-        button_frame = ttk.Frame(dialog)
-        button_frame.pack(pady=20)
-
-        def on_ok():
-            term = search_var.get().strip()
-            if term:
-                result['search_term'] = term
-                dialog.destroy()
-            else:
-                messagebox.showerror("Error", "Please enter a search term")
-
-        def on_cancel():
-            dialog.destroy()
-
-        ttk.Button(button_frame, text="Start Comparison", command=on_ok).pack(side=tk.LEFT, padx=10)
-        ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.LEFT, padx=10)
-
-        # Bind Enter key
-        entry.bind('<Return>', lambda e: on_ok())
-
-        # Wait for dialog to close
-        self.wait_window(dialog)
-
-        return result['search_term']
-
-    def _convert_image_comparison_results(self, result, search_term):
-        """Convert image comparison results to display format"""
-        display_results = []
-
-        if result.matches_found > 0:
-            for match in result.all_matches:
-                # Convert to the expected format for the results table
-                display_results.append({
-                    'title': match.title,
-                    'mandarake_price': f"Search: {search_term}",
-                    'ebay_sold_count': '1 (matched)',
-                    'ebay_median_price': f"${match.price:.2f}",
-                    'ebay_price_range': f"Similarity: {float(match.image_similarity):.1%}",
-                    'profit_margin': f"Sold: {match.sold_date}",
-                    'estimated_profit': f"Confidence: {float(match.confidence_score):.1%}"
-                })
-
-            # Add summary row
-            if len(result.all_matches) > 1:
-                avg_price = result.average_price
-                price_range = f"${result.price_range[0]:.2f} - ${result.price_range[1]:.2f}"
-
-                display_results.insert(0, {
-                    'title': f"🎯 SUMMARY: {result.matches_found} Visual Matches Found",
-                    'mandarake_price': f"Average Price: ${avg_price:.2f}",
-                    'ebay_sold_count': f"{result.matches_found} matches",
-                    'ebay_median_price': f"${avg_price:.2f}",
-                    'ebay_price_range': price_range,
-                    'profit_margin': f"Confidence: {result.confidence}",
-                    'estimated_profit': f"Best: {float(result.best_match.image_similarity):.1%} similar"
-                })
-
-        return display_results
-
-    def start_category_research(self):
-        """Start the category research process"""
-        def research_worker():
-            try:
-                from category_optimizer import research_category_sync
-
-                # Get research parameters
-                if self.use_custom_terms.get():
-                    custom_terms_text = self.custom_terms_var.get().strip()
-                    if not custom_terms_text:
-                        self.research_status.set("Error: Please enter custom terms or use built-in category")
-                        return
-
-                    custom_terms = [term.strip() for term in custom_terms_text.split(',')]
-                    category = "custom"
-                    result = research_category_sync(category, custom_terms)
-                else:
-                    category = self.research_category.get()
-                    result = research_category_sync(category)
-
-                # Update results display
-                self.research_progress.stop()
-
-                if result.get('error'):
-                    self.research_status.set(f"Research failed: {result['error']}")
-                    return
-
-                # Format and display results
-                results_text = self._format_research_results(result)
-
-                self.research_results_text.config(state=tk.NORMAL)
-                self.research_results_text.delete(1.0, tk.END)
-                self.research_results_text.insert(tk.END, results_text)
-                self.research_results_text.config(state=tk.DISABLED)
-
-                quality_score = result.get('performance_metrics', {}).get('research_quality_score', 0)
-                self.research_status.set(f"Research complete! Quality score: {quality_score}/100")
-
-            except Exception as e:
-                self.research_progress.stop()
-                self.research_status.set(f"Research error: {e}")
-
-        # Start research
-        self.research_status.set("Starting category research...")
-        self.research_progress.start()
-
-        self.research_results_text.config(state=tk.NORMAL)
-        self.research_results_text.delete(1.0, tk.END)
-        self.research_results_text.insert(tk.END, "Research in progress...\n\nThis may take 1-2 minutes as we analyze eBay data.")
-        self.research_results_text.config(state=tk.DISABLED)
-
-        # Run in background thread
-        import threading
-        thread = threading.Thread(target=research_worker)
-        thread.daemon = True
-        thread.start()
-
-    def _format_research_results(self, result: dict) -> str:
-        """Format research results for display"""
-        try:
-            text = f"RESEARCH RESULTS - {result.get('description', 'Unknown Category')}\n"
-            text += "=" * 60 + "\n\n"
-
-            # Performance metrics
-            metrics = result.get('performance_metrics', {})
-            text += f"Quality Score: {metrics.get('research_quality_score', 0)}/100\n"
-            text += f"Items Analyzed: {metrics.get('total_items_analyzed', 0)}\n"
-            text += f"Most Effective Term: {metrics.get('most_effective_term', 'N/A')}\n\n"
-
-            # Top learned keywords
-            keywords = result.get('learned_keywords', {})
-            if keywords:
-                text += "TOP LEARNED KEYWORDS:\n"
-                text += "-" * 25 + "\n"
-                for keyword, count in list(keywords.items())[:10]:
-                    text += f"• {keyword} (appeared {count} times)\n"
-                text += "\n"
-
-            # Price patterns
-            price_patterns = result.get('price_patterns', {})
-            if price_patterns:
-                text += "PRICE ANALYSIS:\n"
-                text += "-" * 15 + "\n"
-                text += f"Median Price: ${price_patterns.get('median', 0):.2f}\n"
-                text += f"Average Price: ${price_patterns.get('mean', 0):.2f}\n"
-                text += f"Price Variation: ±${price_patterns.get('std_dev', 0):.2f}\n\n"
-
-            # Optimization rules
-            rules = result.get('optimization_rules', [])
-            if rules:
-                text += "OPTIMIZATION RULES LEARNED:\n"
-                text += "-" * 30 + "\n"
-                for i, rule in enumerate(rules, 1):
-                    confidence = rule.get('confidence', 'unknown').upper()
-                    text += f"{i}. [{confidence}] {rule.get('rule', '')}\n"
-                text += "\n"
-
-            # Common phrases
-            title_patterns = result.get('title_patterns', {})
-            common_phrases = title_patterns.get('common_phrases', [])
-            if common_phrases:
-                text += "COMMON SUCCESSFUL PHRASES:\n"
-                text += "-" * 30 + "\n"
-                for phrase_data in common_phrases[:8]:
-                    phrase = phrase_data.get('phrase', '')
-                    count = phrase_data.get('count', 0)
-                    text += f"• \"{phrase}\" (used {count} times)\n"
-                text += "\n"
-
-            text += "These optimizations will automatically be applied when using this category in future searches."
-
-            return text
-
-        except Exception as e:
-            return f"Error formatting results: {e}"
-
-    def view_optimization_profiles(self):
-        """Open a dialog to view saved optimization profiles"""
-        from category_optimizer import CategoryOptimizer
-
-        # Create profiles window
-        profiles_window = tk.Toplevel(self.master)
-        profiles_window.title("Saved Optimization Profiles")
-        profiles_window.geometry("500x400")
-        profiles_window.transient(self.master)
-
-        # Main frame
-        main_frame = ttk.Frame(profiles_window)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        ttk.Label(main_frame, text="Saved Optimization Profiles", font=("Arial", 12, "bold")).pack(pady=(0, 10))
-
-        # Profile list
-        optimizer = CategoryOptimizer()
-        profiles_dir = optimizer.profiles_dir
-
-        if profiles_dir.exists():
-            profile_files = list(profiles_dir.glob("*_latest.json"))
-
-            if profile_files:
-                for profile_file in profile_files:
-                    try:
-                        profile = optimizer.load_optimization_profile(profile_file.stem.replace('_latest', ''))
-                        if profile:
-                            frame = ttk.LabelFrame(main_frame, text=profile.get('description', 'Unknown'))
-                            frame.pack(fill=tk.X, pady=5)
-
-                            date = profile.get('research_date', 'Unknown date')
-                            quality = profile.get('performance_metrics', {}).get('research_quality_score', 0)
-                            keywords_count = len(profile.get('learned_keywords', {}))
-
-                            info_text = f"Date: {date[:10]} | Quality: {quality}/100 | Keywords: {keywords_count}"
-                            ttk.Label(frame, text=info_text, foreground="gray").pack(padx=10, pady=5)
-
-                    except Exception as e:
-                        continue
-            else:
-                ttk.Label(main_frame, text="No optimization profiles found.\nRun research to create profiles.",
-                         foreground="gray").pack(pady=20)
-        else:
-            ttk.Label(main_frame, text="No optimization profiles directory found.",
-                     foreground="gray").pack(pady=20)
-
-        ttk.Button(main_frame, text="Close", command=profiles_window.destroy).pack(pady=(20, 0))
 
     def _restore_paned_position(self):
         """Restore the paned window sash position from saved settings"""
@@ -1561,6 +1320,37 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         except Exception as exc:
             messagebox.showerror('Error', f'Failed to save config: {exc}')
 
+    def _save_config_on_enter(self, event=None):
+        """Autosave config with new filename when Enter is pressed in keyword field."""
+        # Commit keyword changes first
+        self._commit_keyword_changes(event)
+
+        # Save config with autoname
+        config = self._collect_config()
+        if not config:
+            return
+
+        try:
+            config_path = self._save_config_autoname(config)
+            # Add to recent files
+            self.settings.add_recent_config_file(str(config_path))
+            self._update_recent_menu()
+
+            # Reload the tree to ensure the new file appears
+            self._load_config_tree()
+
+            # Select the newly saved config in the tree
+            for item in self.config_tree.get_children():
+                values = self.config_tree.item(item, 'values')
+                if values and values[0] == config_path.name:
+                    self.config_tree.selection_set(item)
+                    self.config_tree.see(item)
+                    break
+
+            self.status_var.set(f"✓ Saved: {config_path.name}")
+        except Exception as exc:
+            self.status_var.set(f"Save failed: {exc}")
+
     def run_now(self):
         # Check if a CSV is loaded - if so, use its corresponding config
         if hasattr(self, 'csv_compare_path') and self.csv_compare_path:
@@ -1710,17 +1500,18 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         return path
 
     def _collect_config(self):
-        keyword = self.keyword_var.get().strip()
+        # Don't strip keyword here - let it be stripped only on commit (FocusOut)
+        keyword = self.keyword_var.get()
 
         config: dict[str, object] = {
             'keyword': keyword,
             'hide_sold_out': self.hide_sold_var.get(),
+            'csv_show_in_stock_only': self.csv_in_stock_only.get() if hasattr(self, 'csv_in_stock_only') else False,
+            'csv_add_secondary_keyword': self.csv_add_secondary_keyword.get() if hasattr(self, 'csv_add_secondary_keyword') else False,
             'language': self.language_var.get(),
             'fast': self.fast_var.get(),
             'resume': self.resume_var.get(),
             'debug': self.debug_var.get(),
-            'client_id': self.client_id_var.get().strip(),
-            'client_secret': self.client_secret_var.get().strip(),
         }
 
         categories = self._get_selected_categories()
@@ -1782,9 +1573,21 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         return config
 
     def _resolve_shop(self):
-        selection = self.shop_var.get()
-        if selection == "Custom...":
+        """Get the selected shop code from the listbox."""
+        selection = self.shop_listbox.curselection()
+        if not selection:
+            return "all"  # Default to all stores if nothing selected
+
+        index = selection[0]
+        shop_code = self.shop_code_map[index]
+
+        if shop_code == "custom":
             return self.custom_shop_var.get().strip()
+
+        return shop_code if shop_code else "all"
+
+    def _resolve_shop_old(self):
+        """Old method - keeping for reference during migration."""
         for code, name in STORE_OPTIONS:
             label = f"{name} ({code})"
             if selection == label:
@@ -1946,17 +1749,60 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         finally:
             self._settings_loaded = True
 
+    def _on_listbox_paned_configure(self, event=None):
+        """Handle listbox paned window configure event - restore position once."""
+        if not self._listbox_paned_restored:
+            # Wait a bit to ensure proper sizing
+            self.after(50, self._restore_listbox_paned_position)
+            self._listbox_paned_restored = True
+
+    def _restore_listbox_paned_position(self):
+        """Restore the listbox paned window sash position from saved settings."""
+        if not hasattr(self, 'listbox_paned'):
+            return
+        try:
+            ratio = self.gui_settings.get('listbox_paned_ratio', 0.65)  # Default 65% for categories, 35% for shops
+            total_width = self.listbox_paned.winfo_width()
+
+            # Only restore if window is properly sized (> 500px to avoid early restoration)
+            if total_width > 500:
+                sash_pos = int(total_width * ratio)
+                self.listbox_paned.sash_place(0, sash_pos, 0)
+                print(f"[LISTBOX PANED] Restored sash position: {sash_pos}px (ratio: {ratio:.2f}, total: {total_width}px)")
+                self._listbox_paned_restored = True  # Mark as successfully restored
+            else:
+                print(f"[LISTBOX PANED] Skipping restore - window too small: {total_width}px")
+        except Exception as e:
+            print(f"[LISTBOX PANED] Error restoring position: {e}")
+
     def _save_gui_settings(self):
         if not getattr(self, '_settings_loaded', False):
             return
         try:
             SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+            # Save listbox paned position as ratio - only if window is properly sized
+            listbox_ratio = self.gui_settings.get('listbox_paned_ratio', 0.65)  # Use existing ratio as default
+            if hasattr(self, 'listbox_paned'):
+                try:
+                    total_width = self.listbox_paned.winfo_width()
+                    # Only save if window is properly sized (> 500px)
+                    if total_width > 500:
+                        sash_pos = self.listbox_paned.sash_coord(0)[0]
+                        listbox_ratio = sash_pos / total_width
+                        print(f"[LISTBOX PANED] Saving sash position: {sash_pos}px (ratio: {listbox_ratio:.2f}, total: {total_width}px)")
+                    else:
+                        print(f"[LISTBOX PANED] Skipping save - window too small: {total_width}px (keeping ratio: {listbox_ratio:.2f})")
+                except Exception as e:
+                    print(f"[LISTBOX PANED] Error saving position: {e}")
+
             data = {
                 'mimic': bool(self.mimic_var.get()),
                 'ebay_max_results': self.browserless_max_results.get() if hasattr(self, 'browserless_max_results') else "10",
                 'ebay_max_comparisons': self.browserless_max_comparisons.get() if hasattr(self, 'browserless_max_comparisons') else "MAX",
                 'csv_in_stock_only': bool(self.csv_in_stock_only.get()) if hasattr(self, 'csv_in_stock_only') else True,
-                'csv_add_secondary_keyword': bool(self.csv_add_secondary_keyword.get()) if hasattr(self, 'csv_add_secondary_keyword') else False
+                'csv_add_secondary_keyword': bool(self.csv_add_secondary_keyword.get()) if hasattr(self, 'csv_add_secondary_keyword') else False,
+                'listbox_paned_ratio': listbox_ratio
             }
             with SETTINGS_PATH.open('w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
@@ -1991,6 +1837,48 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 label = f"{code} - {info['en']}"
                 self.detail_listbox.insert(tk.END, label)
                 self.detail_code_map.append(code)
+
+    def _populate_shop_list(self):
+        """Populate shop listbox with all available stores."""
+        self.shop_listbox.delete(0, tk.END)
+        self.shop_code_map = []
+
+        # Add "All Stores" option first
+        self.shop_listbox.insert(tk.END, "All Stores")
+        self.shop_code_map.append("all")
+
+        # Add all individual stores
+        for code, name in STORE_OPTIONS:
+            label = f"{name} ({code})"
+            self.shop_listbox.insert(tk.END, label)
+            self.shop_code_map.append(code)
+
+        # Add "Custom..." option at the end
+        self.shop_listbox.insert(tk.END, "Custom...")
+        self.shop_code_map.append("custom")
+
+        # Default selection: All Stores
+        self.shop_listbox.selection_set(0)
+
+    def _on_shop_selected(self, event=None):
+        """Handle shop selection from listbox."""
+        selection = self.shop_listbox.curselection()
+        if not selection:
+            return
+
+        index = selection[0]
+        shop_code = self.shop_code_map[index]
+
+        if shop_code == "custom":
+            # Enable custom shop entry
+            self.custom_shop_entry.configure(state="normal")
+            self.custom_shop_var.set('')
+        else:
+            # Disable custom shop entry
+            self.custom_shop_entry.configure(state="disabled")
+            self.custom_shop_var.set('')
+
+        self._update_preview()
 
     def _on_main_category_selected(self, event=None):
         code = utils.extract_code(self.main_category_var.get())
@@ -2194,9 +2082,8 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             return
 
         from mandarake_scraper import EbayAPI
-        client_id = self.client_id_var.get().strip()
-        client_secret = self.client_secret_var.get().strip()
-        ebay_api = EbayAPI(client_id, client_secret)
+        # Note: eBay API credentials removed from GUI - using web scraping instead
+        ebay_api = EbayAPI("", "")
 
         self.status_var.set("Searching by image on eBay (API)...")
         url = ebay_api.search_by_image_api(local_image_path)
@@ -2251,17 +2138,27 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         # Confirm deletion
         count = len(selection)
         item_word = "item" if count == 1 else "items"
-        if not messagebox.askyesno("Confirm Delete", f"Delete {count} {item_word}?"):
+        if not messagebox.askyesno("Confirm Delete",
+                                   f"Delete {count} {item_word}?\n\nThis will also delete associated images from disk."):
             return
 
         try:
-            # Get the titles of selected items to identify them in csv_compare_data
+            # Get the titles and image paths of selected items
             items_to_delete = []
+            images_to_delete = []
             for item_id in selection:
                 values = self.csv_items_tree.item(item_id)['values']
                 if values:
                     title = values[0]  # Title is first column
                     items_to_delete.append(title)
+
+                    # Find the corresponding row in csv_compare_data to get image path
+                    for row in self.csv_compare_data:
+                        if row.get('title', '') == title:
+                            local_image = row.get('local_image', '')
+                            if local_image:
+                                images_to_delete.append(local_image)
+                            break
 
             # Remove from csv_compare_data by matching titles
             original_count = len(self.csv_compare_data)
@@ -2271,12 +2168,27 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             ]
             deleted_count = original_count - len(self.csv_compare_data)
 
+            # Delete associated image files
+            images_deleted = 0
+            for image_path in images_to_delete:
+                try:
+                    img_file = Path(image_path)
+                    if img_file.exists():
+                        img_file.unlink()
+                        images_deleted += 1
+                        print(f"[CSV DELETE] Deleted image: {image_path}")
+                except Exception as e:
+                    print(f"[CSV DELETE] Failed to delete image {image_path}: {e}")
+
             # Refresh the display
-            self._display_csv_items()
+            self.filter_csv_items()
 
             # Update status
-            self.status_var.set(f"Deleted {deleted_count} {item_word}")
-            print(f"[CSV DELETE] Removed {deleted_count} items from CSV data")
+            status_msg = f"Deleted {deleted_count} {item_word}"
+            if images_deleted > 0:
+                status_msg += f" and {images_deleted} image{'s' if images_deleted != 1 else ''}"
+            self.status_var.set(status_msg)
+            print(f"[CSV DELETE] Removed {deleted_count} items and {images_deleted} images from disk")
 
             # Save updated CSV if a file is loaded
             if hasattr(self, 'csv_compare_path') and self.csv_compare_path:
@@ -2293,9 +2205,12 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             return
         item_id = selection[0]
         try:
-            index = int(item_id) - 1
-            if 0 <= index < len(self.csv_compare_data):
-                link = self.csv_compare_data[index].get('product_url', '')
+            # item_id is now 0-based index directly
+            index = int(item_id)
+            # Use filtered items if available
+            items_list = self.csv_filtered_items if hasattr(self, 'csv_filtered_items') and self.csv_filtered_items else self.csv_compare_data
+            if 0 <= index < len(items_list):
+                link = items_list[index].get('product_url', '')
                 if link:
                     webbrowser.open(link)
         except Exception as e:
@@ -2308,18 +2223,20 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             return
         item_id = selection[0]
         try:
-            index = int(item_id) - 1
-            if 0 <= index < len(self.csv_compare_data):
-                item_data = self.csv_compare_data[index]
+            # item_id is now 0-based index directly
+            index = int(item_id)
+            # Use filtered items if available
+            items_list = self.csv_filtered_items if hasattr(self, 'csv_filtered_items') and self.csv_filtered_items else self.csv_compare_data
+            if 0 <= index < len(items_list):
+                item_data = items_list[index]
                 local_image_path = item_data.get('local_image', '')
                 if not local_image_path or not Path(local_image_path).exists():
                     messagebox.showerror("Error", "Local image not found for this item.")
                     return
 
                 from mandarake_scraper import EbayAPI
-                client_id = self.client_id_var.get().strip()
-                client_secret = self.client_secret_var.get().strip()
-                ebay_api = EbayAPI(client_id, client_secret)
+                # Note: eBay API credentials removed from GUI - using web scraping instead
+                ebay_api = EbayAPI("", "")
 
                 self.browserless_status.set("Searching by image on eBay (API)...")
                 url = ebay_api.search_by_image_api(local_image_path)
@@ -2339,9 +2256,12 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             return
         item_id = selection[0]
         try:
-            index = int(item_id) - 1
-            if 0 <= index < len(self.csv_compare_data):
-                item_data = self.csv_compare_data[index]
+            # item_id is now 0-based index directly
+            index = int(item_id)
+            # Use filtered items if available
+            items_list = self.csv_filtered_items if hasattr(self, 'csv_filtered_items') and self.csv_filtered_items else self.csv_compare_data
+            if 0 <= index < len(items_list):
+                item_data = items_list[index]
                 local_image_path = item_data.get('local_image', '')
                 if not local_image_path or not Path(local_image_path).exists():
                     messagebox.showerror("Error", "Local image not found for this item.")
@@ -2434,37 +2354,56 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             raise
 
     def _update_tree_item(self, path: Path, config: dict):
-        """Update a specific tree item's values without reloading the entire tree"""
+        """Update a specific tree item's values without reloading the entire tree, or add if new"""
         # Find the tree item that matches this path
+        existing_item = None
         for item in self.config_tree.get_children():
             if self.config_paths.get(item) == path:
-                # Update just this item's values
-                keyword = config.get('keyword', '')
-
-                # Use category name if available, otherwise show code
-                category = config.get('category_name', config.get('category', ''))
-
-                # Use shop name if available, otherwise show code
-                shop = config.get('shop_name', config.get('shop', ''))
-
-                hide = 'Yes' if config.get('hide_sold_out') else 'No'
-
-                # Results per page (default 48)
-                results_per_page = config.get('results_per_page', 48)
-
-                # Max pages (empty if not set)
-                max_pages = config.get('max_pages', '')
-
-                # New items timeframe
-                recent_hours = config.get('recent_hours')
-                timeframe = self._label_for_recent_hours(recent_hours) if recent_hours else ''
-
-                # Language (default to english)
-                language = config.get('language', 'en')
-
-                values = (path.name, keyword, category, shop, hide, results_per_page, max_pages, timeframe, language)
-                self.config_tree.item(item, values=values)
+                existing_item = item
                 break
+
+        # Prepare values
+        keyword = config.get('keyword', '')
+
+        # Use category name if available, otherwise show code
+        category = config.get('category_name', config.get('category', ''))
+
+        # Use shop name if available, otherwise show code
+        shop = config.get('shop_name', config.get('shop', ''))
+
+        # Hide sold out (affects search URL)
+        hide_sold = 'Yes' if config.get('hide_sold_out') else 'No'
+
+        # Results per page (default 48)
+        results_per_page = config.get('results_per_page', 48)
+
+        # Max pages (empty if not set)
+        max_pages = config.get('max_pages', '')
+
+        # CSV settings
+        csv_show_in_stock = 'Yes' if config.get('csv_show_in_stock_only') else 'No'
+        csv_secondary = 'Yes' if config.get('csv_add_secondary_keyword') else 'No'
+
+        # Latest additions timeframe
+        recent_hours = config.get('recent_hours')
+        latest_additions = self._label_for_recent_hours(recent_hours) if recent_hours else ''
+
+        # Language (default to english)
+        language = config.get('language', 'en')
+
+        values = (path.name, keyword, category, shop, hide_sold, results_per_page, max_pages, csv_show_in_stock, csv_secondary, latest_additions, language)
+
+        if existing_item:
+            # Update existing item
+            self.config_tree.item(existing_item, values=values)
+        else:
+            # Add new item at the end
+            new_item = self.config_tree.insert('', 'end', values=values)
+            self.config_paths[new_item] = path
+            # Select the newly added item
+            self.config_tree.selection_set(new_item)
+            self.config_tree.see(new_item)
+            print(f"[CONFIG TREE] Added new config: {path.name}")
 
     def _load_config_tree(self):
         if not hasattr(self, 'config_tree'):
@@ -2513,6 +2452,10 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             except Exception:
                 continue
 
+            # Skip if data is not a dictionary (malformed config)
+            if not isinstance(data, dict):
+                continue
+
             keyword = data.get('keyword', '')
 
             # Use category name if available, otherwise show code
@@ -2523,7 +2466,8 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             # Use shop name if available, otherwise show code
             shop = data.get('shop_name', data.get('shop', ''))
 
-            hide = 'Yes' if data.get('hide_sold_out') else 'No'
+            # Hide sold out (affects search URL)
+            hide_sold = 'Yes' if data.get('hide_sold_out') else 'No'
 
             # Results per page (default 48)
             results_per_page = data.get('results_per_page', 48)
@@ -2531,14 +2475,18 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             # Max pages (empty if not set)
             max_pages = data.get('max_pages', '')
 
-            # New items timeframe
+            # CSV settings
+            csv_show_in_stock = 'Yes' if data.get('csv_show_in_stock_only') else 'No'
+            csv_secondary = 'Yes' if data.get('csv_add_secondary_keyword') else 'No'
+
+            # Latest additions timeframe
             recent_hours = data.get('recent_hours')
-            timeframe = self._label_for_recent_hours(recent_hours) if recent_hours else ''
+            latest_additions = self._label_for_recent_hours(recent_hours) if recent_hours else ''
 
             # Language (default to english)
             language = data.get('language', 'en')
 
-            values = (cfg_path.name, keyword, category, shop, hide, results_per_page, max_pages, timeframe, language)
+            values = (cfg_path.name, keyword, category, shop, hide_sold, results_per_page, max_pages, csv_show_in_stock, csv_secondary, latest_additions, language)
             item = self.config_tree.insert('', tk.END, values=values)
             self.config_paths[item] = cfg_path
 
@@ -2688,21 +2636,93 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 for row in reader:
                     self.csv_compare_data.append(row)
 
-            # Set "In-stock only" checkbox based on config's hide_sold_out setting
-            hide_sold_out = config.get('hide_sold_out', False)
-            self.csv_in_stock_only.set(hide_sold_out)
+            # Set "In-stock only" checkbox based on config's csv_show_in_stock_only setting
+            show_in_stock_only = config.get('csv_show_in_stock_only', False)
+            self.csv_in_stock_only.set(show_in_stock_only)
 
             self.filter_csv_items()  # Display with filter applied
+
+            # Auto-fill eBay search query from keyword in config
+            self._autofill_search_query_from_config(config)
+
             self.status_var.set(f"CSV loaded successfully: {len(self.csv_compare_data)} items")
             print(f"[CONFIG MENU] Loaded {len(self.csv_compare_data)} items from CSV")
-            print(f"[CONFIG MENU] In-stock only filter set to: {hide_sold_out}")
+            print(f"[CONFIG MENU] Show in-stock only filter set to: {show_in_stock_only}")
 
         except Exception as e:
             self.status_var.set(f"Error loading CSV: {e}")
             print(f"[CONFIG MENU] Error loading CSV: {e}")
 
+    def _autofill_search_query_from_config(self, config):
+        """Auto-fill eBay search query from config keyword and optionally add secondary keyword"""
+        try:
+            # Get keyword from config
+            keyword = config.get('keyword', '').strip()
+            if not keyword:
+                return
+
+            # Check if secondary keyword should be added
+            add_secondary = hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get()
+
+            if add_secondary and self.csv_filtered_items:
+                # Get first filtered item and extract secondary keyword
+                first_item = self.csv_filtered_items[0]
+                title = first_item.get('title', '')
+                if title:
+                    secondary = self._extract_secondary_keyword(title, keyword)
+                    if secondary:
+                        query = f"{keyword} {secondary}"
+                        self.browserless_query_var.set(query)
+                        print(f"[CSV AUTOFILL] Set eBay query with secondary: {query}")
+                        return
+
+            # No secondary keyword, just use primary keyword
+            self.browserless_query_var.set(keyword)
+            print(f"[CSV AUTOFILL] Set eBay query: {keyword}")
+
+        except Exception as e:
+            print(f"[CSV AUTOFILL] Error: {e}")
+
+    def _autofill_search_query_from_csv(self):
+        """Auto-fill eBay search query from first CSV item's keyword and optionally add secondary keyword"""
+        try:
+            if not self.csv_filtered_items:
+                return
+
+            # Get first filtered item
+            first_item = self.csv_filtered_items[0]
+            keyword = first_item.get('keyword', '').strip()
+
+            # If no keyword field, try to extract from title
+            if not keyword:
+                title = first_item.get('title', '')
+                keyword = ' '.join(title.split()[:3]) if title else ''
+
+            if not keyword:
+                return
+
+            # Check if secondary keyword should be added
+            add_secondary = hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get()
+
+            if add_secondary:
+                title = first_item.get('title', '')
+                if title:
+                    secondary = self._extract_secondary_keyword(title, keyword)
+                    if secondary:
+                        query = f"{keyword} {secondary}"
+                        self.browserless_query_var.set(query)
+                        print(f"[CSV AUTOFILL] Set eBay query with secondary: {query}")
+                        return
+
+            # No secondary keyword, just use primary keyword
+            self.browserless_query_var.set(keyword)
+            print(f"[CSV AUTOFILL] Set eBay query: {keyword}")
+
+        except Exception as e:
+            print(f"[CSV AUTOFILL] Error: {e}")
+
     def _auto_save_config(self, *args):
-        """Auto-save the current config when fields change (with debounce)"""
+        """Auto-save the current config when fields change (with 50ms debounce)"""
         # Only auto-save if we have a loaded config
         if not hasattr(self, 'last_saved_path') or not self.last_saved_path:
             return
@@ -2719,53 +2739,18 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         if hasattr(self, '_auto_save_timer') and self._auto_save_timer:
             self.after_cancel(self._auto_save_timer)
 
-        # Schedule auto-save after 500ms of inactivity (debounce)
-        self._auto_save_timer = self.after(500, self._do_auto_save)
+        # Schedule auto-save after 50ms of inactivity (debounce)
+        self._auto_save_timer = self.after(50, self._do_auto_save)
 
     def _do_auto_save(self):
-        """Actually perform the auto-save (called after debounce delay)"""
+        """Actually perform the auto-save - saves without renaming filename"""
         try:
             config = self._collect_config()
             if config:
                 # Save the current selection before updating tree
                 current_selection = self.config_tree.selection()
 
-                # Check if filename should be updated based on config changes
-                # Strip trailing spaces from keyword for filename generation
-                keyword_for_filename = config.get('keyword', '').rstrip()
-                filename_config = config.copy()
-                filename_config['keyword'] = keyword_for_filename
-
-                suggested_filename = utils.suggest_config_filename(filename_config)
-                current_filename = self.last_saved_path.name
-
-                # Track the old path before renaming
-                old_path = self.last_saved_path
-
-                # If the suggested filename is different, rename the file
-                if suggested_filename != current_filename:
-                    new_path = self.last_saved_path.parent / suggested_filename
-
-                    # Only rename if new path doesn't exist or is the same file
-                    if not new_path.exists() or new_path == self.last_saved_path:
-                        try:
-                            # Find the tree item with the old path and update its mapping
-                            for item in self.config_tree.get_children():
-                                if self.config_paths.get(item) == old_path:
-                                    # Update the path mapping to the new path
-                                    self.config_paths[item] = new_path
-                                    break
-
-                            # Delete old file if renaming
-                            if new_path != self.last_saved_path and self.last_saved_path.exists():
-                                self.last_saved_path.unlink()
-
-                            # Update the path
-                            self.last_saved_path = new_path
-                            # Silently renamed (no console spam)
-                        except Exception as e:
-                            print(f"[AUTO-RENAME] Error renaming: {e}")
-
+                # Save without renaming - just update the file in place
                 self._save_config_to_path(config, self.last_saved_path, update_tree=True)
 
                 # Restore the selection after tree update
@@ -2780,6 +2765,61 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 # Silently saved (no console spam)
         except Exception as e:
             print(f"[AUTO-SAVE] Error: {e}")
+
+    def _commit_keyword_changes(self, event=None):
+        """Trim trailing spaces from keyword and rename file if needed (called on blur)"""
+        if not hasattr(self, 'last_saved_path') or not self.last_saved_path:
+            return
+
+        # Don't rename during initial load
+        if not getattr(self, '_settings_loaded', False):
+            return
+
+        # Don't rename while loading a config
+        if getattr(self, '_loading_config', False):
+            return
+
+        try:
+            # Trim trailing spaces from keyword
+            current_keyword = self.keyword_var.get()
+            trimmed_keyword = current_keyword.rstrip()
+
+            # Only update if there were trailing spaces
+            if current_keyword != trimmed_keyword:
+                self.keyword_var.set(trimmed_keyword)
+
+            # Now check if filename should be updated
+            config = self._collect_config()
+            if config:
+                suggested_filename = utils.suggest_config_filename(config)
+                current_filename = self.last_saved_path.name
+
+                # If the suggested filename is different, rename the file
+                if suggested_filename != current_filename:
+                    new_path = self.last_saved_path.parent / suggested_filename
+
+                    # Only rename if new path doesn't exist or is the same file
+                    if not new_path.exists() or new_path == self.last_saved_path:
+                        old_path = self.last_saved_path
+
+                        # Find the tree item with the old path and update its mapping
+                        for item in self.config_tree.get_children():
+                            if self.config_paths.get(item) == old_path:
+                                self.config_paths[item] = new_path
+                                break
+
+                        # Delete old file if renaming
+                        if new_path != self.last_saved_path and self.last_saved_path.exists():
+                            self.last_saved_path.unlink()
+
+                        # Update the path
+                        self.last_saved_path = new_path
+                        print(f"[COMMIT] Renamed config to: {suggested_filename}")
+
+                        # Save and update tree
+                        self._save_config_to_path(config, self.last_saved_path, update_tree=True)
+        except Exception as e:
+            print(f"[COMMIT] Error: {e}")
 
     def _on_config_selected(self, event=None):
         """Load config when selected (single click)"""
@@ -2825,8 +2865,6 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                     'fast': False,
                     'resume': True,
                     'debug': False,
-                    'client_id': '',
-                    'client_secret': '',
                 }
         else:
             # No keyword - create empty config
@@ -2837,8 +2875,6 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 'fast': False,
                 'resume': True,
                 'debug': False,
-                'client_id': '',
-                'client_secret': '',
             }
 
         # Generate filename based on current values
@@ -3011,43 +3047,65 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         self.max_pages_var.set(str(config.get('max_pages', '')))
         self.recent_hours_var.set(self._label_for_recent_hours(config.get('recent_hours')))
 
+        # Set shop selection in listbox
         shop_value = config.get('shop', '')
         matched = False
-        for code, name in STORE_OPTIONS:
-            label = f"{name} ({code})"
-            # Match by code (primary) or by full label
-            if str(shop_value) == str(code) or shop_value == label:
-                self.shop_var.set(label)
+
+        # Try to find matching shop in listbox
+        for idx, code in enumerate(self.shop_code_map):
+            # Match by code (primary)
+            if str(shop_value) == str(code) or shop_value == 'all':
+                self.shop_listbox.selection_clear(0, tk.END)
+                self.shop_listbox.selection_set(idx)
+                self.shop_listbox.see(idx)
                 matched = True
                 break
 
         # If not matched, try matching by name from shop_name field
         if not matched and config.get('shop_name'):
             shop_name = config.get('shop_name')
-            for code, name in STORE_OPTIONS:
-                label = f"{name} ({code})"
-                if shop_name == name or shop_name == label:
-                    self.shop_var.set(label)
-                    matched = True
+            for idx, code in enumerate(self.shop_code_map):
+                if code == "all" or code == "custom":
+                    continue
+                # Find the name for this code
+                for store_code, store_name in STORE_OPTIONS:
+                    if store_code == code and (shop_name == store_name or shop_name in store_name):
+                        self.shop_listbox.selection_clear(0, tk.END)
+                        self.shop_listbox.selection_set(idx)
+                        self.shop_listbox.see(idx)
+                        matched = True
+                        break
+                if matched:
                     break
 
+        # If still not matched, check if it's a custom shop
         if not matched:
-            if shop_value:
-                self.shop_var.set('Custom...')
-                self.custom_shop_entry.configure(state="normal")
-                self.custom_shop_var.set(str(shop_value))
+            if shop_value and shop_value != 'all':
+                # Select "Custom..." option
+                custom_idx = self.shop_code_map.index("custom") if "custom" in self.shop_code_map else -1
+                if custom_idx >= 0:
+                    self.shop_listbox.selection_clear(0, tk.END)
+                    self.shop_listbox.selection_set(custom_idx)
+                    self.shop_listbox.see(custom_idx)
+                    self.custom_shop_entry.configure(state="normal")
+                    self.custom_shop_var.set(str(shop_value))
             else:
-                self.shop_var.set('')
+                # Default to "All Stores" (index 0)
+                self.shop_listbox.selection_clear(0, tk.END)
+                self.shop_listbox.selection_set(0)
                 self.custom_shop_entry.configure(state="disabled")
                 self.custom_shop_var.set('')
 
         self.hide_sold_var.set(config.get('hide_sold_out', False))
+        if hasattr(self, 'csv_in_stock_only'):
+            self.csv_in_stock_only.set(config.get('csv_show_in_stock_only', False))
+        if hasattr(self, 'csv_add_secondary_keyword'):
+            self.csv_add_secondary_keyword.set(config.get('csv_add_secondary_keyword', False))
         self.language_var.set(config.get('language', 'en'))
         self.fast_var.set(config.get('fast', False))
         self.resume_var.set(config.get('resume', True))
         self.debug_var.set(config.get('debug', False))
-        self.client_id_var.set(config.get('client_id', ''))
-        self.client_secret_var.set(config.get('client_secret', ''))
+        # Note: eBay API credentials removed from GUI
 
         self.csv_path_var.set(config.get('csv', ''))
         self.download_dir_var.set(config.get('download_images', ''))
@@ -3227,6 +3285,10 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                         self.csv_compare_data.append(row)
 
                 self.filter_csv_items()  # Display with filter applied
+
+                # Auto-fill eBay search query from first item's keyword
+                self._autofill_search_query_from_csv()
+
                 print(f"[CSV COMPARE] Loaded {len(self.csv_compare_data)} items")
 
             except Exception as e:
@@ -3256,12 +3318,15 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         # Display filtered items WITHOUT thumbnails first (fast load)
         from datetime import datetime, timedelta
         current_time = datetime.now()
-        cutoff_time = current_time - timedelta(hours=12)
+
+        # Use recent_hours setting for CSV "new items" cutoff
+        recent_hours = self._get_recent_hours_value()
+        cutoff_time = current_time - timedelta(hours=recent_hours) if recent_hours else current_time - timedelta(hours=12)
 
         # Store NEW status for each item for thumbnail border rendering
         self.csv_new_items = set()
 
-        for i, row in enumerate(filtered_items, 1):
+        for i, row in enumerate(filtered_items):
             # Calculate NEW indicator dynamically
             first_seen_str = row.get('first_seen', '')
             if first_seen_str:
@@ -3278,38 +3343,74 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             stock_display = 'Yes' if row.get('in_stock', '').lower() in ('true', 'yes', '1') else 'No'
             category = row.get('category', '')
 
-            # Insert WITHOUT image for fast loading
-            self.csv_items_tree.insert('', 'end', iid=str(i), text=str(i),
+            # Insert WITHOUT image for fast loading (use 0-based index as iid for proper mapping)
+            self.csv_items_tree.insert('', 'end', iid=str(i), text=str(i+1),
                                       values=(title, price, shop, stock_display, category))
 
         print(f"[CSV COMPARE] Displayed {len(filtered_items)} items (in-stock filter: {in_stock_only})")
 
-        # Load thumbnails in background thread
-        self._start_thread(self._load_csv_thumbnails_worker, filtered_items)
+        # Store filtered items for thumbnail toggling
+        self.csv_filtered_items = filtered_items
+
+        # Load thumbnails in background thread if enabled
+        if self.csv_show_thumbnails.get():
+            self._start_thread(self._load_csv_thumbnails_worker, filtered_items)
+        else:
+            print(f"[CSV THUMBNAILS] Thumbnails disabled, skipping load")
 
     def _load_csv_thumbnails_worker(self, filtered_items):
         """Background worker to load CSV thumbnails without blocking UI"""
         def update_image_callback(item_id, img):
             def update_image():
                 try:
-                    if item_id in [self.csv_items_tree.item(child)['text'] or child for child in self.csv_items_tree.get_children()]:
+                    # item_id is the tree item's iid (0-based index as string)
+                    if item_id in self.csv_items_tree.get_children():
                         self.csv_items_tree.item(item_id, image=img, text='')
                         self.csv_images[item_id] = img
                 except Exception as e:
                     print(f"[CSV THUMBNAILS] Error updating image for {item_id}: {e}")
             self.after(0, update_image)
 
+        # Get current thumbnail column width
+        thumb_width = self.csv_items_tree.column('#0', 'width')
+
         workers.load_csv_thumbnails_worker(
             filtered_items,
             self.csv_new_items,
-            self.csv_images,
-            update_image_callback
+            update_image_callback,
+            thumb_width
         )
 
     def _on_csv_filter_changed(self):
         """Handle CSV filter changes - filter items and save setting"""
         self.filter_csv_items()
         self._save_gui_settings()
+
+    def _on_recent_hours_changed(self, *args):
+        """Handle latest additions timeframe change - refresh CSV view if loaded"""
+        # Only refresh if CSV is loaded
+        if hasattr(self, 'csv_compare_data') and self.csv_compare_data:
+            self.filter_csv_items()
+
+    def _on_csv_column_resize(self, event):
+        """Handle column resize event to reload thumbnails with new size"""
+        # Only handle if we're resizing the thumbnail column (#0)
+        # Use a timer to avoid reloading on every pixel change
+        if hasattr(self, '_resize_timer'):
+            self.after_cancel(self._resize_timer)
+
+        def reload_thumbnails():
+            # Check if thumbnail column was resized and thumbnails are enabled
+            if self.csv_show_thumbnails.get() and hasattr(self, 'csv_filtered_items') and self.csv_filtered_items:
+                current_width = self.csv_items_tree.column('#0', 'width')
+                # Only reload if width changed significantly (more than 5px)
+                if not hasattr(self, '_last_thumb_width') or abs(current_width - self._last_thumb_width) > 5:
+                    self._last_thumb_width = current_width
+                    print(f"[CSV THUMBNAILS] Column resized to {current_width}px, reloading thumbnails...")
+                    self._start_thread(self._load_csv_thumbnails_worker, self.csv_filtered_items)
+
+        # Debounce: wait 300ms after user stops dragging
+        self._resize_timer = self.after(300, reload_thumbnails)
 
     def toggle_csv_thumbnails(self):
         """Toggle visibility of thumbnails in CSV treeview"""
@@ -3320,6 +3421,11 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             self.csv_items_tree.column('#0', width=70, stretch=False)
             style = ttk.Style()
             style.configure('CSV.Treeview', rowheight=70)
+
+            # Reload thumbnails if we have CSV items loaded
+            if hasattr(self, 'csv_filtered_items') and self.csv_filtered_items:
+                print(f"[CSV THUMBNAILS] Loading thumbnails for {len(self.csv_filtered_items)} items...")
+                self._start_thread(self._load_csv_thumbnails_worker, self.csv_filtered_items)
         else:
             # Hide thumbnails - set column width to 0
             self.csv_items_tree.column('#0', width=0, stretch=False)
@@ -3407,9 +3513,12 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         item_id = selection[0]
         try:
-            index = int(item_id) - 1
-            if 0 <= index < len(self.csv_compare_data):
-                row = self.csv_compare_data[index]
+            # item_id is now 0-based index directly
+            index = int(item_id)
+            # Use filtered items if available
+            items_list = self.csv_filtered_items if hasattr(self, 'csv_filtered_items') and self.csv_filtered_items else self.csv_compare_data
+            if 0 <= index < len(items_list):
+                row = items_list[index]
 
                 # Get the full title
                 title = row.get('title', '')
@@ -3429,9 +3538,14 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         item_id = selection[0]
         try:
-            index = int(item_id) - 1
-            if 0 <= index < len(self.csv_compare_data):
-                row = self.csv_compare_data[index]
+            # item_id is now 0-based index directly
+            index = int(item_id)
+
+            # Use filtered items if available, otherwise use full list
+            items_list = self.csv_filtered_items if hasattr(self, 'csv_filtered_items') and self.csv_filtered_items else self.csv_compare_data
+
+            if 0 <= index < len(items_list):
+                row = items_list[index]
 
                 # Get the title and primary keyword
                 title = row.get('title', '')
@@ -3516,9 +3630,12 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         item_id = selection[0]
         try:
-            index = int(item_id) - 1
-            if 0 <= index < len(self.csv_compare_data):
-                row = self.csv_compare_data[index]
+            # item_id is now 0-based index directly
+            index = int(item_id)
+            # Use filtered items if available
+            items_list = self.csv_filtered_items if hasattr(self, 'csv_filtered_items') and self.csv_filtered_items else self.csv_compare_data
+            if 0 <= index < len(items_list):
+                row = items_list[index]
 
                 # Extract core word from title and category keyword
                 title = row.get('title', '')
@@ -3608,74 +3725,32 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             messagebox.showinfo("No Items", "No items to compare (check filter settings)")
             return
 
-        # Confirm before batch processing
-        response = messagebox.askyesno(
-            "Batch Comparison",
-            f"Compare {len(items_to_compare)} items with eBay?\nThis may take several minutes."
-        )
+        # Check if 2nd keyword is enabled
+        add_secondary = hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get()
 
-        if response:
-            self.csv_compare_progress.start()
-            self._start_thread(lambda: self._compare_csv_items_worker(items_to_compare))
+        # Choose comparison method based on 2nd keyword setting
+        if add_secondary:
+            # With 2nd keyword: Each item needs individual eBay search (different keywords)
+            response = messagebox.askyesno(
+                "Individual Batch Comparison",
+                f"Compare {len(items_to_compare)} items with individual eBay searches?\n\n"
+                f"2nd keyword is enabled, so each item will have a separate search.\n"
+                f"This will take longer."
+            )
+            if response:
+                self.csv_compare_progress.start()
+                self._start_thread(lambda: self._compare_csv_items_individually_worker(items_to_compare))
+        else:
+            # Without 2nd keyword: Use single cached eBay search for all items
+            response = messagebox.askyesno(
+                "Batch Comparison",
+                f"Compare {len(items_to_compare)} items with cached eBay search?\n\n"
+                f"All items use the same keyword, so we'll reuse eBay results."
+            )
+            if response:
+                self.csv_compare_progress.start()
+                self._start_thread(lambda: self._compare_csv_items_worker(items_to_compare))
 
-    def compare_selected_csv_item_individually(self):
-        """Compare selected CSV item individually with its own eBay search"""
-        selection = self.csv_items_tree.selection()
-        if not selection:
-            messagebox.showinfo("No Selection", "Please select an item to compare")
-            return
-
-        # Get selected item data
-        item_id = selection[0]
-        try:
-            # Find the actual item from the tree display
-            title_prefix = self.csv_items_tree.item(item_id)['values'][0]
-            item = None
-            for row in self.csv_compare_data:
-                if row.get('title', '').startswith(title_prefix.replace('...', '')):
-                    item = row
-                    break
-
-            if not item:
-                messagebox.showerror("Error", "Could not find selected item")
-                return
-
-            # Run comparison in background
-            self.csv_compare_progress.start()
-            self._start_thread(lambda: self._compare_csv_items_individually_worker([item]))
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Invalid selection: {e}")
-
-    def compare_all_csv_items_individually(self):
-        """Compare all visible CSV items individually with separate eBay searches"""
-        if not self.csv_compare_data:
-            messagebox.showinfo("No Data", "Please load a CSV file first")
-            return
-
-        # Get filtered items
-        in_stock_only = self.csv_in_stock_only.get()
-        items_to_compare = []
-
-        for row in self.csv_compare_data:
-            stock = row.get('in_stock', '').lower()
-            if in_stock_only and stock not in ('true', 'yes', '1'):
-                continue
-            items_to_compare.append(row)
-
-        if not items_to_compare:
-            messagebox.showinfo("No Items", "No items to compare (check filter settings)")
-            return
-
-        # Confirm before batch processing
-        response = messagebox.askyesno(
-            "Individual Batch Comparison",
-            f"Run {len(items_to_compare)} separate eBay searches?\nThis will take longer than single search."
-        )
-
-        if response:
-            self.csv_compare_progress.start()
-            self._start_thread(lambda: self._compare_csv_items_individually_worker(items_to_compare))
 
     def _compare_csv_items_worker(self, items):
         """Worker to compare CSV items with eBay - OPTIMIZED with caching (runs in background thread)"""
@@ -3687,7 +3762,8 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         def display_callback(comparison_results):
             self.all_comparison_results = comparison_results
-            self.after(0, lambda: self._display_csv_comparison_results(comparison_results))
+            # Apply filters automatically after comparison
+            self.after(0, self.apply_results_filter)
             self.after(0, self.csv_compare_progress.stop)
 
         def show_message_callback(title, message, msg_type='info'):
@@ -3697,19 +3773,15 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
                 self.after(0, lambda: messagebox.showinfo(title, message))
             self.after(0, self.csv_compare_progress.stop)
 
-        def create_debug_folder_callback(query):
-            return self._create_debug_folder(query)
-
         workers.compare_csv_items_worker(
             items,
             max_results,
-            search_query,
             self.browserless_results_data if hasattr(self, 'browserless_results_data') else [],
+            search_query,
             self.usd_jpy_rate,
             update_callback,
             display_callback,
-            show_message_callback,
-            create_debug_folder_callback
+            show_message_callback
         )
 
     def _compare_csv_items_individually_worker(self, items):
@@ -3722,7 +3794,8 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
 
         def display_callback(comparison_results):
             self.all_comparison_results = comparison_results
-            self.after(0, lambda: self._display_csv_comparison_results(comparison_results))
+            # Apply filters automatically after comparison
+            self.after(0, self.apply_results_filter)
             self.after(0, self.csv_compare_progress.stop)
 
         def show_message_callback(title, message):
@@ -3835,6 +3908,12 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
         print(f"[DEBUG] Debug folder: {debug_folder}")
         return debug_folder
 
+    def _debounced_filter(self):
+        """Debounced filter application (50ms delay)"""
+        if hasattr(self, '_filter_timer') and self._filter_timer:
+            self.after_cancel(self._filter_timer)
+        self._filter_timer = self.after(50, self.apply_results_filter)
+
     def apply_results_filter(self):
         """Apply filters to comparison results"""
         if not self.all_comparison_results:
@@ -3844,19 +3923,46 @@ Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
             min_similarity = float(self.min_similarity_var.get() or 0)
             min_profit = float(self.min_profit_var.get() or 0)
         except ValueError:
-            messagebox.showerror("Invalid Filter", "Please enter valid numbers for filters")
+            # Invalid input, ignore silently during typing
+            return
+
+        # Check if results have similarity/profit data (from comparison)
+        # If not, don't filter (pure eBay search without comparison)
+        has_comparison_data = any('similarity' in r and 'profit_margin' in r for r in self.all_comparison_results)
+
+        if not has_comparison_data:
+            # No comparison data yet, show all results without filtering
+            self._display_csv_comparison_results(self.all_comparison_results)
             return
 
         # Filter results
         filtered_results = []
         for r in self.all_comparison_results:
-            if r['similarity'] >= min_similarity and r['profit_margin'] >= min_profit:
+            similarity = r.get('similarity', 0)
+            profit_margin = r.get('profit_margin', 0)
+            if similarity >= min_similarity and profit_margin >= min_profit:
                 filtered_results.append(r)
+
+        # Sort filtered results by similarity (descending), then by profit margin (descending)
+        filtered_results.sort(key=lambda x: (x.get('similarity', 0), x.get('profit_margin', 0)), reverse=True)
 
         print(f"[FILTER] Showing {len(filtered_results)} of {len(self.all_comparison_results)} results (similarity>={min_similarity}%, profit>={min_profit}%)")
 
         self._display_csv_comparison_results(filtered_results)
-        self.browserless_status.set(f"Showing {len(filtered_results)} of {len(self.all_comparison_results)} results (filtered)")
+        if len(filtered_results) < len(self.all_comparison_results):
+            self.browserless_status.set(f"Showing {len(filtered_results)} of {len(self.all_comparison_results)} results (filtered)")
+        else:
+            self.browserless_status.set(f"Showing all {len(self.all_comparison_results)} results")
+
+    def send_comparison_to_alerts(self):
+        """Send comparison results to Alert tab."""
+        if not self.all_comparison_results:
+            messagebox.showinfo("No Results", "No comparison results available to send to alerts.")
+            return
+
+        # Send all unfiltered comparison results to alerts
+        # The alert tab will filter based on its own thresholds
+        self.alert_tab.add_comparison_results_to_alerts(self.all_comparison_results)
 
     def _display_csv_comparison_results(self, results):
         """Display CSV comparison results in the browserless tree"""
