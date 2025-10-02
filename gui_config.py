@@ -49,9 +49,11 @@ class ScraperGUI(tk.Tk):
         # Initialize settings manager
         self.settings = get_settings_manager()
 
-        # Fetch current USD/JPY exchange rate
-        self.usd_jpy_rate = utils.fetch_exchange_rate()
-        print(f"[EXCHANGE RATE] USD/JPY: {self.usd_jpy_rate}")
+        # Set default exchange rate immediately (don't block GUI launch)
+        self.usd_jpy_rate = 150.0
+
+        # Fetch current USD/JPY exchange rate in background after GUI initializes
+        self._fetch_exchange_rate_async()
 
         self.title("Mandarake Scraper GUI")
 
@@ -103,6 +105,25 @@ class ScraperGUI(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_queue()
         self._update_preview()
+
+    def _fetch_exchange_rate_async(self):
+        """Fetch exchange rate in background thread without blocking GUI launch."""
+        def fetch_rate():
+            try:
+                rate = utils.fetch_exchange_rate()
+                # Update the rate on the main thread
+                self.after(0, lambda: self._update_exchange_rate(rate))
+            except Exception as e:
+                print(f"[EXCHANGE RATE] Background fetch failed: {e}")
+
+        # Start background thread
+        thread = threading.Thread(target=fetch_rate, daemon=True)
+        thread.start()
+
+    def _update_exchange_rate(self, rate: float):
+        """Update exchange rate on main thread."""
+        self.usd_jpy_rate = rate
+        print(f"[EXCHANGE RATE] Updated USD/JPY: {self.usd_jpy_rate}")
 
     def _create_menu_bar(self):
         """Create the application menu bar"""
@@ -329,7 +350,7 @@ With RANSAC enabled:
     # UI construction
     # ------------------------------------------------------------------
     def _build_widgets(self):
-        pad = {"padx": 8, "pady": 4}
+        pad = {"padx": 3, "pady": 4}
 
         # Create status bar
         self.status_var = tk.StringVar(value="Ready")
@@ -466,8 +487,7 @@ With RANSAC enabled:
 
         # Configure top pane grid weights
         top_pane.rowconfigure(4, weight=1)  # Listbox row expands
-        for i in range(7):
-            top_pane.columnconfigure(i, weight=1)
+        top_pane.columnconfigure(6, weight=1)  # Last column expands to fill width
 
         # Middle pane: Options (fixed, no sash below it)
         middle_pane = ttk.Frame(bottom_container)
@@ -479,7 +499,7 @@ With RANSAC enabled:
                         command=self._update_preview).grid(row=0, column=0, sticky=tk.W, **pad)
 
         self.results_per_page_var = tk.StringVar(value="48")
-        ttk.Label(middle_pane, text="Results/page:").grid(row=0, column=1, sticky=tk.W, **pad)
+        ttk.Label(middle_pane, text="Results/page:").grid(row=0, column=1, sticky=tk.W, padx=(15, 5), pady=5)
         results_per_page_combo = ttk.Combobox(
             middle_pane,
             textvariable=self.results_per_page_var,
@@ -491,12 +511,12 @@ With RANSAC enabled:
         self.results_per_page_var.trace_add("write", self._update_preview)
 
         self.max_pages_var = tk.StringVar()
-        ttk.Label(middle_pane, text="Max pages:").grid(row=0, column=3, sticky=tk.W, **pad)
+        ttk.Label(middle_pane, text="Max pages:").grid(row=0, column=3, sticky=tk.W, padx=(15, 5), pady=5)
         ttk.Entry(middle_pane, textvariable=self.max_pages_var, width=8).grid(row=0, column=4, sticky=tk.W, **pad)
         self.max_pages_var.trace_add("write", self._auto_save_config)
 
         self.recent_hours_var = tk.StringVar(value=RECENT_OPTIONS[0][0])
-        ttk.Label(middle_pane, text="Latest:").grid(row=0, column=5, sticky=tk.W, **pad)
+        ttk.Label(middle_pane, text="Latest:").grid(row=0, column=5, sticky=tk.W, padx=(15, 5), pady=5)
         self.recent_combo = ttk.Combobox(
             middle_pane,
             textvariable=self.recent_hours_var,
@@ -520,12 +540,9 @@ With RANSAC enabled:
         self.language_var = tk.StringVar(value="en")
         ttk.Label(middle_pane, text="Language:").grid(row=1, column=0, sticky=tk.W, **pad)
         lang_combo = ttk.Combobox(middle_pane, textvariable=self.language_var, values=["en", "ja"], width=6, state="readonly")
-        lang_combo.grid(row=1, column=6, sticky=tk.W, **pad)
+        lang_combo.grid(row=1, column=1, sticky=tk.W, **pad)
         self.language_var.trace_add("write", self._update_preview)
 
-        # Configure middle pane grid weights
-        for i in range(7):
-            middle_pane.columnconfigure(i, weight=1)
 
         # Bottom pane: Configs/Schedules and buttons (fills remaining space)
         bottom_pane = ttk.Frame(bottom_container)
@@ -538,7 +555,7 @@ With RANSAC enabled:
         # Configs tab
         tree_frame = ttk.Frame(config_schedule_notebook)
         config_schedule_notebook.add(tree_frame, text="Configs")
-        columns = ('file', 'keyword', 'category', 'shop', 'hide_sold', 'results_per_page', 'max_pages', 'csv_show_in_stock', 'csv_secondary', 'latest_additions', 'language')
+        columns = ('file', 'keyword', 'category', 'shop', 'hide_sold', 'results_per_page', 'max_pages', 'latest_additions', 'language')
         self.config_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=6)
         headings = {
             'file': 'File',
@@ -548,8 +565,6 @@ With RANSAC enabled:
             'hide_sold': 'Hide Sold',
             'results_per_page': 'Results/Page',
             'max_pages': 'Max Pages',
-            'csv_show_in_stock': 'Show In-Stock',
-            'csv_secondary': '2nd KW',
             'latest_additions': 'Latest',
             'language': 'Lang',
         }
@@ -561,8 +576,6 @@ With RANSAC enabled:
             'hide_sold': 80,
             'results_per_page': 80,
             'max_pages': 70,
-            'csv_show_in_stock': 90,
-            'csv_secondary': 70,
             'latest_additions': 70,
             'language': 50,
         }
@@ -648,16 +661,34 @@ With RANSAC enabled:
         ttk.Button(browserless_frame, text="Search", command=self.run_scrapy_text_search).grid(row=2, column=0, sticky=tk.W, **pad)
         ttk.Button(browserless_frame, text="Clear Results", command=self.clear_browserless_results).grid(row=2, column=1, sticky=tk.W, **pad)
 
-        # Progress bar
+        # Alert Thresholds frame (row 3) - left side in labeled frame
+        alert_threshold_frame = ttk.LabelFrame(browserless_frame, text="Alert Threshold", padding=5)
+        alert_threshold_frame.grid(row=3, column=0, columnspan=3, sticky=tk.W, **pad)
+
+        # Toggle for alert thresholds
+        self.alert_threshold_active = tk.BooleanVar(value=True)
+        ttk.Checkbutton(alert_threshold_frame, text="Active", variable=self.alert_threshold_active).pack(side=tk.LEFT, padx=5)
+
+        # Min Similarity
+        ttk.Label(alert_threshold_frame, text="Min Similarity %:").pack(side=tk.LEFT, padx=5)
+        self.alert_min_similarity = tk.DoubleVar(value=70.0)
+        ttk.Spinbox(alert_threshold_frame, from_=0, to=100, textvariable=self.alert_min_similarity, width=8).pack(side=tk.LEFT, padx=5)
+
+        # Min Profit
+        ttk.Label(alert_threshold_frame, text="Min Profit %:").pack(side=tk.LEFT, padx=5)
+        self.alert_min_profit = tk.DoubleVar(value=20.0)
+        ttk.Spinbox(alert_threshold_frame, from_=-100, to=1000, textvariable=self.alert_min_profit, width=8).pack(side=tk.LEFT, padx=5)
+
+        # Progress bar (row 4)
         self.browserless_progress = ttk.Progressbar(browserless_frame, mode='indeterminate')
-        self.browserless_progress.grid(row=2, column=3, columnspan=2, sticky=tk.EW, **pad)
+        self.browserless_progress.grid(row=4, column=0, columnspan=6, sticky=tk.EW, **pad)
 
         # Create PanedWindow to split eBay results and CSV comparison sections
         self.ebay_paned = tk.PanedWindow(browserless_frame, orient=tk.VERTICAL, sashwidth=5, sashrelief=tk.RAISED)
-        self.ebay_paned.grid(row=3, column=0, columnspan=5, sticky=tk.NSEW, **pad)
+        self.ebay_paned.grid(row=5, column=0, columnspan=6, sticky=tk.NSEW, **pad)
 
         # Configure grid weights for proper resizing
-        browserless_frame.rowconfigure(3, weight=1)
+        browserless_frame.rowconfigure(5, weight=1)
         browserless_frame.columnconfigure(2, weight=1)
 
         # Results section (top pane)
@@ -725,30 +756,7 @@ With RANSAC enabled:
         # Enable column drag-to-reorder for browserless tree
         self._setup_column_drag(self.browserless_tree)
 
-        # Results filters row
-        filters_frame = ttk.Frame(browserless_results_frame)
-        filters_frame.grid(row=2, column=0, columnspan=2, sticky=tk.EW, pady=(5, 0))
-
-        ttk.Label(filters_frame, text="Min Similarity %:").pack(side=tk.LEFT, padx=5)
-        self.min_similarity_var = tk.StringVar(value="0")
-        similarity_entry = ttk.Entry(filters_frame, textvariable=self.min_similarity_var, width=5)
-        similarity_entry.pack(side=tk.LEFT, padx=5)
-        similarity_entry.bind('<Return>', lambda e: self.apply_results_filter())
-        # Auto-apply filter when value changes
-        self.min_similarity_var.trace_add("write", lambda *args: self._debounced_filter())
-
-        ttk.Label(filters_frame, text="Min Profit %:").pack(side=tk.LEFT, padx=5)
-        self.min_profit_var = tk.StringVar(value="0")
-        profit_entry = ttk.Entry(filters_frame, textvariable=self.min_profit_var, width=5)
-        profit_entry.pack(side=tk.LEFT, padx=5)
-        profit_entry.bind('<Return>', lambda e: self.apply_results_filter())
-        # Auto-apply filter when value changes
-        self.min_profit_var.trace_add("write", lambda *args: self._debounced_filter())
-
-        ttk.Button(filters_frame, text="Apply Filters", command=self.apply_results_filter).pack(side=tk.LEFT, padx=5)
-        ttk.Button(filters_frame, text="→ Send to Alerts", command=self.send_comparison_to_alerts).pack(side=tk.LEFT, padx=5)
-
-        # Status area for browserless search (below filters)
+        # Status area for browserless search
         self.browserless_status = tk.StringVar(value="Ready for eBay text search")
         browserless_status_label = ttk.Label(browserless_results_frame, textvariable=self.browserless_status, relief=tk.SUNKEN, anchor='w')
         browserless_status_label.grid(row=3, column=0, columnspan=2, sticky=tk.EW, pady=(5, 0))
@@ -759,26 +767,18 @@ With RANSAC enabled:
         # CSV Batch Comparison section (bottom pane) --------------------------------
         csv_compare_frame = ttk.LabelFrame(self.ebay_paned, text="CSV Batch Comparison")
         csv_compare_frame.rowconfigure(1, weight=1)
-        csv_compare_frame.columnconfigure(0, weight=1)
+        csv_compare_frame.columnconfigure(3, weight=1)  # Weight on filename column instead
 
-        # CSV loader
-        ttk.Label(csv_compare_frame, text="Load CSV:").grid(row=0, column=0, sticky=tk.W, **pad)
-        ttk.Button(csv_compare_frame, text="Load CSV...", command=self.load_csv_for_comparison).grid(row=0, column=1, sticky=tk.W, **pad)
+        # CSV controls - all left-justified
+        ttk.Checkbutton(csv_compare_frame, text="Newly listed", variable=self.csv_newly_listed_only, command=self._on_csv_filter_changed).grid(row=0, column=0, sticky=tk.W, **pad)
+        ttk.Checkbutton(csv_compare_frame, text="In-stock only", variable=self.csv_in_stock_only, command=self._on_csv_filter_changed).grid(row=0, column=1, sticky=tk.W, **pad)
+        ttk.Button(csv_compare_frame, text="Load CSV...", command=self.load_csv_for_comparison).grid(row=0, column=2, sticky=tk.W, **pad)
         self.csv_compare_label = ttk.Label(csv_compare_frame, text="No file loaded", foreground="gray")
-        self.csv_compare_label.grid(row=0, column=2, columnspan=2, sticky=tk.W, **pad)
-
-        # Filter option (already created in Search tab, just add the widgets here)
-        ttk.Checkbutton(csv_compare_frame, text="In-stock only", variable=self.csv_in_stock_only, command=self._on_csv_filter_changed).grid(row=0, column=4, sticky=tk.W, **pad)
-
-        # Thumbnail toggle
-        self.csv_show_thumbnails = tk.BooleanVar(value=True)
-        ttk.Checkbutton(csv_compare_frame, text="Show thumbnails", variable=self.csv_show_thumbnails, command=self.toggle_csv_thumbnails).grid(row=0, column=6, sticky=tk.W, **pad)
+        self.csv_compare_label.grid(row=0, column=3, columnspan=2, sticky=tk.W, **pad)
 
         # CSV items treeview
         csv_items_frame = ttk.Frame(csv_compare_frame)
         csv_items_frame.grid(row=1, column=0, columnspan=7, sticky=tk.NSEW, **pad)
-        csv_compare_frame.rowconfigure(1, weight=1)
-        csv_compare_frame.columnconfigure(0, weight=1)
 
         # Create custom style for CSV treeview with thumbnails
         style.configure('CSV.Treeview', rowheight=70)  # Match other trees
@@ -954,6 +954,12 @@ With RANSAC enabled:
             row=current_row, column=0, sticky=tk.W, **pad)
         ttk.Entry(advanced_frame, textvariable=self.thumbnails_var, width=10).grid(
             row=current_row, column=1, sticky=tk.W, **pad)
+        current_row += 1
+
+        # CSV Thumbnails toggle
+        self.csv_show_thumbnails = tk.BooleanVar(value=True)
+        ttk.Checkbutton(advanced_frame, text="Show CSV thumbnails", variable=self.csv_show_thumbnails, command=self.toggle_csv_thumbnails).grid(
+            row=current_row, column=0, columnspan=2, sticky=tk.W, **pad)
         current_row += 1
 
         # Restore paned window position after widgets are created
@@ -1615,9 +1621,6 @@ With RANSAC enabled:
         index = selection[0]
         shop_code = self.shop_code_map[index]
 
-        if shop_code == "custom":
-            return self.custom_shop_var.get().strip()
-
         return shop_code if shop_code else "all"
 
     def _resolve_shop_old(self):
@@ -1889,10 +1892,6 @@ With RANSAC enabled:
             self.shop_listbox.insert(tk.END, label)
             self.shop_code_map.append(code)
 
-        # Add "Custom..." option at the end
-        self.shop_listbox.insert(tk.END, "Custom...")
-        self.shop_code_map.append("custom")
-
         # Default selection: All Stores
         self.shop_listbox.selection_set(0)
 
@@ -1904,15 +1903,6 @@ With RANSAC enabled:
 
         index = selection[0]
         shop_code = self.shop_code_map[index]
-
-        if shop_code == "custom":
-            # Enable custom shop entry
-            self.custom_shop_entry.configure(state="normal")
-            self.custom_shop_var.set('')
-        else:
-            # Disable custom shop entry
-            self.custom_shop_entry.configure(state="disabled")
-            self.custom_shop_var.set('')
 
         self._update_preview()
 
@@ -2416,10 +2406,6 @@ With RANSAC enabled:
         # Max pages (empty if not set)
         max_pages = config.get('max_pages', '')
 
-        # CSV settings
-        csv_show_in_stock = 'Yes' if config.get('csv_show_in_stock_only') else 'No'
-        csv_secondary = 'Yes' if config.get('csv_add_secondary_keyword') else 'No'
-
         # Latest additions timeframe
         recent_hours = config.get('recent_hours')
         latest_additions = self._label_for_recent_hours(recent_hours) if recent_hours else ''
@@ -2427,7 +2413,7 @@ With RANSAC enabled:
         # Language (default to english)
         language = config.get('language', 'en')
 
-        values = (path.name, keyword, category, shop, hide_sold, results_per_page, max_pages, csv_show_in_stock, csv_secondary, latest_additions, language)
+        values = (path.name, keyword, category, shop, hide_sold, results_per_page, max_pages, latest_additions, language)
 
         if existing_item:
             # Update existing item
@@ -2456,7 +2442,7 @@ With RANSAC enabled:
         config_files = list(configs_dir.glob('*.json'))
 
         # Load custom order from metadata file
-        order_file = configs_dir / '.config_order.json'
+        order_file = Path('.config_order.json')
         custom_order = []
         if order_file.exists():
             try:
@@ -2511,10 +2497,6 @@ With RANSAC enabled:
             # Max pages (empty if not set)
             max_pages = data.get('max_pages', '')
 
-            # CSV settings
-            csv_show_in_stock = 'Yes' if data.get('csv_show_in_stock_only') else 'No'
-            csv_secondary = 'Yes' if data.get('csv_add_secondary_keyword') else 'No'
-
             # Latest additions timeframe
             recent_hours = data.get('recent_hours')
             latest_additions = self._label_for_recent_hours(recent_hours) if recent_hours else ''
@@ -2522,7 +2504,7 @@ With RANSAC enabled:
             # Language (default to english)
             language = data.get('language', 'en')
 
-            values = (cfg_path.name, keyword, category, shop, hide_sold, results_per_page, max_pages, csv_show_in_stock, csv_secondary, latest_additions, language)
+            values = (cfg_path.name, keyword, category, shop, hide_sold, results_per_page, max_pages, latest_additions, language)
             item = self.config_tree.insert('', tk.END, values=values)
             self.config_paths[item] = cfg_path
 
@@ -2874,32 +2856,28 @@ With RANSAC enabled:
         """Create a new config from current form values"""
         import time
 
-        # Check if there's a keyword entered
-        has_keyword = bool(self.keyword_var.get().strip())
+        # Ensure "All Stores" is selected if nothing is selected
+        if not self.shop_listbox.curselection():
+            self.shop_listbox.selection_clear(0, tk.END)
+            self.shop_listbox.selection_set(0)
 
-        if has_keyword:
-            # Collect current form values
-            config = self._collect_config()
-            if not config:
-                # If collection failed, use minimal defaults
-                config = {
-                    'keyword': self.keyword_var.get().strip(),
-                    'hide_sold_out': False,
-                    'language': 'en',
-                    'fast': False,
-                    'resume': True,
-                    'debug': False,
-                }
-        else:
-            # No keyword - create empty config
+        # Always collect current form values
+        config = self._collect_config()
+
+        # If collection failed, use current GUI values as defaults
+        if not config:
             config = {
-                'keyword': '',
-                'hide_sold_out': False,
-                'language': 'en',
-                'fast': False,
-                'resume': True,
-                'debug': False,
+                'keyword': self.keyword_var.get().strip(),
+                'hide_sold_out': self.hide_sold_var.get(),
+                'language': self.language_var.get(),
+                'fast': self.fast_var.get(),
+                'resume': self.resume_var.get(),
+                'debug': self.debug_var.get(),
             }
+            # Add shop if selected
+            shop_value = self._resolve_shop()
+            if shop_value:
+                config['shop'] = shop_value
 
         # Generate filename based on current values
         timestamp = int(time.time())
@@ -2907,6 +2885,7 @@ With RANSAC enabled:
         configs_dir.mkdir(parents=True, exist_ok=True)
 
         # Use auto-generated filename based on settings, or timestamp if no keyword
+        has_keyword = bool(config.get('keyword', '').strip())
         if has_keyword:
             suggested_filename = utils.suggest_config_filename(config)
             path = configs_dir / suggested_filename
@@ -3020,8 +2999,7 @@ With RANSAC enabled:
         current_order[current_index], current_order[new_index] = current_order[new_index], current_order[current_index]
 
         # Save new order to metadata file
-        configs_dir = Path('configs')
-        order_file = configs_dir / '.config_order.json'
+        order_file = Path('.config_order.json')
         try:
             with order_file.open('w', encoding='utf-8') as f:
                 json.dump(current_order, f, indent=2)
@@ -3102,23 +3080,10 @@ With RANSAC enabled:
                 if matched:
                     break
 
-        # If still not matched, check if it's a custom shop
+        # If still not matched, default to "All Stores"
         if not matched:
-            if shop_value and shop_value != 'all':
-                # Select "Custom..." option
-                custom_idx = self.shop_code_map.index("custom") if "custom" in self.shop_code_map else -1
-                if custom_idx >= 0:
-                    self.shop_listbox.selection_clear(0, tk.END)
-                    self.shop_listbox.selection_set(custom_idx)
-                    self.shop_listbox.see(custom_idx)
-                    self.custom_shop_entry.configure(state="normal")
-                    self.custom_shop_var.set(str(shop_value))
-            else:
-                # Default to "All Stores" (index 0)
-                self.shop_listbox.selection_clear(0, tk.END)
-                self.shop_listbox.selection_set(0)
-                self.custom_shop_entry.configure(state="disabled")
-                self.custom_shop_var.set('')
+            self.shop_listbox.selection_clear(0, tk.END)
+            self.shop_listbox.selection_set(0)
 
         self.hide_sold_var.set(config.get('hide_sold_out', False))
         if hasattr(self, 'csv_in_stock_only'):
@@ -3762,9 +3727,15 @@ With RANSAC enabled:
                 messagebox.showerror("Error", "Could not find selected item")
                 return
 
+            # Extract search query from eBay query field
+            search_query = self.browserless_query_var.get().strip()
+            if not search_query:
+                messagebox.showwarning("No Query", "Please enter a search query")
+                return
+
             # Run comparison in background
             self.csv_compare_progress.start()
-            self._start_thread(lambda: self._compare_csv_items_worker([item]))
+            self._start_thread(lambda: self._compare_csv_items_worker([item], search_query))
 
         except Exception as e:
             messagebox.showerror("Error", f"Invalid selection: {e}")
@@ -3793,6 +3764,12 @@ With RANSAC enabled:
                 messagebox.showinfo("No Items", "No items to compare (check filter settings)")
             return
 
+        # Extract search query from the eBay query field (already populated by CSV load)
+        search_query = self.browserless_query_var.get().strip()
+        if not search_query:
+            messagebox.showwarning("No Query", "Please load a CSV or enter a search query")
+            return
+
         # Check if 2nd keyword is enabled
         add_secondary = hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get()
 
@@ -3810,7 +3787,7 @@ With RANSAC enabled:
                 )
             if response:
                 self.csv_compare_progress.start()
-                self._start_thread(lambda: self._compare_csv_items_individually_worker(items_to_compare))
+                self._start_thread(lambda: self._compare_csv_items_individually_worker(items_to_compare, search_query))
         else:
             # Without 2nd keyword: Use single cached eBay search for all items
             if skip_confirmation:
@@ -3823,29 +3800,30 @@ With RANSAC enabled:
                 )
             if response:
                 self.csv_compare_progress.start()
-                self._start_thread(lambda: self._compare_csv_items_worker(items_to_compare))
+                self._start_thread(lambda: self._compare_csv_items_worker(items_to_compare, search_query))
 
 
-    def _compare_csv_items_worker(self, items):
-        """Worker to compare CSV items with eBay - OPTIMIZED with caching (runs in background thread)"""
+    def _compare_csv_items_worker(self, items, search_query):
+        """Worker to compare CSV items with eBay - OPTIMIZED with caching (runs in background thread)
+
+        Args:
+            items: List of items to compare
+            search_query: Pre-built search query (keyword + category keyword)
+        """
         max_results = int(self.browserless_max_results.get())
-        # Build search query: keyword + category keyword
-        base_keyword = self.keyword_var.get().strip()
-
-        # Get category keyword from selected category
-        category = self._extract_category()
-        category_keyword = CATEGORY_KEYWORDS.get(category, '')
-
-        # Combine keyword + category keyword
-        search_query = f"{base_keyword} {category_keyword}".strip() if category_keyword else base_keyword
 
         def update_callback(message):
             self.after(0, lambda: self.browserless_status.set(message))
 
         def display_callback(comparison_results):
             self.all_comparison_results = comparison_results
-            # Apply filters automatically after comparison
+            # Display results sorted by similarity/profit
             self.after(0, self.apply_results_filter)
+            # Auto-send to alerts if threshold is active
+            if self.alert_threshold_active.get():
+                min_sim = self.alert_min_similarity.get()
+                min_profit = self.alert_min_profit.get()
+                self.after(0, lambda: self._send_to_alerts_with_thresholds(comparison_results, min_sim, min_profit))
             self.after(0, self.csv_compare_progress.stop)
 
         def show_message_callback(title, message, msg_type='info'):
@@ -3866,8 +3844,13 @@ With RANSAC enabled:
             show_message_callback
         )
 
-    def _compare_csv_items_individually_worker(self, items):
-        """Worker to compare CSV items individually - each item gets its own eBay search"""
+    def _compare_csv_items_individually_worker(self, items, base_search_query):
+        """Worker to compare CSV items individually - each item gets its own eBay search
+
+        Args:
+            items: List of items to compare
+            base_search_query: Base search query (keyword + category keyword)
+        """
         max_results = int(self.browserless_max_results.get())
         add_secondary = hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get()
 
@@ -3876,8 +3859,13 @@ With RANSAC enabled:
 
         def display_callback(comparison_results):
             self.all_comparison_results = comparison_results
-            # Apply filters automatically after comparison
+            # Display results sorted by similarity/profit
             self.after(0, self.apply_results_filter)
+            # Auto-send to alerts if threshold is active
+            if self.alert_threshold_active.get():
+                min_sim = self.alert_min_similarity.get()
+                min_profit = self.alert_min_profit.get()
+                self.after(0, lambda: self._send_to_alerts_with_thresholds(comparison_results, min_sim, min_profit))
             self.after(0, self.csv_compare_progress.stop)
 
         def show_message_callback(title, message):
@@ -3990,61 +3978,51 @@ With RANSAC enabled:
         print(f"[DEBUG] Debug folder: {debug_folder}")
         return debug_folder
 
-    def _debounced_filter(self):
-        """Debounced filter application (50ms delay)"""
-        if hasattr(self, '_filter_timer') and self._filter_timer:
-            self.after_cancel(self._filter_timer)
-        self._filter_timer = self.after(50, self.apply_results_filter)
+    def _send_to_alerts_with_thresholds(self, comparison_results, min_similarity, min_profit):
+        """Send comparison results to alerts with specified thresholds."""
+        # Filter results based on thresholds
+        filtered = [
+            r for r in comparison_results
+            if r.get('similarity', 0) >= min_similarity and r.get('profit_margin', 0) >= min_profit
+        ]
+
+        if filtered:
+            # Add filtered results to alerts tab
+            self.alert_tab.add_filtered_alerts(filtered)
+            messagebox.showinfo(
+                "Alerts Created",
+                f"Created {len(filtered)} new alerts from {len(comparison_results)} results\n\n"
+                f"Thresholds used:\n"
+                f"• Similarity ≥ {min_similarity}%\n"
+                f"• Profit ≥ {min_profit}%"
+            )
+        else:
+            messagebox.showinfo(
+                "No Alerts",
+                f"No items met the alert thresholds:\n\n"
+                f"• Similarity ≥ {min_similarity}%\n"
+                f"• Profit ≥ {min_profit}%"
+            )
 
     def apply_results_filter(self):
-        """Apply filters to comparison results"""
+        """Display comparison results sorted by similarity and profit"""
         if not self.all_comparison_results:
-            return
-
-        try:
-            min_similarity = float(self.min_similarity_var.get() or 0)
-            min_profit = float(self.min_profit_var.get() or 0)
-        except ValueError:
-            # Invalid input, ignore silently during typing
             return
 
         # Check if results have similarity/profit data (from comparison)
-        # If not, don't filter (pure eBay search without comparison)
         has_comparison_data = any('similarity' in r and 'profit_margin' in r for r in self.all_comparison_results)
 
-        if not has_comparison_data:
-            # No comparison data yet, show all results without filtering
-            self._display_csv_comparison_results(self.all_comparison_results)
-            return
-
-        # Filter results
-        filtered_results = []
-        for r in self.all_comparison_results:
-            similarity = r.get('similarity', 0)
-            profit_margin = r.get('profit_margin', 0)
-            if similarity >= min_similarity and profit_margin >= min_profit:
-                filtered_results.append(r)
-
-        # Sort filtered results by similarity (descending), then by profit margin (descending)
-        filtered_results.sort(key=lambda x: (x.get('similarity', 0), x.get('profit_margin', 0)), reverse=True)
-
-        print(f"[FILTER] Showing {len(filtered_results)} of {len(self.all_comparison_results)} results (similarity>={min_similarity}%, profit>={min_profit}%)")
-
-        self._display_csv_comparison_results(filtered_results)
-        if len(filtered_results) < len(self.all_comparison_results):
-            self.browserless_status.set(f"Showing {len(filtered_results)} of {len(self.all_comparison_results)} results (filtered)")
+        if has_comparison_data:
+            # Sort results by similarity (descending), then by profit margin (descending)
+            sorted_results = sorted(
+                self.all_comparison_results,
+                key=lambda x: (x.get('similarity', 0), x.get('profit_margin', 0)),
+                reverse=True
+            )
+            self._display_csv_comparison_results(sorted_results)
         else:
-            self.browserless_status.set(f"Showing all {len(self.all_comparison_results)} results")
-
-    def send_comparison_to_alerts(self):
-        """Send comparison results to Alert tab."""
-        if not self.all_comparison_results:
-            messagebox.showinfo("No Results", "No comparison results available to send to alerts.")
-            return
-
-        # Send all unfiltered comparison results to alerts
-        # The alert tab will filter based on its own thresholds
-        self.alert_tab.add_comparison_results_to_alerts(self.all_comparison_results)
+            # No comparison data yet, show all results
+            self._display_csv_comparison_results(self.all_comparison_results)
 
     def _display_csv_comparison_results(self, results):
         """Display CSV comparison results in the browserless tree"""
