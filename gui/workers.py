@@ -48,44 +48,190 @@ def extract_price(price_text: str) -> float:
     return 0.0
 
 
-def compare_images(ref_image: np.ndarray, compare_image: np.ndarray) -> float:
+def compare_images(ref_image: np.ndarray, compare_image: np.ndarray, use_ransac: bool = False) -> float:
     """
     Compare two images and return similarity score (0-100).
-    Uses SSIM (70%) + Histogram (30%) for robust comparison.
+    Enhanced multi-metric comparison with robustness to crops/extra elements:
+    - Feature Matching (ORB) - 50% (most robust to crops/additions)
+    - SSIM (Structural Similarity) - 25%
+    - Color Histogram - 15%
+    - Template Matching - 10% (for detecting embedded matches)
 
     Args:
         ref_image: Reference image (numpy array)
         compare_image: Image to compare (numpy array)
+        use_ransac: Enable RANSAC geometric verification (slower, more accurate)
 
     Returns:
         float: Similarity score from 0-100
     """
     try:
-        # Resize images to same size for comparison
-        ref_resized = cv2.resize(ref_image, (300, 300))
-        compare_resized = cv2.resize(compare_image, (300, 300))
+        # Resize images to same size for comparison (higher res for better feature detection)
+        ref_resized = cv2.resize(ref_image, (400, 400))
+        compare_resized = cv2.resize(compare_image, (400, 400))
 
-        # Convert to grayscale for SSIM
+        # Convert to grayscale
         ref_gray = cv2.cvtColor(ref_resized, cv2.COLOR_BGR2GRAY)
         compare_gray = cv2.cvtColor(compare_resized, cv2.COLOR_BGR2GRAY)
 
-        # Calculate SSIM (Structural Similarity Index)
+        # === 1. Feature Matching (ORB) - 50% weight ===
+        # Increased features for better matching
+        orb = cv2.ORB_create(nfeatures=1000, scaleFactor=1.2, nlevels=8)
+        kp1, des1 = orb.detectAndCompute(ref_gray, None)
+        kp2, des2 = orb.detectAndCompute(compare_gray, None)
+
+        feature_score = 0.0
+        ransac_score = 0.0
+
+        if des1 is not None and des2 is not None and len(des1) > 0 and len(des2) > 0:
+            # Use BFMatcher with Hamming distance for ORB
+            bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+            matches = bf.knnMatch(des1, des2, k=2)
+
+            # Apply ratio test (Lowe's ratio test)
+            good_matches = []
+            for match_pair in matches:
+                if len(match_pair) == 2:
+                    m, n = match_pair
+                    if m.distance < 0.75 * n.distance:  # Ratio test
+                        good_matches.append(m)
+                elif len(match_pair) == 1:
+                    good_matches.append(match_pair[0])
+
+            # Calculate score based on good matches
+            if len(good_matches) > 0:
+                # Normalize by the smaller number of keypoints
+                max_possible_matches = min(len(kp1), len(kp2))
+                if max_possible_matches > 0:
+                    # More lenient scoring for feature matches
+                    raw_ratio = len(good_matches) / max_possible_matches
+                    feature_score = min(raw_ratio * 2.0, 1.0)  # Multiply by 2 to boost scores
+
+                # === RANSAC Geometric Verification (optional) ===
+                if use_ransac and len(good_matches) >= 4:  # Need at least 4 points for homography
+                    try:
+                        # Extract matched keypoint coordinates
+                        src_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+                        dst_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+
+                        # Find homography using RANSAC
+                        M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+
+                        if mask is not None:
+                            # Calculate inlier ratio (geometrically coherent matches)
+                            inliers = np.sum(mask)
+                            inlier_ratio = inliers / len(good_matches)
+                            ransac_score = inlier_ratio  # 0.0 to 1.0
+
+                    except Exception as e:
+                        # RANSAC can fail if points are degenerate
+                        ransac_score = 0.0
+
+        # === 2. SSIM (Structural Similarity) - 25% weight ===
         ssim_score = ssim(ref_gray, compare_gray)
 
-        # Calculate histogram similarity as secondary metric
-        ref_hist = cv2.calcHist([ref_resized], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-        compare_hist = cv2.calcHist([compare_resized], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-        cv2.normalize(ref_hist, ref_hist)
-        cv2.normalize(compare_hist, compare_hist)
+        # === 3. Color Histogram Comparison - 15% weight ===
+        # Use HSV color space (better for color matching than RGB)
+        ref_hsv = cv2.cvtColor(ref_resized, cv2.COLOR_BGR2HSV)
+        compare_hsv = cv2.cvtColor(compare_resized, cv2.COLOR_BGR2HSV)
+
+        # Calculate histograms with higher bins for better precision
+        ref_hist = cv2.calcHist([ref_hsv], [0, 1, 2], None, [12, 12, 12], [0, 180, 0, 256, 0, 256])
+        compare_hist = cv2.calcHist([compare_hsv], [0, 1, 2], None, [12, 12, 12], [0, 180, 0, 256, 0, 256])
+        cv2.normalize(ref_hist, ref_hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+        cv2.normalize(compare_hist, compare_hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
         hist_score = cv2.compareHist(ref_hist, compare_hist, cv2.HISTCMP_CORREL)
 
-        # Weighted combination: SSIM (70%) + Histogram (30%)
-        similarity = (ssim_score * 0.7 + hist_score * 0.3) * 100
+        # Handle NaN from histogram comparison
+        if np.isnan(hist_score):
+            hist_score = 0.0
+        else:
+            hist_score = max(0.0, hist_score)  # Ensure non-negative
 
-        return similarity
+        # === 4. Template Matching - 10% weight ===
+        # Check if reference appears as a sub-region in compare image
+        template_score = 0.0
+        try:
+            # Try multiple scales to handle size differences
+            scales = [0.7, 0.8, 0.9, 1.0, 1.1, 1.2]
+            best_match = 0.0
+
+            for scale in scales:
+                if scale != 1.0:
+                    width = int(ref_resized.shape[1] * scale)
+                    height = int(ref_resized.shape[0] * scale)
+                    if width < compare_resized.shape[1] and height < compare_resized.shape[0]:
+                        scaled_ref = cv2.resize(ref_resized, (width, height))
+                        scaled_ref_gray = cv2.cvtColor(scaled_ref, cv2.COLOR_BGR2GRAY)
+                    else:
+                        continue
+                else:
+                    scaled_ref_gray = ref_gray
+
+                # Template matching
+                result = cv2.matchTemplate(compare_gray, scaled_ref_gray, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, _ = cv2.minMaxLoc(result)
+                best_match = max(best_match, max_val)
+
+            template_score = max(0.0, best_match)
+        except:
+            template_score = 0.0
+
+        # === Weighted combination ===
+        # Template matching is proving to be the most reliable for exact matches with watermarks
+        # Feature matching is second but can be inconsistent with heavy watermarks
+        if use_ransac and ransac_score > 0:
+            # With RANSAC: adjust weights to incorporate geometric verification
+            similarity = (
+                template_score * 0.50 +   # Template matching (reduced from 60%)
+                feature_score * 0.20 +    # Feature matching (reduced from 25%)
+                ransac_score * 0.20 +     # RANSAC geometric coherence (new)
+                ssim_score * 0.07 +       # Structural similarity (reduced from 10%)
+                hist_score * 0.03         # Color distribution (reduced from 5%)
+            ) * 100
+        else:
+            # Without RANSAC: standard weights
+            similarity = (
+                template_score * 0.60 +   # Template matching (best for exact matches)
+                feature_score * 0.25 +    # Feature matching (robust to crops)
+                ssim_score * 0.10 +       # Structural similarity
+                hist_score * 0.05         # Color distribution (least important)
+            ) * 100
+
+        # === Consistency Bonus ===
+        # When multiple metrics agree (all score high), it's a stronger match
+        # This increases separation between true matches and false positives
+        high_threshold = 0.50  # Metric must be >50% to count as "high"
+        if use_ransac:
+            metrics = [template_score, feature_score, ssim_score, hist_score, ransac_score]
+        else:
+            metrics = [template_score, feature_score, ssim_score, hist_score]
+        high_count = sum(1 for m in metrics if m > high_threshold)
+
+        consistency_multiplier = 1.0
+        if high_count >= 3:
+            consistency_multiplier = 1.25  # 3+ metrics agree: strong match, +25% boost
+        elif high_count >= 2:
+            consistency_multiplier = 1.15  # 2 metrics agree: good match, +15% boost
+
+        similarity *= consistency_multiplier
+
+        # Debug output for analysis
+        if use_ransac:
+            print(f"[IMAGE COMPARE] Features: {feature_score*100:.1f}%, SSIM: {ssim_score*100:.1f}%, "
+                  f"Hist: {hist_score*100:.1f}%, Template: {template_score*100:.1f}%, RANSAC: {ransac_score*100:.1f}% "
+                  f"[{high_count} high] x{consistency_multiplier:.2f} => Total: {similarity:.1f}%")
+        else:
+            print(f"[IMAGE COMPARE] Features: {feature_score*100:.1f}%, SSIM: {ssim_score*100:.1f}%, "
+                  f"Hist: {hist_score*100:.1f}%, Template: {template_score*100:.1f}% "
+                  f"[{high_count} high] x{consistency_multiplier:.2f} => Total: {similarity:.1f}%")
+
+        return max(0.0, min(100.0, similarity))  # Clamp to 0-100
 
     except Exception as e:
         print(f"[IMAGE COMPARE] Error: {e}")
+        import traceback
+        traceback.print_exc()
         return 0.0
 
 
@@ -833,7 +979,7 @@ def run_cached_compare_worker(query: str, max_comparisons: Optional[int], cached
 
 
 def load_csv_thumbnails_worker(filtered_items: List[Dict], csv_new_items: set,
-                               update_image_callback) -> None:
+                               update_image_callback, thumb_width: int = 70) -> None:
     """
     Background worker to load CSV thumbnails without blocking UI.
 
@@ -841,10 +987,14 @@ def load_csv_thumbnails_worker(filtered_items: List[Dict], csv_new_items: set,
         filtered_items: List of filtered CSV items
         csv_new_items: Set of item IDs that are new
         update_image_callback: Callback to update image in treeview
+        thumb_width: Width of thumbnail column (default 70)
     """
-    print(f"[CSV THUMBNAILS] Loading thumbnails for {len(filtered_items)} items in background...")
+    print(f"[CSV THUMBNAILS] Loading thumbnails for {len(filtered_items)} items (size: {thumb_width}px)...")
 
-    for i, row in enumerate(filtered_items, 1):
+    # Calculate thumbnail size with padding (leave some margin)
+    thumb_size = max(20, thumb_width - 10)
+
+    for i, row in enumerate(filtered_items):
         local_image_path = row.get('local_image', '')
         image_url = row.get('image_url', '')
         photo = None
@@ -853,7 +1003,7 @@ def load_csv_thumbnails_worker(filtered_items: List[Dict], csv_new_items: set,
         if local_image_path and Path(local_image_path).exists():
             try:
                 pil_img = Image.open(local_image_path)
-                pil_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
+                pil_img.thumbnail((thumb_size, thumb_size), Image.Resampling.LANCZOS)
 
                 # Add light blue border if item is NEW
                 item_id = str(i)
@@ -862,7 +1012,7 @@ def load_csv_thumbnails_worker(filtered_items: List[Dict], csv_new_items: set,
 
                 photo = ImageTk.PhotoImage(pil_img)
             except Exception as e:
-                print(f"[CSV THUMBNAILS] Failed to load local thumbnail {i}: {e}")
+                print(f"[CSV THUMBNAILS] Failed to load local thumbnail {i+1}: {e}")
 
         # Update treeview with image (must be done in main thread)
         if photo:
@@ -948,6 +1098,11 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
         for idx, ebay_item in enumerate(ebay_results):
             # Support both 'main_image' (from search) and 'image_url' (from cached browserless_results_data)
             ebay_image_url = ebay_item.get('main_image') or ebay_item.get('image_url', '')
+
+            # Debug: Check for duplicate URLs
+            if ebay_image_url in ebay_image_cache:
+                print(f"[CSV BATCH DEBUG] Skipping duplicate eBay image URL at index {idx+1}: {ebay_image_url[:80]}")
+
             if ebay_image_url and ebay_image_url not in ebay_image_cache:
                 try:
                     response = requests.get(ebay_image_url, timeout=5)
@@ -966,6 +1121,9 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
                     print(f"[CSV BATCH] Error downloading eBay image {idx+1}: {e}")
 
         print(f"[CSV BATCH] Cached {len(ebay_image_cache)} eBay images")
+        print(f"[CSV BATCH DEBUG] Unique image URLs in cache: {len(ebay_image_cache)}")
+        if len(ebay_image_cache) != len(ebay_results):
+            print(f"[CSV BATCH DEBUG] WARNING: Cache has {len(ebay_image_cache)} unique images but {len(ebay_results)} eBay results!")
 
         # **Now compare each CSV item with cached eBay images**
         comparison_results = []
@@ -1015,6 +1173,13 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
                         try:
                             # Use shared comparison method
                             similarity = compare_images(ref_image, ebay_img)
+
+                            # Debug: Log suspicious perfect matches
+                            if similarity >= 99.9:
+                                print(f"[CSV BATCH DEBUG] Perfect match (100%) at eBay item {ebay_idx+1}")
+                                print(f"[CSV BATCH DEBUG]   CSV image shape: {ref_image.shape}, eBay image shape: {ebay_img.shape}")
+                                print(f"[CSV BATCH DEBUG]   eBay URL: {ebay_image_url[:100]}")
+
                             item_comparisons.append((similarity, ebay_idx, ebay_item.get('product_title', 'unknown')[:50]))
                         except Exception as e:
                             print(f"[CSV BATCH] Error comparing with eBay item {ebay_idx+1}: {e}")
@@ -1033,10 +1198,16 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
                     mandarake_price_text = item.get('price_text', item.get('price', '0'))
                     mandarake_price = extract_price(mandarake_price_text)
 
-                    ebay_price_text = ebay_item.get('current_price', '0')
+                    # Try both key formats (current_price/price, shipping_cost/shipping)
+                    ebay_price_text = ebay_item.get('current_price') or ebay_item.get('price', '0')
+                    if not ebay_price_text or ebay_price_text == '0':
+                        print(f"[CSV BATCH DEBUG] Missing or zero eBay price for item: {ebay_item.get('product_title') or ebay_item.get('title', 'N/A')[:50]}")
+                        print(f"[CSV BATCH DEBUG] eBay item keys: {list(ebay_item.keys())}")
                     ebay_price = extract_price(ebay_price_text)
 
-                    shipping_text = ebay_item.get('shipping_cost', '0')
+                    shipping_text = ebay_item.get('shipping_cost') or ebay_item.get('shipping', '0')
+                    if not shipping_text or shipping_text == '0':
+                        print(f"[CSV BATCH DEBUG] Missing or zero shipping for item: {ebay_item.get('product_title') or ebay_item.get('title', 'N/A')[:50]}")
                     shipping_cost = extract_price(shipping_text)
 
                     # Profit % = ((eBay Price + Shipping) / (Mandarake Price * Exchange Rate) - 1) * 100

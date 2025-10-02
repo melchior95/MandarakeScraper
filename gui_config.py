@@ -36,6 +36,8 @@ from gui.constants import (
 from gui import utils
 from gui import workers
 from gui.alert_tab import AlertTab
+from gui.schedule_executor import ScheduleExecutor
+from gui.schedule_frame import ScheduleFrame
 
 
 class ScraperGUI(tk.Tk):
@@ -358,17 +360,33 @@ With RANSAC enabled:
 
         notebook.add(advanced_frame, text="Advanced")
 
+        # Initialize schedule executor (background thread)
+        self.schedule_executor = ScheduleExecutor(self)
+        self.schedule_executor.start()
+
         # Search tab ----------------------------------------------------
+        # Create vertical PanedWindow to split top section from bottom sections
+        self.vertical_paned = tk.PanedWindow(basic_frame, orient=tk.VERTICAL, sashrelief=tk.RAISED, sashwidth=5)
+        self.vertical_paned.pack(fill=tk.BOTH, expand=True)
+
+        # Top pane: Form fields and listboxes (resizable)
+        top_pane = ttk.Frame(self.vertical_paned)
+        self.vertical_paned.add(top_pane, minsize=200)
+
+        # Bottom container: Options + Configs (not resizable internally)
+        bottom_container = ttk.Frame(self.vertical_paned)
+        self.vertical_paned.add(bottom_container, minsize=200)
+
         # Mandarake URL input
         self.mandarake_url_var = tk.StringVar()
-        ttk.Label(basic_frame, text="Mandarake URL:").grid(row=0, column=0, sticky=tk.W, **pad)
-        url_entry = ttk.Entry(basic_frame, textvariable=self.mandarake_url_var, width=60)
+        ttk.Label(top_pane, text="Mandarake URL:").grid(row=0, column=0, sticky=tk.W, **pad)
+        url_entry = ttk.Entry(top_pane, textvariable=self.mandarake_url_var, width=60)
         url_entry.grid(row=0, column=1, columnspan=3, sticky=(tk.W, tk.E), **pad)
-        ttk.Button(basic_frame, text="Load URL", command=self._load_from_url).grid(row=0, column=4, sticky=tk.W, **pad)
+        ttk.Button(top_pane, text="Load URL", command=self._load_from_url).grid(row=0, column=4, sticky=tk.W, **pad)
 
         self.keyword_var = tk.StringVar()
-        ttk.Label(basic_frame, text="Keyword:").grid(row=1, column=0, sticky=tk.W, **pad)
-        self.keyword_entry = ttk.Entry(basic_frame, textvariable=self.keyword_var, width=42)
+        ttk.Label(top_pane, text="Keyword:").grid(row=1, column=0, sticky=tk.W, **pad)
+        self.keyword_entry = ttk.Entry(top_pane, textvariable=self.keyword_var, width=42)
         self.keyword_entry.grid(row=1, column=1, columnspan=3, sticky=tk.W, **pad)
         self.keyword_var.trace_add("write", self._update_preview)
 
@@ -384,9 +402,9 @@ With RANSAC enabled:
         self.keyword_entry.bind("<Button-3>", self._show_keyword_menu)
 
         self.main_category_var = tk.StringVar()
-        ttk.Label(basic_frame, text="Main category:").grid(row=2, column=0, sticky=tk.W, **pad)
+        ttk.Label(top_pane, text="Main category:").grid(row=2, column=0, sticky=tk.W, **pad)
         self.main_category_combo = ttk.Combobox(
-            basic_frame,
+            top_pane,
             textvariable=self.main_category_var,
             state="readonly",
             width=42,
@@ -396,13 +414,13 @@ With RANSAC enabled:
         self.main_category_combo.bind("<<ComboboxSelected>>", self._on_main_category_selected)
 
         # Create labels row for both listboxes
-        labels_frame = ttk.Frame(basic_frame)
+        labels_frame = ttk.Frame(top_pane)
         labels_frame.grid(row=3, column=0, columnspan=7, sticky=(tk.W, tk.E), **pad)
         ttk.Label(labels_frame, text="Detailed categories:").pack(side=tk.LEFT)
         ttk.Label(labels_frame, text="Shop:", anchor='e').pack(side=tk.RIGHT, padx=(0, 50))
 
         # Create PanedWindow for resizable listboxes
-        self.listbox_paned = tk.PanedWindow(basic_frame, orient=tk.HORIZONTAL, sashrelief=tk.RAISED, sashwidth=5)
+        self.listbox_paned = tk.PanedWindow(top_pane, orient=tk.HORIZONTAL, sashrelief=tk.RAISED, sashwidth=5)
         self.listbox_paned.grid(row=4, column=0, columnspan=7, sticky=(tk.W, tk.E, tk.N, tk.S), **pad)
 
         # Left pane: Detailed categories
@@ -437,83 +455,89 @@ With RANSAC enabled:
         self._populate_shop_list()
         self.listbox_paned.add(shop_frame, minsize=150)
 
-        # Restore listbox paned position after widgets are created and window is sized
-        self.after(200, self._restore_listbox_paned_position)
+        # Track user's sash position
+        self._user_sash_ratio = None  # Track the last valid user position
 
-        # Also restore when the paned window is resized (only once)
-        self._listbox_paned_restored = False
-        self.listbox_paned.bind('<Configure>', self._on_listbox_paned_configure)
+        # Bind to track user changes
+        self.listbox_paned.bind('<ButtonRelease-1>', self._on_listbox_sash_moved)
 
-        # Custom shop entry (below listboxes)
-        self.custom_shop_var = tk.StringVar()
-        ttk.Label(basic_frame, text="Custom shop code/slug:").grid(row=5, column=0, sticky=tk.W, **pad)
-        self.custom_shop_entry = ttk.Entry(basic_frame, textvariable=self.custom_shop_var, width=30, state="disabled")
-        self.custom_shop_entry.grid(row=5, column=1, columnspan=2, sticky=tk.W, **pad)
-        self.custom_shop_var.trace_add("write", self._update_preview)
+        # Restore position after the window is fully mapped and sized
+        self.bind('<Map>', self._on_window_mapped, add='+')
+
+        # Configure top pane grid weights
+        top_pane.rowconfigure(4, weight=1)  # Listbox row expands
+        for i in range(7):
+            top_pane.columnconfigure(i, weight=1)
+
+        # Middle pane: Options (fixed, no sash below it)
+        middle_pane = ttk.Frame(bottom_container)
+        middle_pane.pack(fill=tk.X, padx=5, pady=5)
 
         # --- URL Options (affect Mandarake search) - All in one row ---
         self.hide_sold_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(basic_frame, text="Hide sold", variable=self.hide_sold_var,
-                        command=self._update_preview).grid(row=6, column=0, sticky=tk.W, **pad)
+        ttk.Checkbutton(middle_pane, text="Hide sold", variable=self.hide_sold_var,
+                        command=self._update_preview).grid(row=0, column=0, sticky=tk.W, **pad)
 
         self.results_per_page_var = tk.StringVar(value="48")
-        ttk.Label(basic_frame, text="Results/page:").grid(row=6, column=1, sticky=tk.W, **pad)
+        ttk.Label(middle_pane, text="Results/page:").grid(row=0, column=1, sticky=tk.W, **pad)
         results_per_page_combo = ttk.Combobox(
-            basic_frame,
+            middle_pane,
             textvariable=self.results_per_page_var,
             state="readonly",
             width=6,
             values=["48", "120", "240"]
         )
-        results_per_page_combo.grid(row=6, column=2, sticky=tk.W, **pad)
+        results_per_page_combo.grid(row=0, column=2, sticky=tk.W, **pad)
         self.results_per_page_var.trace_add("write", self._update_preview)
 
         self.max_pages_var = tk.StringVar()
-        ttk.Label(basic_frame, text="Max pages:").grid(row=6, column=3, sticky=tk.W, **pad)
-        ttk.Entry(basic_frame, textvariable=self.max_pages_var, width=8).grid(row=6, column=4, sticky=tk.W, **pad)
+        ttk.Label(middle_pane, text="Max pages:").grid(row=0, column=3, sticky=tk.W, **pad)
+        ttk.Entry(middle_pane, textvariable=self.max_pages_var, width=8).grid(row=0, column=4, sticky=tk.W, **pad)
         self.max_pages_var.trace_add("write", self._auto_save_config)
 
         self.recent_hours_var = tk.StringVar(value=RECENT_OPTIONS[0][0])
-        ttk.Label(basic_frame, text="Latest:").grid(row=6, column=5, sticky=tk.W, **pad)
+        ttk.Label(middle_pane, text="Latest:").grid(row=0, column=5, sticky=tk.W, **pad)
         self.recent_combo = ttk.Combobox(
-            basic_frame,
+            middle_pane,
             textvariable=self.recent_hours_var,
             state="readonly",
             width=15,
             values=[label for label, _ in RECENT_OPTIONS],
         )
-        self.recent_combo.grid(row=6, column=6, sticky=tk.W, **pad)
+        self.recent_combo.grid(row=0, column=6, sticky=tk.W, **pad)
         self.recent_hours_var.trace_add("write", self._update_preview)
         self.recent_hours_var.trace_add("write", self._on_recent_hours_changed)
 
-        # --- CSV Options - All in one row ---
-        ttk.Label(basic_frame, text="CSV Options:", font=('TkDefaultFont', 9,)).grid(row=7, column=0, sticky=tk.W, **pad)
-
-        # Initialize CSV variables if not already done
+        # Initialize CSV variables if not already done (for backward compatibility with CSV comparison tab)
+        if not hasattr(self, 'csv_newly_listed_only'):
+            self.csv_newly_listed_only = tk.BooleanVar(value=False)
         if not hasattr(self, 'csv_in_stock_only'):
             self.csv_in_stock_only = tk.BooleanVar(value=True)
         if not hasattr(self, 'csv_add_secondary_keyword'):
             self.csv_add_secondary_keyword = tk.BooleanVar(value=False)
 
-        # Add trace for auto-save
-        self.csv_in_stock_only.trace_add("write", self._auto_save_config)
-        self.csv_add_secondary_keyword.trace_add("write", self._auto_save_config)
-
-        ttk.Checkbutton(basic_frame, text="Show in-stock", variable=self.csv_in_stock_only,
-                        command=self._on_csv_filter_changed).grid(row=7, column=1, sticky=tk.W, **pad)
-
-        ttk.Checkbutton(basic_frame, text="2nd keyword", variable=self.csv_add_secondary_keyword).grid(row=7, column=2, sticky=tk.W, **pad)
-
         # --- Language (rarely used) - Same row ---
         self.language_var = tk.StringVar(value="en")
-        ttk.Label(basic_frame, text="Language:").grid(row=7, column=5, sticky=tk.W, **pad)
-        lang_combo = ttk.Combobox(basic_frame, textvariable=self.language_var, values=["en", "ja"], width=6, state="readonly")
-        lang_combo.grid(row=7, column=6, sticky=tk.W, **pad)
+        ttk.Label(middle_pane, text="Language:").grid(row=1, column=0, sticky=tk.W, **pad)
+        lang_combo = ttk.Combobox(middle_pane, textvariable=self.language_var, values=["en", "ja"], width=6, state="readonly")
+        lang_combo.grid(row=1, column=6, sticky=tk.W, **pad)
         self.language_var.trace_add("write", self._update_preview)
 
-        # Saved configs tree
-        tree_frame = ttk.Frame(basic_frame)
-        tree_frame.grid(row=8, column=0, columnspan=7, sticky=tk.NSEW, **pad)
+        # Configure middle pane grid weights
+        for i in range(7):
+            middle_pane.columnconfigure(i, weight=1)
+
+        # Bottom pane: Configs/Schedules and buttons (fills remaining space)
+        bottom_pane = ttk.Frame(bottom_container)
+        bottom_pane.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
+
+        # Configs/Schedules tabbed interface
+        config_schedule_notebook = ttk.Notebook(bottom_pane)
+        config_schedule_notebook.grid(row=0, column=0, columnspan=7, sticky=tk.NSEW, **pad)
+
+        # Configs tab
+        tree_frame = ttk.Frame(config_schedule_notebook)
+        config_schedule_notebook.add(tree_frame, text="Configs")
         columns = ('file', 'keyword', 'category', 'shop', 'hide_sold', 'results_per_page', 'max_pages', 'csv_show_in_stock', 'csv_secondary', 'latest_additions', 'language')
         self.config_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=6)
         headings = {
@@ -572,27 +596,35 @@ With RANSAC enabled:
         # Enable column drag-to-reorder
         self._setup_column_drag(self.config_tree)
 
-        # Config management buttons
-        config_buttons_frame = ttk.Frame(basic_frame)
-        config_buttons_frame.grid(row=10, column=0, columnspan=5, sticky=tk.W, **pad)
-        ttk.Button(config_buttons_frame, text="New Config", command=self._new_config).pack(side=tk.LEFT, padx=5)
-        ttk.Button(config_buttons_frame, text="Delete Selected", command=self._delete_selected_config).pack(side=tk.LEFT, padx=5)
-        ttk.Button(config_buttons_frame, text="Move Up", command=lambda: self._move_config(-1)).pack(side=tk.LEFT, padx=5)
-        ttk.Button(config_buttons_frame, text="Move Down", command=lambda: self._move_config(1)).pack(side=tk.LEFT, padx=5)
+        # Schedules tab
+        self.schedule_frame = ScheduleFrame(config_schedule_notebook, self.schedule_executor)
+        config_schedule_notebook.add(self.schedule_frame, text="Schedules")
 
-        # Action buttons for Mandarake scraper
-        action_buttons_frame = ttk.Frame(basic_frame)
-        action_buttons_frame.grid(row=11, column=0, columnspan=5, sticky=tk.W, **pad)
-        ttk.Button(action_buttons_frame, text="Search Mandarake", command=self.run_now).pack(side=tk.LEFT, padx=5)
-        self.cancel_button = ttk.Button(action_buttons_frame, text="Cancel Search", command=self.cancel_search, state='disabled')
+        # Bind tab change to show/hide appropriate buttons
+        config_schedule_notebook.bind("<<NotebookTabChanged>>", self._on_config_schedule_tab_changed)
+        self.config_schedule_notebook = config_schedule_notebook
+
+        # Config management buttons (row 1)
+        self.config_buttons_frame = ttk.Frame(bottom_pane)
+        self.config_buttons_frame.grid(row=1, column=0, columnspan=5, sticky=tk.W, **pad)
+        ttk.Button(self.config_buttons_frame, text="New Config", command=self._new_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(self.config_buttons_frame, text="Delete Selected", command=self._delete_selected_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(self.config_buttons_frame, text="Move Up", command=lambda: self._move_config(-1)).pack(side=tk.LEFT, padx=5)
+        ttk.Button(self.config_buttons_frame, text="Move Down", command=lambda: self._move_config(1)).pack(side=tk.LEFT, padx=5)
+
+        # Action buttons for Mandarake scraper (row 2)
+        self.action_buttons_frame = ttk.Frame(bottom_pane)
+        self.action_buttons_frame.grid(row=2, column=0, columnspan=5, sticky=tk.W, **pad)
+        ttk.Button(self.action_buttons_frame, text="Search Mandarake", command=self.run_now).pack(side=tk.LEFT, padx=5)
+        self.cancel_button = ttk.Button(self.action_buttons_frame, text="Cancel Search", command=self.cancel_search, state='disabled')
         self.cancel_button.pack(side=tk.LEFT, padx=5)
-        ttk.Button(action_buttons_frame, text="Schedule", command=self.schedule_run).pack(side=tk.LEFT, padx=5)
+
+        # Configure bottom pane grid
+        bottom_pane.rowconfigure(0, weight=1)  # Tree row expands
+        for i in range(7):
+            bottom_pane.columnconfigure(i, weight=1)
 
         self._load_config_tree()
-        basic_frame.rowconfigure(8, weight=1)
-        basic_frame.columnconfigure(0, weight=1)
-        basic_frame.columnconfigure(1, weight=1)
-        basic_frame.columnconfigure(2, weight=1)
         basic_frame.columnconfigure(3, weight=1)
 
         # eBay Search & CSV tab ------------------------------------------
@@ -608,9 +640,9 @@ With RANSAC enabled:
         ttk.Label(browserless_frame, text="Max results:").grid(row=1, column=3, sticky=tk.W, **pad)
         self.browserless_max_results = tk.StringVar(value="10")
         max_results_combo = ttk.Combobox(browserless_frame, textvariable=self.browserless_max_results,
-                                       values=["5", "10", "15", "20", "25", "30"], width=5, state="readonly")
+                                       values=["5", "10", "20", "30", "45", "60"], width=5, state="readonly")
         max_results_combo.grid(row=1, column=4, sticky=tk.W, **pad)
-        max_results_combo.bind("<<ComboboxSelected>>", lambda e: self._save_gui_settings())
+        max_results_combo.bind("<<ComboboxSelected>>", lambda e: None)  # Settings saved on close
 
         # Action buttons
         ttk.Button(browserless_frame, text="Search", command=self.run_scrapy_text_search).grid(row=2, column=0, sticky=tk.W, **pad)
@@ -1407,17 +1439,19 @@ With RANSAC enabled:
             messagebox.showinfo("No URL", "Enter search criteria to generate a URL")
 
     def schedule_run(self):
-        schedule_time = self.schedule_var.get().strip()
-        if not schedule_time:
-            messagebox.showinfo("Schedule", "Enter a schedule time (HH:MM) in the Advanced tab.")
-            return
-        config = self._collect_config()
-        if not config:
-            return
-        config_path = self._save_config_autoname(config)
-        mimic = bool(self.mimic_var.get())
-        self.status_var.set(f"Scheduling daily run at {schedule_time} (config: {config_path})")
-        self._start_thread(self._schedule_worker, str(config_path), schedule_time, mimic)
+        """Switch to schedules tab in Mandarake tab."""
+        # Switch to Mandarake tab
+        main_notebook = self.children['!notebook']
+        main_notebook.select(0)  # Select Mandarake tab (index 0)
+
+        # Find and select schedules tab in config/schedule notebook
+        for widget in self.children.values():
+            if isinstance(widget, ttk.Frame):  # Mandarake tab frame
+                for child in widget.children.values():
+                    if isinstance(child, ttk.Notebook):  # Config/Schedule notebook
+                        child.select(1)  # Select Schedules tab (index 1)
+                        break
+                break
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1680,20 +1714,8 @@ With RANSAC enabled:
 
                         if csv_path:
                             print(f"[GUI DEBUG] Auto-loading CSV into comparison tree: {csv_path}")
-                            # Load into CSV comparison tree
-                            self.csv_compare_path = csv_path
-                            self.csv_compare_label.config(text=f"Loaded: {csv_path.name}", foreground="black")
-
-                            # Load CSV data
-                            self.csv_compare_data = []
-                            with open(csv_path, 'r', encoding='utf-8') as f:
-                                reader = csv.DictReader(f)
-                                for row in reader:
-                                    self.csv_compare_data.append(row)
-
-                            # Display with filter
-                            self.filter_csv_items()
-                            print(f"[GUI DEBUG] Loaded {len(self.csv_compare_data)} items into CSV tree")
+                            # Load CSV using modular worker
+                            self._load_csv_worker(csv_path)
                         else:
                             print(f"[GUI DEBUG] No CSV file found for config")
 
@@ -1749,12 +1771,24 @@ With RANSAC enabled:
         finally:
             self._settings_loaded = True
 
-    def _on_listbox_paned_configure(self, event=None):
-        """Handle listbox paned window configure event - restore position once."""
-        if not self._listbox_paned_restored:
-            # Wait a bit to ensure proper sizing
-            self.after(50, self._restore_listbox_paned_position)
-            self._listbox_paned_restored = True
+    def _on_window_mapped(self, event=None):
+        """Handle window map event - restore sash position once after window is shown."""
+        # Unbind after first call
+        self.unbind('<Map>')
+        # Wait for window to stabilize, then restore
+        self.after(100, self._restore_listbox_paned_position)
+
+    def _on_listbox_sash_moved(self, event=None):
+        """Track when user manually moves the sash."""
+        if not hasattr(self, 'listbox_paned'):
+            return
+        try:
+            total_width = self.listbox_paned.winfo_width()
+            if total_width > 500:
+                sash_pos = self.listbox_paned.sash_coord(0)[0]
+                self._user_sash_ratio = sash_pos / total_width
+        except Exception:
+            pass
 
     def _restore_listbox_paned_position(self):
         """Restore the listbox paned window sash position from saved settings."""
@@ -1763,15 +1797,9 @@ With RANSAC enabled:
         try:
             ratio = self.gui_settings.get('listbox_paned_ratio', 0.65)  # Default 65% for categories, 35% for shops
             total_width = self.listbox_paned.winfo_width()
-
-            # Only restore if window is properly sized (> 500px to avoid early restoration)
-            if total_width > 500:
-                sash_pos = int(total_width * ratio)
-                self.listbox_paned.sash_place(0, sash_pos, 0)
-                print(f"[LISTBOX PANED] Restored sash position: {sash_pos}px (ratio: {ratio:.2f}, total: {total_width}px)")
-                self._listbox_paned_restored = True  # Mark as successfully restored
-            else:
-                print(f"[LISTBOX PANED] Skipping restore - window too small: {total_width}px")
+            sash_pos = int(total_width * ratio)
+            self.listbox_paned.sash_place(0, sash_pos, 0)
+            self._user_sash_ratio = ratio  # Initialize user ratio to the restored value
         except Exception as e:
             print(f"[LISTBOX PANED] Error restoring position: {e}")
 
@@ -1781,20 +1809,10 @@ With RANSAC enabled:
         try:
             SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-            # Save listbox paned position as ratio - only if window is properly sized
-            listbox_ratio = self.gui_settings.get('listbox_paned_ratio', 0.65)  # Use existing ratio as default
-            if hasattr(self, 'listbox_paned'):
-                try:
-                    total_width = self.listbox_paned.winfo_width()
-                    # Only save if window is properly sized (> 500px)
-                    if total_width > 500:
-                        sash_pos = self.listbox_paned.sash_coord(0)[0]
-                        listbox_ratio = sash_pos / total_width
-                        print(f"[LISTBOX PANED] Saving sash position: {sash_pos}px (ratio: {listbox_ratio:.2f}, total: {total_width}px)")
-                    else:
-                        print(f"[LISTBOX PANED] Skipping save - window too small: {total_width}px (keeping ratio: {listbox_ratio:.2f})")
-                except Exception as e:
-                    print(f"[LISTBOX PANED] Error saving position: {e}")
+            # Save listbox paned position - use tracked user ratio if available
+            listbox_ratio = self.gui_settings.get('listbox_paned_ratio', 0.65)
+            if hasattr(self, '_user_sash_ratio') and self._user_sash_ratio is not None:
+                listbox_ratio = self._user_sash_ratio
 
             data = {
                 'mimic': bool(self.mimic_var.get()),
@@ -1810,12 +1828,27 @@ With RANSAC enabled:
             pass
 
     def _on_mimic_changed(self, *args):
-        if not hasattr(self, 'mimic_var'):
-            return
-        if getattr(self, '_settings_loaded', False):
-            self._save_gui_settings()
+        # Settings saved on close, no need to save on every change
+        pass
+
+    def _on_config_schedule_tab_changed(self, event):
+        """Handle config/schedule tab change to show appropriate buttons."""
+        selected_tab = self.config_schedule_notebook.index(self.config_schedule_notebook.select())
+
+        if selected_tab == 0:  # Configs tab
+            # Show config buttons, hide schedule frame buttons
+            self.config_buttons_frame.grid()
+            self.schedule_frame.hide_buttons()
+        else:  # Schedules tab
+            # Hide config buttons, show schedule frame buttons
+            self.config_buttons_frame.grid_remove()
+            self.schedule_frame.show_buttons_in_parent(self.config_buttons_frame.master, row=1)
 
     def _on_close(self):
+        # Stop schedule executor
+        if hasattr(self, 'schedule_executor'):
+            self.schedule_executor.stop()
+
         self._save_gui_settings()
         # Call our comprehensive closing method
         self.on_closing()
@@ -1829,6 +1862,9 @@ With RANSAC enabled:
 
         def should_include(code: str) -> bool:
             if not main_code:
+                return True
+            # If main_code is "00" (Everything), show all categories
+            if main_code == "00":
                 return True
             return code.startswith(main_code)
 
@@ -2624,30 +2660,13 @@ With RANSAC enabled:
                 self.status_var.set(f"CSV does not exist: {csv_path.name}")
                 return
 
-            # Load the CSV into the comparison tree
-            self.csv_compare_path = csv_path
-            self.csv_compare_label.config(text=f"Loaded: {csv_path.name}", foreground="black")
-            print(f"[CONFIG MENU] Loading CSV: {csv_path}")
+            # Load CSV using modular worker
+            success = self._load_csv_worker(csv_path, autofill_from_config=config)
 
-            # Load CSV data
-            self.csv_compare_data = []
-            with open(csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    self.csv_compare_data.append(row)
-
-            # Set "In-stock only" checkbox based on config's csv_show_in_stock_only setting
-            show_in_stock_only = config.get('csv_show_in_stock_only', False)
-            self.csv_in_stock_only.set(show_in_stock_only)
-
-            self.filter_csv_items()  # Display with filter applied
-
-            # Auto-fill eBay search query from keyword in config
-            self._autofill_search_query_from_config(config)
-
-            self.status_var.set(f"CSV loaded successfully: {len(self.csv_compare_data)} items")
-            print(f"[CONFIG MENU] Loaded {len(self.csv_compare_data)} items from CSV")
-            print(f"[CONFIG MENU] Show in-stock only filter set to: {show_in_stock_only}")
+            if success:
+                self.status_var.set(f"CSV loaded successfully: {len(self.csv_compare_data)} items")
+            else:
+                self.status_var.set(f"Error loading CSV: {csv_path.name}")
 
         except Exception as e:
             self.status_var.set(f"Error loading CSV: {e}")
@@ -2692,6 +2711,7 @@ With RANSAC enabled:
             # Get first filtered item
             first_item = self.csv_filtered_items[0]
             keyword = first_item.get('keyword', '').strip()
+            category = first_item.get('category', '')
 
             # If no keyword field, try to extract from title
             if not keyword:
@@ -2701,6 +2721,12 @@ With RANSAC enabled:
             if not keyword:
                 return
 
+            # Get category keyword from mapping
+            category_keyword = CATEGORY_KEYWORDS.get(category, '')
+
+            # Build search query: keyword + category keyword
+            search_query = f"{keyword} {category_keyword}".strip()
+
             # Check if secondary keyword should be added
             add_secondary = hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get()
 
@@ -2709,14 +2735,12 @@ With RANSAC enabled:
                 if title:
                     secondary = self._extract_secondary_keyword(title, keyword)
                     if secondary:
-                        query = f"{keyword} {secondary}"
-                        self.browserless_query_var.set(query)
-                        print(f"[CSV AUTOFILL] Set eBay query with secondary: {query}")
-                        return
+                        search_query = f"{search_query} {secondary}".strip()
+                        print(f"[CSV AUTOFILL] Added secondary keyword: {secondary}")
 
-            # No secondary keyword, just use primary keyword
-            self.browserless_query_var.set(keyword)
-            print(f"[CSV AUTOFILL] Set eBay query: {keyword}")
+            # Set the final query
+            self.browserless_query_var.set(search_query)
+            print(f"[CSV AUTOFILL] Set eBay query: {search_query}")
 
         except Exception as e:
             print(f"[CSV AUTOFILL] Error: {e}")
@@ -3263,6 +3287,49 @@ With RANSAC enabled:
         self.browserless_status.set("Ready for eBay text search")
 
     # CSV Batch Comparison methods
+    def _load_csv_worker(self, csv_path: Path, autofill_from_config=None):
+        """
+        Modular worker to load CSV data into comparison tree.
+
+        Args:
+            csv_path: Path to CSV file
+            autofill_from_config: Optional config dict to autofill eBay query from config keyword
+                                 and set in-stock filter
+        """
+        try:
+            self.csv_compare_path = csv_path
+            self.csv_compare_label.config(text=f"Loaded: {csv_path.name}", foreground="black")
+            print(f"[CSV WORKER] Loading CSV: {csv_path}")
+
+            # Load CSV data
+            self.csv_compare_data = []
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    self.csv_compare_data.append(row)
+
+            # Set in-stock filter from config if provided
+            if autofill_from_config:
+                show_in_stock_only = autofill_from_config.get('csv_show_in_stock_only', False)
+                self.csv_in_stock_only.set(show_in_stock_only)
+                print(f"[CSV WORKER] Set in-stock filter to: {show_in_stock_only}")
+
+            # Display with filter applied
+            self.filter_csv_items()
+
+            # Auto-fill eBay search query
+            if autofill_from_config:
+                self._autofill_search_query_from_config(autofill_from_config)
+            else:
+                self._autofill_search_query_from_csv()
+
+            print(f"[CSV WORKER] Loaded {len(self.csv_compare_data)} items")
+            return True
+
+        except Exception as e:
+            print(f"[CSV WORKER ERROR] {e}")
+            return False
+
     def load_csv_for_comparison(self):
         """Load CSV file for batch comparison"""
         file_path = filedialog.askopenfilename(
@@ -3272,28 +3339,9 @@ With RANSAC enabled:
         )
 
         if file_path:
-            self.csv_compare_path = Path(file_path)
-            self.csv_compare_label.config(text=f"Loaded: {self.csv_compare_path.name}", foreground="black")
-            print(f"[CSV COMPARE] Loaded CSV: {self.csv_compare_path}")
-
-            # Load CSV data
-            self.csv_compare_data = []
-            try:
-                with open(self.csv_compare_path, 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        self.csv_compare_data.append(row)
-
-                self.filter_csv_items()  # Display with filter applied
-
-                # Auto-fill eBay search query from first item's keyword
-                self._autofill_search_query_from_csv()
-
-                print(f"[CSV COMPARE] Loaded {len(self.csv_compare_data)} items")
-
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to load CSV: {e}")
-                print(f"[CSV COMPARE ERROR] {e}")
+            success = self._load_csv_worker(Path(file_path))
+            if not success:
+                messagebox.showerror("Error", f"Failed to load CSV: {file_path}")
 
     def filter_csv_items(self):
         """Filter and display CSV items based on in-stock filter - fast load, thumbnails loaded on demand"""
@@ -3305,23 +3353,40 @@ With RANSAC enabled:
         if not self.csv_compare_data:
             return
 
-        # Apply filter
+        # Apply filters
+        from datetime import datetime, timedelta
+        current_time = datetime.now()
+        cutoff_time = current_time - timedelta(hours=24)  # 24 hours for newly listed filter
+
         in_stock_only = self.csv_in_stock_only.get()
+        newly_listed_only = self.csv_newly_listed_only.get()
         filtered_items = []
 
         for row in self.csv_compare_data:
+            # In-stock filter
             stock = row.get('in_stock', '').lower()
             if in_stock_only and stock not in ('true', 'yes', '1'):
                 continue
+
+            # Newly listed filter (24 hours)
+            if newly_listed_only:
+                first_seen_str = row.get('first_seen', '')
+                if first_seen_str:
+                    try:
+                        first_seen = datetime.fromisoformat(first_seen_str)
+                        if first_seen < cutoff_time:
+                            continue  # Skip items older than 24 hours
+                    except:
+                        continue  # Skip items with invalid dates
+                else:
+                    continue  # Skip items without first_seen date
+
             filtered_items.append(row)
 
         # Display filtered items WITHOUT thumbnails first (fast load)
-        from datetime import datetime, timedelta
-        current_time = datetime.now()
-
-        # Use recent_hours setting for CSV "new items" cutoff
+        # Use recent_hours setting for CSV "new items" visual indicator
         recent_hours = self._get_recent_hours_value()
-        cutoff_time = current_time - timedelta(hours=recent_hours) if recent_hours else current_time - timedelta(hours=12)
+        new_indicator_cutoff = current_time - timedelta(hours=recent_hours) if recent_hours else current_time - timedelta(hours=12)
 
         # Store NEW status for each item for thumbnail border rendering
         self.csv_new_items = set()
@@ -3332,7 +3397,7 @@ With RANSAC enabled:
             if first_seen_str:
                 try:
                     first_seen = datetime.fromisoformat(first_seen_str)
-                    if first_seen >= cutoff_time:
+                    if first_seen >= new_indicator_cutoff:
                         self.csv_new_items.add(str(i))  # Mark as new
                 except:
                     pass
@@ -3347,7 +3412,7 @@ With RANSAC enabled:
             self.csv_items_tree.insert('', 'end', iid=str(i), text=str(i+1),
                                       values=(title, price, shop, stock_display, category))
 
-        print(f"[CSV COMPARE] Displayed {len(filtered_items)} items (in-stock filter: {in_stock_only})")
+        print(f"[CSV COMPARE] Displayed {len(filtered_items)} items (newly listed: {newly_listed_only}, in-stock: {in_stock_only})")
 
         # Store filtered items for thumbnail toggling
         self.csv_filtered_items = filtered_items
@@ -3382,9 +3447,8 @@ With RANSAC enabled:
         )
 
     def _on_csv_filter_changed(self):
-        """Handle CSV filter changes - filter items and save setting"""
+        """Handle CSV filter changes - filter items (settings saved on close)"""
         self.filter_csv_items()
-        self._save_gui_settings()
 
     def _on_recent_hours_changed(self, *args):
         """Handle latest additions timeframe change - refresh CSV view if loaded"""
@@ -3705,24 +3769,28 @@ With RANSAC enabled:
         except Exception as e:
             messagebox.showerror("Error", f"Invalid selection: {e}")
 
-    def compare_all_csv_items(self):
-        """Compare all visible CSV items with eBay"""
+    def _run_csv_comparison_async(self):
+        """Run CSV comparison without confirmation (for scheduled tasks)"""
+        self.compare_all_csv_items(skip_confirmation=True)
+
+    def compare_all_csv_items(self, skip_confirmation=False):
+        """Compare all visible CSV items with eBay
+
+        Args:
+            skip_confirmation: If True, skip confirmation dialogs (for scheduled tasks)
+        """
         if not self.csv_compare_data:
-            messagebox.showinfo("No Data", "Please load a CSV file first")
+            if not skip_confirmation:
+                messagebox.showinfo("No Data", "Please load a CSV file first")
             return
 
-        # Get filtered items
-        in_stock_only = self.csv_in_stock_only.get()
-        items_to_compare = []
-
-        for row in self.csv_compare_data:
-            stock = row.get('in_stock', '').lower()
-            if in_stock_only and stock not in ('true', 'yes', '1'):
-                continue
-            items_to_compare.append(row)
+        # Use already filtered items from the display
+        # This respects both in-stock and newly listed filters
+        items_to_compare = self.csv_filtered_items if hasattr(self, 'csv_filtered_items') else self.csv_compare_data
 
         if not items_to_compare:
-            messagebox.showinfo("No Items", "No items to compare (check filter settings)")
+            if not skip_confirmation:
+                messagebox.showinfo("No Items", "No items to compare (check filter settings)")
             return
 
         # Check if 2nd keyword is enabled
@@ -3731,22 +3799,28 @@ With RANSAC enabled:
         # Choose comparison method based on 2nd keyword setting
         if add_secondary:
             # With 2nd keyword: Each item needs individual eBay search (different keywords)
-            response = messagebox.askyesno(
-                "Individual Batch Comparison",
-                f"Compare {len(items_to_compare)} items with individual eBay searches?\n\n"
-                f"2nd keyword is enabled, so each item will have a separate search.\n"
-                f"This will take longer."
-            )
+            if skip_confirmation:
+                response = True
+            else:
+                response = messagebox.askyesno(
+                    "Individual Batch Comparison",
+                    f"Compare {len(items_to_compare)} items with individual eBay searches?\n\n"
+                    f"2nd keyword is enabled, so each item will have a separate search.\n"
+                    f"This will take longer."
+                )
             if response:
                 self.csv_compare_progress.start()
                 self._start_thread(lambda: self._compare_csv_items_individually_worker(items_to_compare))
         else:
             # Without 2nd keyword: Use single cached eBay search for all items
-            response = messagebox.askyesno(
-                "Batch Comparison",
-                f"Compare {len(items_to_compare)} items with cached eBay search?\n\n"
-                f"All items use the same keyword, so we'll reuse eBay results."
-            )
+            if skip_confirmation:
+                response = True
+            else:
+                response = messagebox.askyesno(
+                    "Batch Comparison",
+                    f"Compare {len(items_to_compare)} items with cached eBay search?\n\n"
+                    f"All items use the same keyword, so we'll reuse eBay results."
+                )
             if response:
                 self.csv_compare_progress.start()
                 self._start_thread(lambda: self._compare_csv_items_worker(items_to_compare))
@@ -3755,7 +3829,15 @@ With RANSAC enabled:
     def _compare_csv_items_worker(self, items):
         """Worker to compare CSV items with eBay - OPTIMIZED with caching (runs in background thread)"""
         max_results = int(self.browserless_max_results.get())
-        search_query = self.browserless_query_var.get().strip()
+        # Build search query: keyword + category keyword
+        base_keyword = self.keyword_var.get().strip()
+
+        # Get category keyword from selected category
+        category = self._extract_category()
+        category_keyword = CATEGORY_KEYWORDS.get(category, '')
+
+        # Combine keyword + category keyword
+        search_query = f"{base_keyword} {category_keyword}".strip() if category_keyword else base_keyword
 
         def update_callback(message):
             self.after(0, lambda: self.browserless_status.set(message))
