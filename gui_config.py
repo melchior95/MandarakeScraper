@@ -1011,7 +1011,7 @@ With RANSAC enabled:
         # Max CSV items control
         ttk.Label(advanced_frame, text="Max CSV items (0 = unlimited):").grid(
             row=current_row, column=0, sticky=tk.W, **pad)
-        self.max_csv_items_var = tk.StringVar(value=str(self.settings.get('scraper', {}).get('max_csv_items', 0)))
+        self.max_csv_items_var = tk.StringVar(value=str(self.settings.get_setting('scraper.max_csv_items', 0)))
         max_csv_entry = ttk.Entry(advanced_frame, textvariable=self.max_csv_items_var, width=10)
         max_csv_entry.grid(row=current_row, column=1, sticky=tk.W, **pad)
         self.max_csv_items_var.trace_add('write', self._on_max_csv_items_changed)
@@ -2007,7 +2007,7 @@ With RANSAC enabled:
                     sorted_items = sorted(merged_items.values(), key=lambda x: x.get('first_seen', ''), reverse=True)
 
                     # Trim old items if max_csv_items is set
-                    max_csv_items = self.settings.get('scraper', {}).get('max_csv_items', 0)
+                    max_csv_items = self.settings.get_setting('scraper.max_csv_items', 0)
                     if max_csv_items > 0 and len(sorted_items) > max_csv_items:
                         removed_count = len(sorted_items) - max_csv_items
                         sorted_items = sorted_items[:max_csv_items]
@@ -2208,14 +2208,12 @@ With RANSAC enabled:
                 max_items = 0
 
             # Update settings
-            scraper_settings = self.settings.get('scraper', {})
-            scraper_settings['max_csv_items'] = max_items
-            self.settings.set('scraper', scraper_settings)
+            self.settings.set_setting('scraper.max_csv_items', max_items)
             self.settings.save()
 
         except ValueError:
             # Invalid input - reset to current saved value
-            current_value = self.settings.get('scraper', {}).get('max_csv_items', 0)
+            current_value = self.settings.get_setting('scraper.max_csv_items', 0)
             self.max_csv_items_var.set(str(current_value))
 
     def _on_marketplace_toggle(self):
