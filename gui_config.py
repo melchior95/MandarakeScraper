@@ -875,7 +875,7 @@ With RANSAC enabled:
         # Create custom style for CSV treeview with thumbnails
         style.configure('CSV.Treeview', rowheight=70)  # Match other trees
 
-        csv_columns = ('title', 'price', 'shop', 'stock', 'category', 'url')
+        csv_columns = ('title', 'price', 'shop', 'stock', 'category', 'compared', 'url')
         self.csv_items_tree = ttk.Treeview(csv_items_frame, columns=csv_columns, show='tree headings', height=6, style='CSV.Treeview')
 
         self.csv_items_tree.heading('#0', text='Thumb')
@@ -887,6 +887,7 @@ With RANSAC enabled:
             'shop': 'Shop',
             'stock': 'Stock',
             'category': 'Category',
+            'compared': 'eBay✓',
             'url': 'URL'
         }
 
@@ -898,6 +899,7 @@ With RANSAC enabled:
         self.csv_items_tree.column('shop', width=80)
         self.csv_items_tree.column('stock', width=60)
         self.csv_items_tree.column('category', width=120)
+        self.csv_items_tree.column('compared', width=50)
         self.csv_items_tree.column('url', width=300)
 
         self.csv_items_tree.grid(row=0, column=0, sticky=tk.NSEW)
@@ -963,8 +965,12 @@ With RANSAC enabled:
         ttk.Button(button_frame, text="Compare Selected", command=self.compare_selected_csv_item).grid(row=0, column=3, sticky=tk.W, **pad)
         ttk.Button(button_frame, text="Compare All", command=self.compare_all_csv_items).grid(row=0, column=4, sticky=tk.W, **pad)
 
+        # Second row for smart comparison controls
+        ttk.Button(button_frame, text="Compare New Only", command=self.compare_new_csv_items).grid(row=1, column=3, sticky=tk.W, **pad)
+        ttk.Button(button_frame, text="Clear Results", command=self.clear_comparison_results).grid(row=1, column=4, sticky=tk.W, **pad)
+
         self.csv_compare_progress = ttk.Progressbar(button_frame, mode='indeterminate', length=200)
-        self.csv_compare_progress.grid(row=0, column=5, sticky=tk.W, padx=(10, 5))
+        self.csv_compare_progress.grid(row=0, column=5, rowspan=2, sticky=tk.W, padx=(10, 5))
 
         # Add the CSV comparison frame to the paned window
         self.ebay_paned.add(csv_compare_frame, minsize=200)
@@ -1000,6 +1006,15 @@ With RANSAC enabled:
         ttk.Checkbutton(advanced_frame, text="Use browser mimic (recommended for Japanese text)",
                        variable=self.mimic_var).grid(row=current_row, column=1, columnspan=2, sticky=tk.W, **pad)
         self.mimic_var.trace_add('write', self._on_mimic_changed)
+        current_row += 1
+
+        # Max CSV items control
+        ttk.Label(advanced_frame, text="Max CSV items (0 = unlimited):").grid(
+            row=current_row, column=0, sticky=tk.W, **pad)
+        self.max_csv_items_var = tk.StringVar(value=str(self.settings.get('scraper', {}).get('max_csv_items', 0)))
+        max_csv_entry = ttk.Entry(advanced_frame, textvariable=self.max_csv_items_var, width=10)
+        max_csv_entry.grid(row=current_row, column=1, sticky=tk.W, **pad)
+        self.max_csv_items_var.trace_add('write', self._on_max_csv_items_changed)
         current_row += 1
 
         # Separator
@@ -1920,19 +1935,93 @@ With RANSAC enabled:
                             print(f"[SURUGA-YA] Failed to translate title {i+1}: {e}")
                             item['title_en'] = title  # Fallback to original title
 
+                # Merge with existing CSV if it exists
+                from datetime import datetime
                 import csv
+
+                current_time = datetime.now()
+                existing_items = {}
+
+                if csv_path.exists():
+                    try:
+                        with open(csv_path, 'r', encoding='utf-8') as f:
+                            reader = csv.DictReader(f)
+                            for row in reader:
+                                url = row.get('url', '')
+                                if url:
+                                    existing_items[url] = row
+                        print(f"[SURUGA-YA] Loaded {len(existing_items)} existing items from CSV")
+                    except Exception as e:
+                        print(f"[SURUGA-YA] Could not read existing CSV: {e}")
+                        existing_items = {}
+
+                # Merge new results with existing items
+                new_count = 0
+                updated_count = 0
+                merged_items = {}
+
+                # First, add all existing items
+                for url, item in existing_items.items():
+                    merged_items[url] = item
+
+                # Then add/update with new results
+                for result in results:
+                    url = result.get('url', '')
+                    if not url:
+                        continue
+
+                    # Add timestamps
+                    if url in existing_items:
+                        # Update last_seen but keep first_seen from existing
+                        result['first_seen'] = existing_items[url].get('first_seen', current_time.isoformat())
+                        result['last_seen'] = current_time.isoformat()
+                        # Preserve eBay comparison results if they exist
+                        result['ebay_compared'] = existing_items[url].get('ebay_compared', '')
+                        result['ebay_match_found'] = existing_items[url].get('ebay_match_found', '')
+                        result['ebay_best_match_title'] = existing_items[url].get('ebay_best_match_title', '')
+                        result['ebay_similarity'] = existing_items[url].get('ebay_similarity', '')
+                        result['ebay_price'] = existing_items[url].get('ebay_price', '')
+                        result['ebay_profit_margin'] = existing_items[url].get('ebay_profit_margin', '')
+                        updated_count += 1
+                    else:
+                        # New item
+                        result['first_seen'] = current_time.isoformat()
+                        result['last_seen'] = current_time.isoformat()
+                        result['ebay_compared'] = ''
+                        result['ebay_match_found'] = ''
+                        result['ebay_best_match_title'] = ''
+                        result['ebay_similarity'] = ''
+                        result['ebay_price'] = ''
+                        result['ebay_profit_margin'] = ''
+                        new_count += 1
+
+                    merged_items[url] = result
+
+                # Write merged results
                 with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-                    fieldnames = ['title', 'title_en', 'price', 'condition', 'stock_status', 'url', 'image_url', 'local_image']
+                    fieldnames = ['first_seen', 'last_seen', 'title', 'title_en', 'price', 'condition', 'stock_status', 'url', 'image_url', 'local_image',
+                                  'ebay_compared', 'ebay_match_found', 'ebay_best_match_title', 'ebay_similarity', 'ebay_price', 'ebay_profit_margin']
                     writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
                     writer.writeheader()
-                    writer.writerows(results)
+                    # Sort by first_seen (newest first)
+                    sorted_items = sorted(merged_items.values(), key=lambda x: x.get('first_seen', ''), reverse=True)
+
+                    # Trim old items if max_csv_items is set
+                    max_csv_items = self.settings.get('scraper', {}).get('max_csv_items', 0)
+                    if max_csv_items > 0 and len(sorted_items) > max_csv_items:
+                        removed_count = len(sorted_items) - max_csv_items
+                        sorted_items = sorted_items[:max_csv_items]
+                        print(f"[SURUGA-YA] Trimmed {removed_count} old items (keeping newest {max_csv_items})")
+
+                    writer.writerows(sorted_items)
+
+                self.run_queue.put(("status", f"Found {len(merged_items)} items ({new_count} new, {updated_count} updated) - saved to {csv_path.name}"))
 
                 # Update config with CSV path
                 config['csv'] = str(csv_path)
                 with open(config_path, 'w', encoding='utf-8') as f:
                     json.dump(config, f, ensure_ascii=False, indent=2)
 
-                self.run_queue.put(("status", f"Found {len(results)} items - saved to {csv_path.name}"))
                 self.run_queue.put(("results", str(config_path)))
             else:
                 self.run_queue.put(("status", "No results found"))
@@ -2104,6 +2193,30 @@ With RANSAC enabled:
     def _on_mimic_changed(self, *args):
         # Settings saved on close, no need to save on every change
         pass
+
+    def _on_max_csv_items_changed(self, *args):
+        """Handle max CSV items setting change with validation"""
+        value = self.max_csv_items_var.get().strip()
+
+        # Allow empty or numeric values only
+        if value == '':
+            value = '0'
+
+        try:
+            max_items = int(value)
+            if max_items < 0:
+                max_items = 0
+
+            # Update settings
+            scraper_settings = self.settings.get('scraper', {})
+            scraper_settings['max_csv_items'] = max_items
+            self.settings.set('scraper', scraper_settings)
+            self.settings.save()
+
+        except ValueError:
+            # Invalid input - reset to current saved value
+            current_value = self.settings.get('scraper', {}).get('max_csv_items', 0)
+            self.max_csv_items_var.set(str(current_value))
 
     def _on_marketplace_toggle(self):
         """Handle marketplace toggle changes"""
@@ -2766,6 +2879,55 @@ With RANSAC enabled:
             print(f"[CSV IMAGES] Error saving CSV: {e}")
             raise
 
+    def _save_comparison_results_to_csv(self, comparison_results):
+        """Save eBay comparison results back to the CSV file
+
+        Args:
+            comparison_results: List of dicts with comparison data including 'mandarake_item', 'similarity', 'best_match', etc.
+        """
+        if not self.csv_compare_path or not self.csv_compare_data:
+            print("[COMPARISON SAVE] No CSV loaded, skipping save")
+            return
+
+        try:
+            from datetime import datetime
+
+            # Create a mapping of URLs to comparison results
+            url_to_results = {}
+            for result in comparison_results:
+                mandarake_item = result.get('mandarake_item', {})
+                url = mandarake_item.get('url', mandarake_item.get('product_url', ''))
+                if url:
+                    best_match = result.get('best_match', {})
+                    url_to_results[url] = {
+                        'ebay_compared': datetime.now().isoformat(),
+                        'ebay_match_found': 'Yes' if best_match else 'No',
+                        'ebay_best_match_title': best_match.get('title', '') if best_match else '',
+                        'ebay_similarity': f"{result.get('similarity', 0):.1f}" if best_match else '',
+                        'ebay_price': f"${best_match.get('price', 0):.2f}" if best_match else '',
+                        'ebay_profit_margin': f"{result.get('profit_margin', 0):.1f}%" if best_match else ''
+                    }
+
+            # Update csv_compare_data with comparison results
+            updated_count = 0
+            for row in self.csv_compare_data:
+                url = row.get('url', row.get('product_url', ''))
+                if url in url_to_results:
+                    row.update(url_to_results[url])
+                    updated_count += 1
+
+            # Save updated CSV
+            if updated_count > 0:
+                self._save_updated_csv()
+                print(f"[COMPARISON SAVE] Saved comparison results for {updated_count} items to CSV")
+            else:
+                print("[COMPARISON SAVE] No items matched for saving")
+
+        except Exception as e:
+            print(f"[COMPARISON SAVE] Error saving comparison results: {e}")
+            import traceback
+            traceback.print_exc()
+
     def _update_tree_item(self, path: Path, config: dict):
         """Update a specific tree item's values without reloading the entire tree, or add if new"""
         # Find the tree item that matches this path
@@ -2808,6 +2970,8 @@ With RANSAC enabled:
         if existing_item:
             # Update existing item
             self.config_tree.item(existing_item, values=values)
+            # Force tree to update display
+            self.config_tree.update_idletasks()
         else:
             # Add new item at the end
             new_item = self.config_tree.insert('', 'end', values=values)
@@ -3916,9 +4080,12 @@ With RANSAC enabled:
             category = row.get('category', '')
             url = row.get('url', '')
 
+            # Check if item has been compared with eBay
+            compared_status = '✓' if row.get('ebay_compared') else ''
+
             # Insert WITHOUT image for fast loading (use 0-based index as iid for proper mapping)
             self.csv_items_tree.insert('', 'end', iid=str(i), text=str(i+1),
-                                      values=(title, price, shop, stock_display, category, url))
+                                      values=(title, price, shop, stock_display, category, compared_status, url))
 
         print(f"[CSV COMPARE] Displayed {len(filtered_items)} items (newly listed: {newly_listed_only}, in-stock: {in_stock_only})")
 
@@ -4398,6 +4565,86 @@ With RANSAC enabled:
                 self.csv_compare_progress.start()
                 self._start_thread(lambda: self._compare_csv_items_worker(items_to_compare, search_query))
 
+    def compare_new_csv_items(self):
+        """Compare only items that haven't been compared yet (no ebay_compared timestamp)"""
+        if not self.csv_compare_data:
+            messagebox.showinfo("No Data", "Please load a CSV file first")
+            return
+
+        # Filter for items not yet compared
+        new_items = []
+        for item in self.csv_compare_data:
+            ebay_compared = item.get('ebay_compared', '')
+            if not ebay_compared:  # Empty or missing ebay_compared field
+                new_items.append(item)
+
+        if not new_items:
+            messagebox.showinfo("All Compared", f"All {len(self.csv_compare_data)} items have already been compared with eBay.\n\nUse 'Clear Results' to reset and recompare, or 'Compare All' to recompare everything.")
+            return
+
+        # Extract search query
+        search_query = self.browserless_query_var.get().strip()
+        if not search_query:
+            messagebox.showwarning("No Query", "Please load a CSV or enter a search query")
+            return
+
+        # Confirm comparison
+        response = messagebox.askyesno(
+            "Compare New Items",
+            f"Found {len(new_items)} new items (out of {len(self.csv_compare_data)} total).\n\n"
+            f"Compare these new items with eBay?"
+        )
+
+        if response:
+            self.csv_compare_progress.start()
+            # Check if 2nd keyword is enabled
+            add_secondary = hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get()
+            if add_secondary:
+                self._start_thread(lambda: self._compare_csv_items_individually_worker(new_items, search_query))
+            else:
+                self._start_thread(lambda: self._compare_csv_items_worker(new_items, search_query))
+
+    def clear_comparison_results(self):
+        """Clear all eBay comparison results from the loaded CSV"""
+        if not self.csv_compare_data or not self.csv_compare_path:
+            messagebox.showwarning("No CSV", "Please load a CSV file first")
+            return
+
+        # Count items with comparison results
+        compared_count = sum(1 for item in self.csv_compare_data if item.get('ebay_compared'))
+
+        if compared_count == 0:
+            messagebox.showinfo("No Results", "No comparison results to clear")
+            return
+
+        # Confirm clearing
+        response = messagebox.askyesno(
+            "Clear Comparison Results",
+            f"Clear comparison results for {compared_count} items?\n\n"
+            f"This will reset ebay_compared, ebay_match_found, ebay_similarity, etc.\n"
+            f"You can recompare items after clearing."
+        )
+
+        if response:
+            try:
+                # Clear comparison fields for all items
+                for item in self.csv_compare_data:
+                    item['ebay_compared'] = ''
+                    item['ebay_match_found'] = ''
+                    item['ebay_best_match_title'] = ''
+                    item['ebay_similarity'] = ''
+                    item['ebay_price'] = ''
+                    item['ebay_profit_margin'] = ''
+
+                # Save updated CSV
+                self._save_updated_csv()
+
+                messagebox.showinfo("Success", f"Cleared comparison results for {compared_count} items")
+                print(f"[CLEAR RESULTS] Cleared comparison results for {compared_count} items")
+
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to clear results: {e}")
+                print(f"[CLEAR RESULTS ERROR] {e}")
 
     def _compare_csv_items_worker(self, items, search_query):
         """Worker to compare CSV items with eBay - OPTIMIZED with caching (runs in background thread)
@@ -4413,6 +4660,8 @@ With RANSAC enabled:
 
         def display_callback(comparison_results):
             self.all_comparison_results = comparison_results
+            # Save comparison results to CSV
+            self.after(0, lambda: self._save_comparison_results_to_csv(comparison_results))
             # Display results sorted by similarity/profit
             self.after(0, self.apply_results_filter)
             # Auto-send to alerts if threshold is active
@@ -4455,6 +4704,8 @@ With RANSAC enabled:
 
         def display_callback(comparison_results):
             self.all_comparison_results = comparison_results
+            # Save comparison results to CSV
+            self.after(0, lambda: self._save_comparison_results_to_csv(comparison_results))
             # Display results sorted by similarity/profit
             self.after(0, self.apply_results_filter)
             # Auto-send to alerts if threshold is active

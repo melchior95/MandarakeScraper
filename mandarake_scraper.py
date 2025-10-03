@@ -1207,9 +1207,22 @@ class MandarakeScraper:
                 # Update last_seen but keep first_seen from existing
                 result['first_seen'] = existing_items[url].get('first_seen', result['first_seen'])
                 result['last_seen'] = current_time.isoformat()
+                # Preserve eBay comparison results if they exist
+                result['ebay_compared'] = existing_items[url].get('ebay_compared', '')
+                result['ebay_match_found'] = existing_items[url].get('ebay_match_found', '')
+                result['ebay_best_match_title'] = existing_items[url].get('ebay_best_match_title', '')
+                result['ebay_similarity'] = existing_items[url].get('ebay_similarity', '')
+                result['ebay_price'] = existing_items[url].get('ebay_price', '')
+                result['ebay_profit_margin'] = existing_items[url].get('ebay_profit_margin', '')
                 updated_count += 1
             else:
-                # New item
+                # New item - initialize eBay comparison columns as empty
+                result['ebay_compared'] = ''
+                result['ebay_match_found'] = ''
+                result['ebay_best_match_title'] = ''
+                result['ebay_similarity'] = ''
+                result['ebay_price'] = ''
+                result['ebay_profit_margin'] = ''
                 new_count += 1
 
             merged_items[url] = result
@@ -1235,6 +1248,28 @@ class MandarakeScraper:
                                 key=lambda x: x.get('first_seen', ''),
                                 reverse=True)
             print(f"[CSV SAVE DEBUG] Sorted {len(sorted_items)} items, writing to CSV")
+
+            # Trim old items if max_csv_items is set in config or user_settings.json
+            max_csv_items = self.config.get('max_csv_items', 0)
+            if max_csv_items == 0:
+                # Try to read from user_settings.json
+                try:
+                    import json
+                    from pathlib import Path
+                    settings_path = Path('user_settings.json')
+                    if settings_path.exists():
+                        with open(settings_path, 'r', encoding='utf-8') as f:
+                            user_settings = json.load(f)
+                            max_csv_items = user_settings.get('scraper', {}).get('max_csv_items', 0)
+                except Exception:
+                    pass
+
+            if max_csv_items > 0 and len(sorted_items) > max_csv_items:
+                removed_count = len(sorted_items) - max_csv_items
+                sorted_items = sorted_items[:max_csv_items]
+                logging.info(f"Trimmed {removed_count} old items (keeping newest {max_csv_items})")
+                print(f"[CSV SAVE DEBUG] Trimmed {removed_count} old items (keeping newest {max_csv_items})")
+
             writer.writerows(sorted_items)
             print(f"[CSV SAVE DEBUG] Rows written to CSV")
 

@@ -101,6 +101,9 @@ class ConfigurationManager:
                 except ValueError:
                     messagebox.showerror("Validation", "Max pages must be an integer.")
                     return None
+            else:
+                # Ensure max_pages is always in config (empty string if not set)
+                config['max_pages'] = ''
             
             # Results per page
             results_per_page = gui_instance.results_per_page_var.get().strip()
