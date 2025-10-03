@@ -830,6 +830,11 @@ With RANSAC enabled:
         browserless_h_scroll.grid(row=1, column=0, sticky=tk.EW)
         self.browserless_tree.configure(xscrollcommand=browserless_h_scroll.set)
 
+        # Status area for browserless search
+        self.browserless_status = tk.StringVar(value="Ready for eBay text search")
+        browserless_status_label = ttk.Label(browserless_results_frame, textvariable=self.browserless_status, relief=tk.SUNKEN, anchor='w')
+        browserless_status_label.grid(row=3, column=0, columnspan=2, sticky=tk.EW, pady=(5, 0))
+
         # Initialize eBay search manager after eBay tree widget is created
         self.ebay_search_manager = EbaySearchManager(
             self.browserless_tree, 
@@ -847,11 +852,6 @@ With RANSAC enabled:
 
         # Enable column drag-to-reorder for browserless tree
         self._setup_column_drag(self.browserless_tree)
-
-        # Status area for browserless search
-        self.browserless_status = tk.StringVar(value="Ready for eBay text search")
-        browserless_status_label = ttk.Label(browserless_results_frame, textvariable=self.browserless_status, relief=tk.SUNKEN, anchor='w')
-        browserless_status_label.grid(row=3, column=0, columnspan=2, sticky=tk.EW, pady=(5, 0))
 
         # Add the results frame to the paned window
         self.ebay_paned.add(browserless_results_frame, minsize=200)
