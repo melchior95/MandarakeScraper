@@ -42,14 +42,22 @@ def run_ebay_scrapy_search(query: str, max_results: int = 10, sold_listings: boo
         print(f"[SCRAPY] Running command: {' '.join(cmd)}")
         print(f"[SCRAPY] Working directory: {spider_path}")
 
-        # Run scrapy spider
-        result = subprocess.run(
-            cmd,
-            cwd=str(spider_path),
-            capture_output=True,
-            text=True,
-            timeout=60  # 60 second timeout
-        )
+        # Run scrapy spider with proper terminal detachment
+        # On Windows, use CREATE_NO_WINDOW to prevent terminal takeover
+        import platform
+        kwargs = {
+            'cwd': str(spider_path),
+            'capture_output': True,
+            'text': True,
+            'timeout': 60,
+            'stdin': subprocess.DEVNULL  # Don't inherit stdin
+        }
+
+        # Windows-specific: prevent console window and terminal inheritance
+        if platform.system() == 'Windows':
+            kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+
+        result = subprocess.run(cmd, **kwargs)
 
         # Print spider logs (they go to stderr)
         if result.stderr:

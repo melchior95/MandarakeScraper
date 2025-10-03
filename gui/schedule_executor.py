@@ -105,15 +105,22 @@ class ScheduleExecutor:
         Run a single config on the main GUI thread.
 
         This method:
-        1. Loads the config into the GUI
-        2. Runs Compare All
-        3. Sends results to alerts tab (items meeting thresholds)
+        1. Sets CSV filter options from schedule
+        2. Loads the config into the GUI
+        3. Runs Compare All
+        4. Sends results to alerts tab (items meeting thresholds)
 
         Args:
             config_path: Path to config JSON file
             schedule: Parent schedule (for logging)
         """
         try:
+            # Set CSV filter options from schedule
+            print(f"[SCHEDULE EXECUTOR] Setting CSV filters from schedule: newly_listed={schedule.csv_newly_listed}, in_stock={schedule.csv_in_stock}, 2nd_kw={schedule.csv_2nd_keyword}")
+            self.gui.csv_newly_listed_only.set(schedule.csv_newly_listed)
+            self.gui.csv_in_stock_only.set(schedule.csv_in_stock)
+            self.gui.csv_add_secondary_keyword.set(schedule.csv_2nd_keyword)
+
             # Load config into GUI
             print(f"[SCHEDULE EXECUTOR] Loading config: {config_path.name}")
             self.gui._load_config_file(config_path)

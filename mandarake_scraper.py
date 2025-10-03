@@ -304,6 +304,10 @@ class MandarakeScraper:
         if getattr(self, 'recent_minutes', None):
             params['upToMinutes'] = str(self.recent_minutes)
 
+        # Adult content filter (for documentation - filtering done post-scrape)
+        if self._get_bool_config('adult_only', False):
+            params['r18'] = '1'  # Document in URL (actual filtering done in parse results)
+
         # Filter out empty parameters
         params = {k: v for k, v in params.items() if v}
 
@@ -762,6 +766,12 @@ class MandarakeScraper:
                 product_info['category'] = category
             if shop:
                 product_info['shop'] = shop
+
+            # Adult content filter - skip non-adult items if adult_only is enabled
+            if self._get_bool_config('adult_only', False):
+                if not product_info.get('is_adult', False):
+                    continue  # Skip non-adult items
+
             page_results.append(product_info)
             self.state['scraped_urls'].add(product_info['product_url'])
 

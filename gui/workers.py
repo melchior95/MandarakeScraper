@@ -1017,7 +1017,8 @@ def run_cached_compare_worker(query: str, max_comparisons: Optional[int], cached
 
 
 def load_csv_thumbnails_worker(filtered_items: List[Dict], csv_new_items: set,
-                               update_image_callback, thumb_width: int = 70) -> None:
+                               update_image_callback, thumb_width: int = 70,
+                               csv_path=None, save_to_csv_callback=None) -> None:
     """
     Background worker to load CSV thumbnails without blocking UI.
 
@@ -1026,16 +1027,21 @@ def load_csv_thumbnails_worker(filtered_items: List[Dict], csv_new_items: set,
         csv_new_items: Set of item IDs that are new
         update_image_callback: Callback to update image in treeview
         thumb_width: Width of thumbnail column (default 70)
+        csv_path: Optional path to CSV file (for saving downloaded images)
+        save_to_csv_callback: Optional callback(local_image_path, row_index) to save image path to CSV
     """
     print(f"[CSV THUMBNAILS] Loading thumbnails for {len(filtered_items)} items (size: {thumb_width}px)...")
 
     # Calculate thumbnail size with padding (leave some margin)
     thumb_size = max(20, thumb_width - 10)
 
+    # Track if we downloaded any new images
+    downloaded_any = False
+
     for i, row in enumerate(filtered_items):
         local_image_path = row.get('local_image', '')
         image_url = row.get('image_url', '')
-        photo = None
+        pil_img = None
 
         # Try local image first (fast)
         if local_image_path and Path(local_image_path).exists():
@@ -1048,15 +1054,56 @@ def load_csv_thumbnails_worker(filtered_items: List[Dict], csv_new_items: set,
                 if item_id in csv_new_items:
                     pil_img = ImageOps.expand(pil_img, border=3, fill='#87CEEB')  # Light blue border
 
-                photo = ImageTk.PhotoImage(pil_img)
             except Exception as e:
                 print(f"[CSV THUMBNAILS] Failed to load local thumbnail {i+1}: {e}")
 
-        # Update treeview with image (must be done in main thread)
-        if photo:
-            update_image_callback(str(i), photo)
+        # If no local image, try downloading from URL and save to disk
+        if not pil_img and image_url and csv_path:
+            try:
+                import requests
+                from io import BytesIO
 
-    print(f"[CSV THUMBNAILS] Finished loading thumbnails")
+                response = requests.get(image_url, timeout=5)
+                if response.status_code == 200:
+                    # Create images directory based on CSV filename
+                    csv_path_obj = Path(csv_path)
+                    images_dir = Path('images') / csv_path_obj.stem
+                    images_dir.mkdir(parents=True, exist_ok=True)
+
+                    # Save image to disk
+                    img_filename = f"thumb_product_{i:04d}.jpg"
+                    img_path = images_dir / img_filename
+
+                    with open(img_path, 'wb') as img_file:
+                        img_file.write(response.content)
+
+                    # Load image for display
+                    pil_img = Image.open(BytesIO(response.content))
+                    pil_img.thumbnail((thumb_size, thumb_size), Image.Resampling.LANCZOS)
+
+                    # Add light blue border if item is NEW
+                    item_id = str(i)
+                    if item_id in csv_new_items:
+                        pil_img = ImageOps.expand(pil_img, border=3, fill='#87CEEB')  # Light blue border
+
+                    # Update the row data with local image path
+                    row['local_image'] = str(img_path)
+                    downloaded_any = True
+
+                    # Notify main thread to update CSV file
+                    if save_to_csv_callback:
+                        save_to_csv_callback(str(img_path), i)
+
+                    print(f"[CSV THUMBNAILS] Downloaded and saved thumbnail {i+1}/{len(filtered_items)}")
+
+            except Exception as e:
+                print(f"[CSV THUMBNAILS] Failed to download thumbnail {i+1} from {image_url}: {e}")
+
+        # Update treeview with PIL image (PhotoImage will be created in main thread)
+        if pil_img:
+            update_image_callback(str(i), pil_img)
+
+    print(f"[CSV THUMBNAILS] Finished loading thumbnails (downloaded: {downloaded_any})")
 
 
 def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results: Optional[List[Dict]],

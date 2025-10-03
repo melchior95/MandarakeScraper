@@ -26,29 +26,54 @@ class SurugayaScraper(BaseScraper):
             rate_limit=2.0  # 2 seconds between requests
         )
 
-    def search(self, keyword: str, category: str = '7', shop_code: str = 'all',
-              max_results: int = 50, show_out_of_stock: bool = False) -> List[Dict]:
+    def search(self, keyword: str = '', category: str = '7', category1: str = None, category2: str = None,
+              shop_code: str = 'all', exclude_word: str = None, condition: str = 'all',
+              max_results: int = 50, show_out_of_stock: bool = False, adult_only: bool = False,
+              search_url: str = None) -> List[Dict]:
         """
-        Search Suruga-ya for items
+        Search Suruga-ya for items with advanced filters
 
         Args:
             keyword: Search keyword (Japanese or English)
-            category: Category code (default: '7' = Books & Photobooks)
+            category: Legacy category code (for backwards compatibility)
+            category1: Main category code (2, 3, 4, 5, 7, 10, 11)
+            category2: Detailed category code
             shop_code: Shop code (default: 'all')
+            exclude_word: Keywords to exclude from search
+            condition: 'all', '1' (new), or '2' (used)
             max_results: Maximum results to return
             show_out_of_stock: Include out of stock items
+            adult_only: Show only adult content (R18+)
+            search_url: Optional direct URL to use instead of building from parameters
 
         Returns:
             List of normalized result dictionaries
         """
-        self.logger.info(f"Searching Suruga-ya: keyword='{keyword}', category={category}, max={max_results}")
+        self.logger.info(f"Searching Suruga-ya: keyword='{keyword}', category1={category1}, category2={category2}, max={max_results}")
 
         results = []
         page = 1
 
         while len(results) < max_results:
-            # Build search URL
-            url = self._build_search_url(keyword, category, shop_code, page)
+            # Use provided URL or build from parameters
+            if search_url and page == 1:
+                # Use the provided URL for the first page
+                url = search_url
+                self.logger.info(f"Using provided URL: {url}")
+            else:
+                # Build search URL with all parameters (or for pagination)
+                url = self._build_search_url(
+                    keyword=keyword,
+                    category=category,
+                    category1=category1,
+                    category2=category2,
+                    shop_code=shop_code,
+                    exclude_word=exclude_word,
+                    condition=condition,
+                    in_stock_only=not show_out_of_stock,
+                    adult_only=adult_only,
+                    page=page
+                )
 
             # Fetch page
             soup = self.fetch_page(url)
@@ -180,30 +205,66 @@ class SurugayaScraper(BaseScraper):
             self.logger.error(f"Failed to parse item: {e}")
             return None
 
-    def _build_search_url(self, keyword: str, category: str, shop_code: str, page: int = 1) -> str:
+    def _build_search_url(self, keyword: str, category: str = None, category1: str = None,
+                           category2: str = None, shop_code: str = None, exclude_word: str = None,
+                           condition: str = 'all', in_stock_only: bool = False, adult_only: bool = False,
+                           page: int = 1) -> str:
         """
-        Build Suruga-ya search URL
+        Build Suruga-ya search URL with advanced parameters
 
         Args:
             keyword: Search keyword
-            category: Category code
+            category: Legacy category code (for backwards compatibility)
+            category1: Main category code (2, 3, 4, 5, 7, 10, 11)
+            category2: Detailed category code
             shop_code: Shop code
+            exclude_word: Keywords to exclude
+            condition: 'all', '1' (new), or '2' (used)
+            in_stock_only: Show only in-stock items
+            adult_only: Show only adult content (R18+)
             page: Page number (1-indexed)
 
         Returns:
             Complete search URL
         """
+        from urllib.parse import quote
+
         params = [
-            f"category={category}",
-            f"search_word={quote(keyword)}",
+            f"search_word={quote(keyword) if keyword else ''}",
             "searchbox=1"
         ]
 
+        # Use new 2-level category structure if provided
+        if category1:
+            params.append(f"category1={category1}")
+        if category2:
+            params.append(f"category2={category2}")
+        # Fallback to old single category
+        elif category:
+            params.append(f"category={category}")
+
+        # Exclude keywords
+        if exclude_word:
+            params.append(f"exclude_word={quote(exclude_word)}")
+
+        # Condition filter
+        if condition and condition != 'all':
+            params.append(f"sale_classified={condition}")
+
+        # Shop filter
         if shop_code and shop_code != 'all':
             params.append(f"tenpo_code={shop_code}")
 
+        # Stock filter
+        if in_stock_only:
+            params.append("inStock=1")
+
+        # Adult content filter
+        if adult_only:
+            params.append("adult_s=1")
+
+        # Pagination
         if page > 1:
-            # Suruga-ya pagination (adjust if needed based on actual site behavior)
             params.append(f"page={page}")
 
         return f"{self.base_url}/search?{'&'.join(params)}"

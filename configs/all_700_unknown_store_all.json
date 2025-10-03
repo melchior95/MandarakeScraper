@@ -1,0 +1,20 @@
+{
+  "store": "suruga-ya",
+  "keyword": "",
+  "hide_sold_out": false,
+  "csv_show_in_stock_only": false,
+  "csv_add_secondary_keyword": false,
+  "language": "en",
+  "fast": false,
+  "resume": true,
+  "debug": false,
+  "condition": "all",
+  "category1": "7",
+  "category2": "700",
+  "category": "700",
+  "results_per_page": 240,
+  "shop": "all",
+  "shop_name": "Unknown Store (all)",
+  "csv": "results\\all_700_unknown_store_all.csv",
+  "download_images": "images\\all_700_unknown_store_all/"
+}

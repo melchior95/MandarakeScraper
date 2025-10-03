@@ -1,11 +1,11 @@
 {
   "window": {
-    "width": 1214,
-    "height": 1185,
-    "x": 853,
-    "y": 151,
+    "width": 1232,
+    "height": 982,
+    "x": 448,
+    "y": 313,
     "maximized": false,
-    "ebay_paned_pos": 403
+    "ebay_paned_pos": 340
   },
   "ebay_analysis": {
     "min_sold_items": 1,
@@ -35,6 +35,7 @@
   },
   "recent": {
     "config_files": [
+      "configs\\sfssf_all_unknown_store_all.json",
       "configs\\norio_sugiura_books_everything_all_stores.json",
       "configs\\norio_sugiura_s_books_everything_all_stores.json",
       "configs\\all_s_m_all_stores.json",
@@ -48,8 +49,27 @@
   "meta": {
     "version": "1.0.0",
     "first_run": false,
-    "last_updated": "2025-10-02T16:05:01.262785",
+    "last_updated": "2025-10-03T15:12:23.720898",
     "settings_version": 1
+  },
+  "marketplaces": {
+    "enabled": {
+      "mandarake": true,
+      "ebay": true,
+      "surugaya": true,
+      "dejapan": false,
+      "alerts": true
+    },
+    "surugaya": {
+      "default_category": "7",
+      "default_shop": "all",
+      "show_out_of_stock": false
+    },
+    "dejapan": {
+      "favorite_sellers": [],
+      "default_max_results": 50,
+      "highlight_ending_soon": true
+    }
   },
   "ebay_text_search": {
     "download_delay": 1.0,

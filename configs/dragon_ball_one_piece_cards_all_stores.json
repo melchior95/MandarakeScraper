@@ -1,0 +1,17 @@
+{
+  "keyword": "dragon ball",
+  "hide_sold_out": false,
+  "csv_show_in_stock_only": false,
+  "csv_add_secondary_keyword": false,
+  "language": "en",
+  "fast": false,
+  "resume": true,
+  "debug": false,
+  "category": "060104",
+  "category_name": "One Piece Cards",
+  "results_per_page": 240,
+  "shop": "0",
+  "shop_name": "All Stores",
+  "csv": "results\\dragon_ball_one_piece_cards_all_stores.csv",
+  "download_images": "images\\dragon_ball_one_piece_cards_all_stores/"
+}

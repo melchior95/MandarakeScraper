@@ -1,15 +1,17 @@
 {
-  "keyword": "hentai kamen",
+  "keyword": "minamo",
   "hide_sold_out": false,
-  "language": "ja",
+  "language": "en",
   "fast": false,
   "resume": true,
-  "debug": true,
-  "client_id": "",
-  "client_secret": "",
+  "debug": false,
+  "category": "050801",
+  "category_name": "AV Actress/Photograph Collection",
+  "max_pages": 5,
   "results_per_page": 48,
   "shop": "0",
   "shop_name": "All Stores",
-  "csv": "results\\hentai_kamen_all_all_stores.csv",
-  "download_images": "images\\minamo_av_actress_photograph_collection_all_stores/"
+  "csv": "results\\minamo_av_actress_photograph_collection_all_stores.csv",
+  "download_images": "images\\minamo_av_actress_photograph_collection_all_stores/",
+  "thumbnails": 400
 }

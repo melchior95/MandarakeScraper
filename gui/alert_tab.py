@@ -45,44 +45,18 @@ class AlertTab(ttk.Frame):
 
     def _build_ui(self):
         """Build the UI components."""
-        # Top controls frame
+        # Top controls frame - everything on the left
         controls_frame = ttk.Frame(self)
         controls_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        # Threshold controls
-        threshold_frame = ttk.LabelFrame(controls_frame, text="Alert Thresholds", padding=5)
-        threshold_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        # All filters on the left side
+        filters_frame = ttk.LabelFrame(controls_frame, text="Filters:", padding=5)
+        filters_frame.pack(side=tk.LEFT, padx=(0, 5))
 
-        ttk.Label(threshold_frame, text="Min Similarity %:").pack(side=tk.LEFT, padx=5)
-        similarity_spinbox = ttk.Spinbox(
-            threshold_frame,
-            from_=0,
-            to=100,
-            textvariable=self.min_similarity_var,
-            width=8
-        )
-        similarity_spinbox.pack(side=tk.LEFT, padx=5)
-
-        ttk.Label(threshold_frame, text="Min Profit %:").pack(side=tk.LEFT, padx=5)
-        profit_spinbox = ttk.Spinbox(
-            threshold_frame,
-            from_=-100,
-            to=1000,
-            textvariable=self.min_profit_var,
-            width=8
-        )
-        profit_spinbox.pack(side=tk.LEFT, padx=5)
-
-        ttk.Label(threshold_frame, text="(Items above these thresholds will be added to alerts)",
-                 foreground='gray').pack(side=tk.LEFT, padx=10)
-
-        # Filter controls
-        filter_frame = ttk.LabelFrame(controls_frame, text="Filter", padding=5)
-        filter_frame.pack(side=tk.RIGHT, padx=(5, 0))
-
-        ttk.Label(filter_frame, text="State:").pack(side=tk.LEFT, padx=5)
+        # State filter
+        ttk.Label(filters_frame, text="State:").pack(side=tk.LEFT, padx=5)
         state_combo = ttk.Combobox(
-            filter_frame,
+            filters_frame,
             textvariable=self.state_filter_var,
             values=["all", "pending", "yay", "nay", "purchased", "shipped", "received", "posted", "sold"],
             state="readonly",
@@ -91,7 +65,35 @@ class AlertTab(ttk.Frame):
         state_combo.pack(side=tk.LEFT, padx=5)
         state_combo.bind("<<ComboboxSelected>>", lambda e: self._load_alerts())
 
-        ttk.Button(filter_frame, text="Refresh", command=self._load_alerts).pack(side=tk.LEFT, padx=5)
+        # Separator
+        ttk.Separator(filters_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+
+        # Similarity filter
+        ttk.Label(filters_frame, text="Min Similarity %:").pack(side=tk.LEFT, padx=5)
+        similarity_spinbox = ttk.Spinbox(
+            filters_frame,
+            from_=0,
+            to=100,
+            textvariable=self.min_similarity_var,
+            width=8
+        )
+        similarity_spinbox.pack(side=tk.LEFT, padx=5)
+        self.min_similarity_var.trace_add("write", lambda *args: self._load_alerts())
+
+        # Profit filter
+        ttk.Label(filters_frame, text="Min Profit %:").pack(side=tk.LEFT, padx=5)
+        profit_spinbox = ttk.Spinbox(
+            filters_frame,
+            from_=-100,
+            to=1000,
+            textvariable=self.min_profit_var,
+            width=8
+        )
+        profit_spinbox.pack(side=tk.LEFT, padx=5)
+        self.min_profit_var.trace_add("write", lambda *args: self._load_alerts())
+
+        # Refresh button
+        ttk.Button(filters_frame, text="Refresh", command=self._load_alerts).pack(side=tk.LEFT, padx=10)
 
         # Bulk actions frame
         actions_frame = ttk.Frame(self)
@@ -186,12 +188,12 @@ class AlertTab(ttk.Frame):
         self.status_label.pack(side=tk.LEFT)
 
     def _load_alerts(self):
-        """Load alerts from storage and populate treeview."""
+        """Load alerts from storage and populate treeview with filters applied."""
         # Clear existing items
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        # Get filter
+        # Get state filter
         state_filter_str = self.state_filter_var.get()
         state_filter = None
         if state_filter_str != "all":
@@ -206,15 +208,32 @@ class AlertTab(ttk.Frame):
         else:
             alerts = self.alert_manager.get_all_alerts()
 
+        # Apply similarity and profit filters (for display only)
+        try:
+            min_similarity = self.min_similarity_var.get()
+            min_profit = self.min_profit_var.get()
+
+            filtered_alerts = [
+                alert for alert in alerts
+                if alert.get('similarity', 0) >= min_similarity and
+                   alert.get('profit_margin', 0) >= min_profit
+            ]
+        except:
+            # If filter values are invalid, show all
+            filtered_alerts = alerts
+
         # Sort by ID (most recent first)
-        alerts.sort(key=lambda x: x.get('alert_id', 0), reverse=True)
+        filtered_alerts.sort(key=lambda x: x.get('alert_id', 0), reverse=True)
 
         # Populate treeview
-        for alert in alerts:
+        for alert in filtered_alerts:
             self._add_alert_to_tree(alert)
 
         # Update status
-        self.status_label.config(text=f"Loaded {len(alerts)} alerts")
+        if len(filtered_alerts) < len(alerts):
+            self.status_label.config(text=f"Showing {len(filtered_alerts)} of {len(alerts)} alerts (filtered)")
+        else:
+            self.status_label.config(text=f"Loaded {len(alerts)} alerts")
 
     def _add_alert_to_tree(self, alert: Dict):
         """Add a single alert to the treeview."""
@@ -379,46 +398,21 @@ class AlertTab(ttk.Frame):
             self.alert_manager.delete_alerts([alert_id])
             self._load_alerts()
 
-    def add_comparison_results_to_alerts(self, comparison_results: List[Dict]):
+    def add_filtered_alerts(self, comparison_results: List[Dict]):
         """
-        Add comparison results to alerts if they meet thresholds.
+        Add pre-filtered comparison results to alerts.
 
-        This is called from the eBay Search tab when comparison completes.
+        Called from eBay Search tab with results already filtered by thresholds.
 
         Args:
-            comparison_results: List of comparison result dictionaries
+            comparison_results: List of comparison result dictionaries (already filtered)
         """
-        min_similarity = self.min_similarity_var.get()
-        min_profit = self.min_profit_var.get()
-
+        # Process results without applying additional thresholds (already filtered)
         created_alerts = self.alert_manager.process_comparison_results(
             comparison_results,
-            min_similarity=min_similarity,
-            min_profit=min_profit
+            min_similarity=0,  # No additional filtering
+            min_profit=-999999  # No additional filtering
         )
 
-        if created_alerts:
-            self._load_alerts()
-            messagebox.showinfo(
-                "Alerts Created",
-                f"Created {len(created_alerts)} new alerts from comparison results\n\n"
-                f"Thresholds used:\n"
-                f"• Similarity ≥ {min_similarity}%\n"
-                f"• Profit ≥ {min_profit}%"
-            )
-        else:
-            messagebox.showinfo(
-                "No Alerts",
-                f"No items met the alert thresholds:\n\n"
-                f"• Similarity ≥ {min_similarity}%\n"
-                f"• Profit ≥ {min_profit}%"
-            )
-
-    def get_threshold_values(self) -> tuple:
-        """
-        Get current threshold values.
-
-        Returns:
-            Tuple of (min_similarity, min_profit)
-        """
-        return (self.min_similarity_var.get(), self.min_profit_var.get())
+        # Reload alerts to show new ones
+        self._load_alerts()

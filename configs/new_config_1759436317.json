@@ -1,0 +1,15 @@
+{
+  "keyword": "",
+  "hide_sold_out": false,
+  "csv_show_in_stock_only": false,
+  "csv_add_secondary_keyword": false,
+  "language": "en",
+  "fast": false,
+  "resume": true,
+  "debug": false,
+  "results_per_page": 240,
+  "shop": "4",
+  "shop_name": "Nagoya",
+  "csv": "results\\all_all_nagoya.csv",
+  "download_images": "images\\new_config_1759436317/"
+}

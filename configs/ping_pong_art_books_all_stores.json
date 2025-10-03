@@ -1,0 +1,19 @@
+{
+  "keyword": "Ping Pong",
+  "hide_sold_out": false,
+  "csv_show_in_stock_only": false,
+  "csv_add_secondary_keyword": false,
+  "language": "en",
+  "fast": false,
+  "resume": true,
+  "debug": false,
+  "category": "0131",
+  "category_name": "Art books",
+  "max_pages": 1,
+  "results_per_page": 48,
+  "shop": "0",
+  "shop_name": "All Stores",
+  "csv": "results\\ping_pong_art_books_all_stores.csv",
+  "download_images": "images\\ping_pong_art_books_all_stores/",
+  "thumbnails": 400
+}
