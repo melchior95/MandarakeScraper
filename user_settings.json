@@ -1,11 +1,11 @@
 {
   "window": {
-    "width": 1187,
-    "height": 1131,
-    "x": 183,
-    "y": 172,
+    "width": 1214,
+    "height": 1185,
+    "x": 853,
+    "y": 151,
     "maximized": false,
-    "ebay_paned_pos": 432
+    "ebay_paned_pos": 403
   },
   "ebay_analysis": {
     "min_sold_items": 1,
@@ -35,6 +35,8 @@
   },
   "recent": {
     "config_files": [
+      "configs\\norio_sugiura_books_everything_all_stores.json",
+      "configs\\norio_sugiura_s_books_everything_all_stores.json",
       "configs\\all_s_m_all_stores.json",
       "configs\\minamo_050801_0.json",
       "C:\\Python Projects\\mandarake_scraper\\configs\\hentai_kamen_all_0.json"
@@ -46,7 +48,7 @@
   "meta": {
     "version": "1.0.0",
     "first_run": false,
-    "last_updated": "2025-09-30T20:39:10.705422",
+    "last_updated": "2025-10-02T16:05:01.262785",
     "settings_version": 1
   },
   "ebay_text_search": {

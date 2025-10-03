@@ -739,9 +739,9 @@ def download_missing_images_worker(csv_data: List[Dict], download_dir: str,
 
 
 def run_scrapy_text_search_worker(query: str, max_results: int, update_callback,
-                                  display_callback, show_message_callback) -> None:
+                                  display_callback, show_message_callback, search_method: str = "scrapy") -> None:
     """
-    Worker for Scrapy text-only search (runs in background thread).
+    Worker for eBay text-only search (runs in background thread).
 
     Args:
         query: Search query
@@ -749,46 +749,84 @@ def run_scrapy_text_search_worker(query: str, max_results: int, update_callback,
         update_callback: Callback to update status
         display_callback: Callback to display results
         show_message_callback: Callback to show message dialog
+        search_method: "scrapy" for sold listings or "api" for active listings
     """
     try:
-        from ebay_scrapy_search import run_ebay_scrapy_search
+        if search_method == "api":
+            # Use eBay Browse API (active listings)
+            from ebay_api_search import run_ebay_api_search
 
-        print(f"[SCRAPY SEARCH] Starting search for: {query}")
-        print(f"[SCRAPY SEARCH] Max results: {max_results}")
+            print(f"[eBay API] Starting search for: {query}")
+            print(f"[eBay API] Max results: {max_results}")
 
-        # Run Scrapy spider
-        scrapy_results = run_ebay_scrapy_search(
-            query=query,
-            max_results=max_results,
-            sold_listings=True
-        )
+            api_results = run_ebay_api_search(
+                query=query,
+                max_results=max_results
+            )
 
-        if not scrapy_results:
-            show_message_callback("No Results", "No eBay listings found")
-            return
+            if not api_results:
+                show_message_callback("No Results", "No eBay active listings found")
+                return
 
-        print(f"[SCRAPY SEARCH] Found {len(scrapy_results)} results")
+            print(f"[eBay API] Found {len(api_results)} results")
 
-        # Convert to display format (no similarity since no image comparison)
-        results = []
-        for item in scrapy_results:
-            results.append({
-                'title': item.get('product_title', 'N/A'),
-                'price': item.get('current_price', 'N/A'),
-                'shipping': item.get('shipping_cost', 'N/A'),
-                'sold_date': item.get('sold_date', 'N/A'),
-                'similarity': '-',  # No comparison
-                'url': item.get('product_url', ''),
-                'image_url': item.get('main_image', '')
-            })
+            # Convert to display format
+            results = []
+            for item in api_results:
+                results.append({
+                    'title': item.get('product_title', 'N/A'),
+                    'price': item.get('current_price', 'N/A'),
+                    'shipping': item.get('shipping_cost', 'N/A'),
+                    'sold_date': item.get('sold_date', 'Active'),  # Active listings
+                    'similarity': '-',  # No comparison
+                    'url': item.get('product_url', ''),
+                    'image_url': item.get('thumbnail_image', '')
+                })
 
-        # Update UI with results
-        display_callback(results)
-        update_callback(f"Found {len(results)} eBay sold listings")
+            # Update UI with results
+            display_callback(results)
+            update_callback(f"Found {len(results)} eBay active listings (API)")
+
+        else:
+            # Use Scrapy (sold listings)
+            from ebay_scrapy_search import run_ebay_scrapy_search
+
+            print(f"[SCRAPY SEARCH] Starting search for: {query}")
+            print(f"[SCRAPY SEARCH] Max results: {max_results}")
+
+            # Run Scrapy spider
+            scrapy_results = run_ebay_scrapy_search(
+                query=query,
+                max_results=max_results,
+                sold_listings=True
+            )
+
+            if not scrapy_results:
+                show_message_callback("No Results", "No eBay sold listings found")
+                return
+
+            print(f"[SCRAPY SEARCH] Found {len(scrapy_results)} results")
+
+            # Convert to display format (no similarity since no image comparison)
+            results = []
+            for item in scrapy_results:
+                results.append({
+                    'title': item.get('product_title', 'N/A'),
+                    'price': item.get('current_price', 'N/A'),
+                    'shipping': item.get('shipping_cost', 'N/A'),
+                    'sold_date': item.get('sold_date', 'N/A'),
+                    'similarity': '-',  # No comparison
+                    'url': item.get('product_url', ''),
+                    'image_url': item.get('main_image', '')
+                })
+
+            # Update UI with results
+            display_callback(results)
+            update_callback(f"Found {len(results)} eBay sold listings (Scrapy)")
 
     except Exception as e:
         import traceback
-        print(f"[SCRAPY SEARCH ERROR] {e}")
+        print(f"[eBay SEARCH ERROR] {e}")
         traceback.print_exc()
         raise
 

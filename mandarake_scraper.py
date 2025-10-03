@@ -130,8 +130,25 @@ class MandarakeScraper:
     def _initialize_ebay_api(self) -> Optional['EbayAPI']:
         """Initialize eBay API with fallback handling"""
         try:
-            client_id = self.config.get('client_id')
-            client_secret = self.config.get('client_secret')
+            # Try user_settings.json first
+            client_id = None
+            client_secret = None
+
+            try:
+                user_settings_path = Path(__file__).parent / "user_settings.json"
+                if user_settings_path.exists():
+                    with open(user_settings_path, 'r') as f:
+                        user_settings = json.load(f)
+                        ebay_config = user_settings.get('ebay_api', {})
+                        client_id = ebay_config.get('client_id')
+                        client_secret = ebay_config.get('client_secret')
+            except Exception as e:
+                logging.debug(f"Could not load eBay credentials from user_settings.json: {e}")
+
+            # Fallback to config file
+            if not client_id or not client_secret:
+                client_id = self.config.get('client_id')
+                client_secret = self.config.get('client_secret')
 
             if not client_id or not client_secret or client_id == "YOUR_EBAY_CLIENT_ID":
                 logging.warning("eBay API credentials not configured, price comparison will be skipped")
@@ -975,7 +992,7 @@ class MandarakeScraper:
         image_dir.mkdir(parents=True, exist_ok=True)
 
         logging.info(f"Downloading images to {image_dir}")
-        print(f"[IMAGE DOWNLOAD] Saving images to: {image_dir}")
+        print(f"[IMAGE DOWNLOAD] Saving images to: {image_dir} (existing images will be skipped)")
 
         for i, product in enumerate(tqdm(self.results, desc="Downloading images")):
             if not product.get('image_url'):
@@ -1003,22 +1020,34 @@ class MandarakeScraper:
                 logging.warning(f"Image download failed: {e}")
 
     def _download_image(self, url: str, image_dir: Path, index: int) -> Optional[Path]:
-        """Download a single image"""
+        """Download a single image, skip if already exists"""
         try:
-            # Use regular session directly for images (CDN doesn't need anti-blocking delays)
-            response = self.session.get(url, timeout=30)
-            response.raise_for_status()
-
-            # Extract original filename from URL
+            # Extract original filename from URL first
             from urllib.parse import urlparse, unquote
             parsed_url = urlparse(url)
             original_filename = Path(unquote(parsed_url.path)).name
 
-            # Use original filename if available, otherwise fall back to indexed name
+            # Determine filename
             if original_filename and '.' in original_filename:
                 filename = original_filename
             else:
-                # Determine file extension from content type
+                # Use indexed name with jpg extension as default
+                filename = f"product_{index:04d}.jpg"
+
+            image_path = image_dir / filename
+
+            # Skip if image already exists
+            if image_path.exists():
+                print(f"[IMAGE DOWNLOAD] Skipping existing image: {filename}")
+                return image_path
+
+            # Download image
+            # Use regular session directly for images (CDN doesn't need anti-blocking delays)
+            response = self.session.get(url, timeout=30)
+            response.raise_for_status()
+
+            # If we used default extension, update based on actual content type
+            if not (original_filename and '.' in original_filename):
                 content_type = response.headers.get('content-type', '')
                 if 'jpeg' in content_type:
                     ext = '.jpg'
@@ -1026,32 +1055,24 @@ class MandarakeScraper:
                     ext = '.png'
                 else:
                     ext = '.jpg'  # Default
-                filename = f"product_{index:04d}{ext}"
 
-            image_path = image_dir / filename
+                new_filename = f"product_{index:04d}{ext}"
+                if new_filename != filename:
+                    filename = new_filename
+                    image_path = image_dir / filename
+                    # Check again if this specific extension exists
+                    if image_path.exists():
+                        print(f"[IMAGE DOWNLOAD] Skipping existing image: {filename}")
+                        return image_path
 
             with open(image_path, 'wb') as f:
                 f.write(response.content)
-
-            # Resize if thumbnails are requested
-            if self.config.get('thumbnails'):
-                self._create_thumbnail(image_path, self.config['thumbnails'])
 
             return image_path
 
         except Exception as e:
             logging.warning(f"Failed to download image {url}: {e}")
             return None
-
-    def _create_thumbnail(self, image_path: Path, max_size: int):
-        """Create thumbnail version of image"""
-        try:
-            with Image.open(image_path) as img:
-                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-                thumb_path = image_path.parent / f"thumb_{image_path.name}"
-                img.save(thumb_path, optimize=True, quality=85)
-        except Exception as e:
-            logging.warning(f"Thumbnail creation failed: {e}")
 
     def save_results(self):
         """Save results to configured outputs"""
@@ -2045,7 +2066,6 @@ def create_config_from_url(url: str, output_name: str = None) -> str:
         'download_images': f'images/{output_name}/',
         'upload_drive': True,
         'drive_folder': '1xBVwaTFGdD5HkQtq8WOILSrc9mr0AQb0',  # Use existing folder
-        'thumbnails': 400,
         'fast': False,  # Enable eBay comparison by default
         'resume': True
     }

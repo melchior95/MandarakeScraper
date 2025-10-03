@@ -910,6 +910,26 @@ With RANSAC enabled:
             row=current_row, column=0, columnspan=4, sticky='ew', pady=10)
         current_row += 1
 
+        # eBay Search Method Section
+        ttk.Label(advanced_frame, text="eBay Search Method", font=('TkDefaultFont', 9, 'bold')).grid(
+            row=current_row, column=0, columnspan=4, sticky=tk.W, padx=5, pady=(0, 5))
+        current_row += 1
+
+        self.ebay_search_method = tk.StringVar(value="scrapy")
+        ttk.Radiobutton(advanced_frame, text="Scrapy (Sold Listings - slower, more complete)",
+                       variable=self.ebay_search_method, value="scrapy").grid(
+            row=current_row, column=0, columnspan=2, sticky=tk.W, **pad)
+        current_row += 1
+        ttk.Radiobutton(advanced_frame, text="eBay API (Active Listings - faster, official API)",
+                       variable=self.ebay_search_method, value="api").grid(
+            row=current_row, column=0, columnspan=2, sticky=tk.W, **pad)
+        current_row += 1
+
+        # Separator
+        ttk.Separator(advanced_frame, orient='horizontal').grid(
+            row=current_row, column=0, columnspan=4, sticky='ew', pady=10)
+        current_row += 1
+
         # Scheduling Section
         ttk.Label(advanced_frame, text="Scheduling", font=('TkDefaultFont', 9, 'bold')).grid(
             row=current_row, column=0, columnspan=4, sticky=tk.W, padx=5, pady=(0, 5))
@@ -3162,9 +3182,10 @@ With RANSAC enabled:
             self._start_thread(self._run_scrapy_search_with_compare_worker)
 
     def _run_scrapy_text_search_worker(self):
-        """Worker method for Scrapy text-only search (runs in background thread)"""
+        """Worker method for eBay text-only search (runs in background thread)"""
         query = self.browserless_query_var.get().strip()
         max_results = int(self.browserless_max_results.get())
+        search_method = self.ebay_search_method.get()  # "scrapy" or "api"
 
         def update_callback(message):
             self.after(0, lambda: self.browserless_status.set(message))
@@ -3181,7 +3202,8 @@ With RANSAC enabled:
             query, max_results,
             update_callback,
             display_callback,
-            show_message_callback
+            show_message_callback,
+            search_method=search_method
         )
 
     def _run_scrapy_search_with_compare_worker(self):
