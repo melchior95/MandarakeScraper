@@ -34,11 +34,7 @@ class SettingsManager:
                 "min_sold_items": 3,
                 "search_days_back": 90,
                 "min_profit_margin": 20.0,
-                "usd_jpy_rate": 150.0,
-                "image_search_method": "direct",
-                "image_enhancement": "medium",
-                "lazy_search_enabled": True,
-                "ai_confirmation_enabled": True
+                "usd_jpy_rate": 150.0
             },
 
             # Scraper settings
@@ -73,6 +69,27 @@ class SettingsManager:
                 "first_run": True,
                 "last_updated": None,
                 "settings_version": 1
+            },
+
+            # Marketplace toggles and settings
+            "marketplaces": {
+                "enabled": {
+                    "mandarake": True,
+                    "ebay": True,
+                    "surugaya": False,
+                    "dejapan": False,
+                    "alerts": True
+                },
+                "surugaya": {
+                    "default_category": "7",  # Books & Photobooks
+                    "default_shop": "all",
+                    "show_out_of_stock": False
+                },
+                "dejapan": {
+                    "favorite_sellers": [],
+                    "default_max_results": 50,
+                    "highlight_ending_soon": True
+                }
             }
         }
 
@@ -207,6 +224,70 @@ class SettingsManager:
         for key, value in kwargs.items():
             self.set_setting(f"scraper.{key}", value)
 
+    def get_marketplace_toggles(self) -> Dict[str, bool]:
+        """Get which marketplaces are enabled"""
+        return self.get_setting("marketplaces.enabled", {
+            "mandarake": True,
+            "ebay": True,
+            "surugaya": False,
+            "dejapan": False,
+            "alerts": True
+        })
+
+    def save_marketplace_toggles(self, toggles: Dict[str, bool]):
+        """Save marketplace enable/disable state"""
+        for marketplace, enabled in toggles.items():
+            self.set_setting(f"marketplaces.enabled.{marketplace}", enabled)
+        self.save_settings()
+
+    def get_surugaya_settings(self) -> Dict[str, Any]:
+        """Get Suruga-ya specific settings"""
+        return self.get_setting("marketplaces.surugaya", {
+            "default_category": "7",
+            "default_shop": "all",
+            "show_out_of_stock": False
+        })
+
+    def save_surugaya_settings(self, **kwargs):
+        """Save Suruga-ya settings"""
+        for key, value in kwargs.items():
+            self.set_setting(f"marketplaces.surugaya.{key}", value)
+        self.save_settings()
+
+    def get_dejapan_settings(self) -> Dict[str, Any]:
+        """Get DejaJapan specific settings"""
+        return self.get_setting("marketplaces.dejapan", {
+            "favorite_sellers": [],
+            "default_max_results": 50,
+            "highlight_ending_soon": True
+        })
+
+    def save_dejapan_settings(self, **kwargs):
+        """Save DejaJapan settings"""
+        for key, value in kwargs.items():
+            self.set_setting(f"marketplaces.dejapan.{key}", value)
+        self.save_settings()
+
+    def add_dejapan_favorite_seller(self, seller_id: str, name: str, notes: str = ""):
+        """Add a seller to DejaJapan favorites"""
+        favorites = self.get_setting("marketplaces.dejapan.favorite_sellers", [])
+        seller = {
+            "id": seller_id,
+            "name": name,
+            "notes": notes,
+            "added_at": datetime.now().isoformat()
+        }
+        favorites.append(seller)
+        self.set_setting("marketplaces.dejapan.favorite_sellers", favorites)
+        self.save_settings()
+
+    def remove_dejapan_favorite_seller(self, seller_id: str):
+        """Remove a seller from DejaJapan favorites"""
+        favorites = self.get_setting("marketplaces.dejapan.favorite_sellers", [])
+        favorites = [s for s in favorites if s.get("id") != seller_id]
+        self.set_setting("marketplaces.dejapan.favorite_sellers", favorites)
+        self.save_settings()
+
     def add_recent_config_file(self, file_path: str, max_recent: int = 10):
         """Add a config file to recent files list"""
         recent_files = self.get_setting("recent.config_files", [])
@@ -311,11 +392,7 @@ class SettingsManager:
         summary += f"  Min Sold Items: {ebay.get('min_sold_items', 'default')}\n"
         summary += f"  Search Days Back: {ebay.get('search_days_back', 'default')}\n"
         summary += f"  Min Profit Margin: {ebay.get('min_profit_margin', 'default')}%\n"
-        summary += f"  USD/JPY Rate: {ebay.get('usd_jpy_rate', 'default')}\n"
-        summary += f"  Image Search Method: {ebay.get('image_search_method', 'default')}\n"
-        summary += f"  Image Enhancement: {ebay.get('image_enhancement', 'default')}\n"
-        summary += f"  Lazy Search: {ebay.get('lazy_search_enabled', 'default')}\n"
-        summary += f"  AI Confirmation: {ebay.get('ai_confirmation_enabled', 'default')}\n\n"
+        summary += f"  USD/JPY Rate: {ebay.get('usd_jpy_rate', 'default')}\n\n"
 
         # Recent files
         recent_configs = self.get_recent_config_files()
