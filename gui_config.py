@@ -38,6 +38,9 @@ from gui import workers
 from gui.alert_tab import AlertTab
 from gui.schedule_executor import ScheduleExecutor
 from gui.schedule_frame import ScheduleFrame
+from gui.configuration_manager import ConfigurationManager
+from gui.tree_manager import TreeManager
+from gui.ebay_search_manager import EbaySearchManager
 
 
 class ScraperGUI(tk.Tk):
@@ -96,6 +99,11 @@ class ScraperGUI(tk.Tk):
 
         # Load publisher list
         self.publisher_list = self._load_publisher_list()
+
+        # Initialize modular components
+        self.config_manager = ConfigurationManager(self.settings)
+        self.tree_manager = None  # Will be initialized after tree widget is created
+        self.ebay_search_manager = None  # Will be initialized after eBay tree widget is created
 
         # Create menu bar
         self._create_menu_bar()
@@ -380,21 +388,10 @@ With RANSAC enabled:
         self.alert_tab = AlertTab(notebook)
 
         if marketplace_toggles.get('mandarake', True):
-            notebook.add(basic_frame, text="Mandarake")
+            notebook.add(basic_frame, text="Stores")
 
         if marketplace_toggles.get('ebay', True):
             notebook.add(browserless_frame, text="eBay Search & CSV")
-
-        # Suruga-ya tab (new modular marketplace)
-        if marketplace_toggles.get('surugaya', False):
-            from gui.surugaya_tab import SurugayaTab
-            self.surugaya_tab = SurugayaTab(notebook, self.settings, self.alert_tab.alert_manager)
-            notebook.add(self.surugaya_tab, text="Suruga-ya")
-
-        # DejaJapan tab (placeholder for Phase 3)
-        if marketplace_toggles.get('dejapan', False):
-            # TODO: Implement DejaJapan tab in Phase 3
-            pass
 
         # Add Alert/Review tab if enabled
         if marketplace_toggles.get('alerts', True):
@@ -419,17 +416,30 @@ With RANSAC enabled:
         bottom_container = ttk.Frame(self.vertical_paned)
         self.vertical_paned.add(bottom_container, minsize=200)
 
+        # Store selector
+        ttk.Label(top_pane, text="Store:").grid(row=0, column=0, sticky=tk.W, **pad)
+        self.current_store = tk.StringVar(value="Mandarake")
+        store_combo = ttk.Combobox(
+            top_pane,
+            textvariable=self.current_store,
+            values=["Mandarake", "Suruga-ya"],
+            state="readonly",
+            width=20
+        )
+        store_combo.grid(row=0, column=1, sticky=tk.W, **pad)
+        store_combo.bind("<<ComboboxSelected>>", self._on_store_changed)
+
         # Mandarake URL input
         self.mandarake_url_var = tk.StringVar()
-        ttk.Label(top_pane, text="Mandarake URL:").grid(row=0, column=0, sticky=tk.W, **pad)
+        ttk.Label(top_pane, text="Store URL:").grid(row=1, column=0, sticky=tk.W, **pad)
         url_entry = ttk.Entry(top_pane, textvariable=self.mandarake_url_var, width=60)
-        url_entry.grid(row=0, column=1, columnspan=3, sticky=(tk.W, tk.E), **pad)
-        ttk.Button(top_pane, text="Load URL", command=self._load_from_url).grid(row=0, column=4, sticky=tk.W, **pad)
+        url_entry.grid(row=1, column=1, columnspan=3, sticky=(tk.W, tk.E), **pad)
+        ttk.Button(top_pane, text="Load URL", command=self._load_from_url).grid(row=1, column=4, sticky=tk.W, **pad)
 
         self.keyword_var = tk.StringVar()
-        ttk.Label(top_pane, text="Keyword:").grid(row=1, column=0, sticky=tk.W, **pad)
+        ttk.Label(top_pane, text="Keyword:").grid(row=2, column=0, sticky=tk.W, **pad)
         self.keyword_entry = ttk.Entry(top_pane, textvariable=self.keyword_var, width=42)
-        self.keyword_entry.grid(row=1, column=1, columnspan=3, sticky=tk.W, **pad)
+        self.keyword_entry.grid(row=2, column=1, columnspan=3, sticky=tk.W, **pad)
         self.keyword_var.trace_add("write", self._update_preview)
 
         # Commit/trim keyword when focus leaves the field
@@ -443,8 +453,15 @@ With RANSAC enabled:
         self.keyword_menu.add_command(label="Add Selected Text to Publisher List", command=self._add_to_publisher_list)
         self.keyword_entry.bind("<Button-3>", self._show_keyword_menu)
 
+        # Exclude keywords field (for Suruga-ya advanced search)
+        self.exclude_word_var = tk.StringVar()
+        ttk.Label(top_pane, text="Exclude words:").grid(row=2, column=3, sticky=tk.W, padx=(20, 5), pady=5)
+        exclude_entry = ttk.Entry(top_pane, textvariable=self.exclude_word_var, width=30)
+        exclude_entry.grid(row=2, column=4, columnspan=2, sticky=tk.W, **pad)
+        self.exclude_word_var.trace_add("write", self._auto_save_config)
+
         self.main_category_var = tk.StringVar()
-        ttk.Label(top_pane, text="Main category:").grid(row=2, column=0, sticky=tk.W, **pad)
+        ttk.Label(top_pane, text="Main category:").grid(row=3, column=0, sticky=tk.W, **pad)
         self.main_category_combo = ttk.Combobox(
             top_pane,
             textvariable=self.main_category_var,
@@ -452,18 +469,18 @@ With RANSAC enabled:
             width=42,
             values=[f"{name} ({code})" for code, name in MAIN_CATEGORY_OPTIONS],
         )
-        self.main_category_combo.grid(row=2, column=1, columnspan=3, sticky=tk.W, **pad)
+        self.main_category_combo.grid(row=3, column=1, columnspan=3, sticky=tk.W, **pad)
         self.main_category_combo.bind("<<ComboboxSelected>>", self._on_main_category_selected)
 
         # Create labels row for both listboxes
         labels_frame = ttk.Frame(top_pane)
-        labels_frame.grid(row=3, column=0, columnspan=7, sticky=(tk.W, tk.E), **pad)
+        labels_frame.grid(row=4, column=0, columnspan=7, sticky=(tk.W, tk.E), **pad)
         ttk.Label(labels_frame, text="Detailed categories:").pack(side=tk.LEFT)
         ttk.Label(labels_frame, text="Shop:", anchor='e').pack(side=tk.RIGHT, padx=(0, 50))
 
         # Create PanedWindow for resizable listboxes
         self.listbox_paned = tk.PanedWindow(top_pane, orient=tk.HORIZONTAL, sashrelief=tk.RAISED, sashwidth=5)
-        self.listbox_paned.grid(row=4, column=0, columnspan=7, sticky=(tk.W, tk.E, tk.N, tk.S), **pad)
+        self.listbox_paned.grid(row=5, column=0, columnspan=7, sticky=(tk.W, tk.E, tk.N, tk.S), **pad)
 
         # Left pane: Detailed categories
         detail_frame = ttk.Frame(self.listbox_paned)
@@ -507,7 +524,7 @@ With RANSAC enabled:
         self.bind('<Map>', self._on_window_mapped, add='+')
 
         # Configure top pane grid weights
-        top_pane.rowconfigure(4, weight=1)  # Listbox row expands
+        top_pane.rowconfigure(5, weight=1)  # Listbox row expands
         top_pane.columnconfigure(6, weight=1)  # Last column expands to fill width
 
         # Middle pane: Options (fixed, no sash below it)
@@ -564,6 +581,32 @@ With RANSAC enabled:
         lang_combo.grid(row=1, column=1, sticky=tk.W, **pad)
         self.language_var.trace_add("write", self._update_preview)
 
+        # --- Condition filter (for Suruga-ya) ---
+        self.condition_var = tk.StringVar(value="all")
+        ttk.Label(middle_pane, text="Condition:").grid(row=1, column=2, sticky=tk.W, padx=(15, 5), pady=5)
+        condition_combo = ttk.Combobox(
+            middle_pane,
+            textvariable=self.condition_var,
+            values=["All", "New Only", "Used Only"],
+            state="readonly",
+            width=12
+        )
+        condition_combo.grid(row=1, column=3, sticky=tk.W, **pad)
+        self.condition_var.trace_add("write", self._auto_save_config)
+
+        # --- Adult content filter ---
+        self.adult_filter_var = tk.StringVar(value="All")
+        ttk.Label(middle_pane, text="Content:").grid(row=1, column=4, sticky=tk.W, padx=(15, 5), pady=5)
+        adult_combo = ttk.Combobox(
+            middle_pane,
+            textvariable=self.adult_filter_var,
+            values=["All", "Adult Only"],
+            state="readonly",
+            width=12
+        )
+        adult_combo.grid(row=1, column=5, sticky=tk.W, **pad)
+        self.adult_filter_var.trace_add("write", self._auto_save_config)
+
 
         # Bottom pane: Configs/Schedules and buttons (fills remaining space)
         bottom_pane = ttk.Frame(bottom_container)
@@ -576,9 +619,22 @@ With RANSAC enabled:
         # Configs tab
         tree_frame = ttk.Frame(config_schedule_notebook)
         config_schedule_notebook.add(tree_frame, text="Configs")
-        columns = ('file', 'keyword', 'category', 'shop', 'hide_sold', 'results_per_page', 'max_pages', 'latest_additions', 'language')
+
+        # Store filter row
+        filter_frame = ttk.Frame(tree_frame)
+        filter_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+
+        ttk.Label(filter_frame, text="Store Filter:").pack(side=tk.LEFT, padx=(0, 5))
+        self.config_store_filter = tk.StringVar(value='All')
+        store_filter_combo = ttk.Combobox(filter_frame, textvariable=self.config_store_filter,
+                                          values=['All', 'Mandarake', 'Suruga-Ya'], state='readonly', width=12)
+        store_filter_combo.pack(side=tk.LEFT)
+        store_filter_combo.bind('<<ComboboxSelected>>', lambda e: self._filter_config_tree())
+
+        columns = ('store', 'file', 'keyword', 'category', 'shop', 'hide_sold', 'results_per_page', 'max_pages', 'latest_additions', 'language')
         self.config_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=6)
         headings = {
+            'store': 'Store',
             'file': 'File',
             'keyword': 'Keyword',
             'category': 'Category',
@@ -590,6 +646,7 @@ With RANSAC enabled:
             'language': 'Lang',
         }
         widths = {
+            'store': 90,
             'file': 200,
             'keyword': 120,
             'category': 120,
@@ -615,6 +672,10 @@ With RANSAC enabled:
 
         self.config_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.config_tree.configure(yscrollcommand=tree_scroll_y.set, xscrollcommand=tree_scroll_x.set)
+        
+        # Initialize tree manager after tree widget is created
+        self.tree_manager = TreeManager(self.config_tree, self.config_manager)
+        
         # Single click to load config
         self.config_tree.bind('<<TreeviewSelect>>', self._on_config_selected)
         # Prevent space from affecting tree selection when it has focus
@@ -626,6 +687,9 @@ With RANSAC enabled:
         self.config_tree_menu = tk.Menu(self.config_tree, tearoff=0)
         self.config_tree_menu.add_command(label="Load CSV", command=self._load_csv_from_config)
         self.config_tree.bind("<Button-3>", self._show_config_tree_menu)
+
+        # Double-click to edit category
+        self.config_tree.bind("<Double-Button-1>", self._on_config_tree_double_click)
 
         # Enable column drag-to-reorder
         self._setup_column_drag(self.config_tree)
@@ -649,7 +713,7 @@ With RANSAC enabled:
         # Action buttons for Mandarake scraper (row 2)
         self.action_buttons_frame = ttk.Frame(bottom_pane)
         self.action_buttons_frame.grid(row=2, column=0, columnspan=5, sticky=tk.W, **pad)
-        ttk.Button(self.action_buttons_frame, text="Search Mandarake", command=self.run_now).pack(side=tk.LEFT, padx=5)
+        ttk.Button(self.action_buttons_frame, text="Search Store", command=self.run_now).pack(side=tk.LEFT, padx=5)
         self.cancel_button = ttk.Button(self.action_buttons_frame, text="Cancel Search", command=self.cancel_search, state='disabled')
         self.cancel_button.pack(side=tk.LEFT, padx=5)
 
@@ -659,7 +723,6 @@ With RANSAC enabled:
             bottom_pane.columnconfigure(i, weight=1)
 
         self._load_config_tree()
-        basic_frame.columnconfigure(3, weight=1)
 
         # eBay Search & CSV tab ------------------------------------------
         ttk.Label(browserless_frame, text="Scrapy eBay Search (Sold Listings):").grid(row=0, column=0, columnspan=5, sticky=tk.W, **pad)
@@ -767,6 +830,14 @@ With RANSAC enabled:
         browserless_h_scroll.grid(row=1, column=0, sticky=tk.EW)
         self.browserless_tree.configure(xscrollcommand=browserless_h_scroll.set)
 
+        # Initialize eBay search manager after eBay tree widget is created
+        self.ebay_search_manager = EbaySearchManager(
+            self.browserless_tree, 
+            self.browserless_progress, 
+            self.browserless_status, 
+            self
+        )
+        
         # Bind double-click to open URL
         self.browserless_tree.bind('<Double-1>', self.open_browserless_url)
         # Prevent space from affecting tree selection when it has focus
@@ -804,7 +875,7 @@ With RANSAC enabled:
         # Create custom style for CSV treeview with thumbnails
         style.configure('CSV.Treeview', rowheight=70)  # Match other trees
 
-        csv_columns = ('title', 'price', 'shop', 'stock', 'category')
+        csv_columns = ('title', 'price', 'shop', 'stock', 'category', 'url')
         self.csv_items_tree = ttk.Treeview(csv_items_frame, columns=csv_columns, show='tree headings', height=6, style='CSV.Treeview')
 
         self.csv_items_tree.heading('#0', text='Thumb')
@@ -812,10 +883,11 @@ With RANSAC enabled:
 
         csv_headings = {
             'title': 'Title',
-            'price': 'Mandarake Price',
+            'price': 'Store Price',
             'shop': 'Shop',
             'stock': 'Stock',
-            'category': 'Category'
+            'category': 'Category',
+            'url': 'URL'
         }
 
         for col, heading in csv_headings.items():
@@ -826,6 +898,7 @@ With RANSAC enabled:
         self.csv_items_tree.column('shop', width=80)
         self.csv_items_tree.column('stock', width=60)
         self.csv_items_tree.column('category', width=120)
+        self.csv_items_tree.column('url', width=300)
 
         self.csv_items_tree.grid(row=0, column=0, sticky=tk.NSEW)
         csv_items_frame.rowconfigure(0, weight=1)
@@ -845,6 +918,9 @@ With RANSAC enabled:
 
         # Bind column resize to reload thumbnails with new size
         self.csv_items_tree.bind('<ButtonRelease-1>', self._on_csv_column_resize)
+
+        # Bind double-click to open URL
+        self.csv_items_tree.bind('<Double-Button-1>', self._on_csv_item_double_click)
 
         # Enable column drag-to-reorder for CSV items tree
         self._setup_column_drag(self.csv_items_tree)
@@ -1479,6 +1555,21 @@ With RANSAC enabled:
             self.status_var.set(f"Save failed: {exc}")
 
     def run_now(self):
+        # Check which store is selected
+        store = self.current_store.get()
+
+        if store == "Suruga-ya":
+            # Run Suruga-ya scraper
+            config = self._collect_config()
+            if not config:
+                return
+            config_path = self._save_config_autoname(config)
+            self.status_var.set(f"Running Suruga-ya scraper: {config_path}")
+            self.cancel_requested = False
+            self.cancel_button.config(state='normal')
+            self._start_thread(self._run_surugaya_scraper, str(config_path))
+            return
+
         # Check if a CSV is loaded - if so, use its corresponding config
         if hasattr(self, 'csv_compare_path') and self.csv_compare_path:
             # Try to find the matching config by CSV path
@@ -1629,77 +1720,8 @@ With RANSAC enabled:
         return path
 
     def _collect_config(self):
-        # Don't strip keyword here - let it be stripped only on commit (FocusOut)
-        keyword = self.keyword_var.get()
-
-        config: dict[str, object] = {
-            'keyword': keyword,
-            'hide_sold_out': self.hide_sold_var.get(),
-            'csv_show_in_stock_only': self.csv_in_stock_only.get() if hasattr(self, 'csv_in_stock_only') else False,
-            'csv_add_secondary_keyword': self.csv_add_secondary_keyword.get() if hasattr(self, 'csv_add_secondary_keyword') else False,
-            'language': self.language_var.get(),
-            'fast': self.fast_var.get(),
-            'resume': self.resume_var.get(),
-            'debug': self.debug_var.get(),
-        }
-
-        categories = self._get_selected_categories()
-        if categories:
-            category_code = categories[0]
-            # Save as category name instead of code
-            from mandarake_codes import get_category_name
-            category_name = get_category_name(category_code, language='en')
-            # Store both for reference
-            config['category'] = category_code
-            config['category_name'] = category_name
-
-        max_pages = self.max_pages_var.get().strip()
-        if max_pages:
-            try:
-                config['max_pages'] = int(max_pages)
-            except ValueError:
-                messagebox.showerror("Validation", "Max pages must be an integer.")
-                return None
-
-        # Results per page
-        results_per_page = self.results_per_page_var.get().strip()
-        if results_per_page:
-            try:
-                config['results_per_page'] = int(results_per_page)
-            except ValueError:
-                config['results_per_page'] = 48  # Default
-        else:
-            config['results_per_page'] = 48  # Default
-
-        recent_hours = self._get_recent_hours_value()
-        if recent_hours:
-            config['recent_hours'] = recent_hours
-
-        shop_value = self._resolve_shop()
-        if shop_value:
-            config['shop'] = shop_value
-            # Store shop name for readable filenames
-            from mandarake_codes import get_store_name
-            shop_name = get_store_name(shop_value, language='en')
-            config['shop_name'] = shop_name
-
-        csv_path = self.csv_path_var.get().strip()
-        if csv_path:
-            config['csv'] = csv_path
-
-        download_dir = self.download_dir_var.get().strip()
-        if download_dir:
-            config['download_images'] = download_dir
-
-        thumbs = self.thumbnails_var.get().strip()
-        if thumbs:
-            try:
-                config['thumbnails'] = int(thumbs)
-            except ValueError:
-                messagebox.showerror("Validation", "Thumbnail width must be an integer.")
-                return None
-
-        return config
+        """Collect configuration data from GUI widgets using configuration manager."""
+        return self.config_manager.collect_config_from_gui(self)
 
     def _resolve_shop(self):
         """Get the selected shop code from the listbox."""
@@ -1734,12 +1756,18 @@ With RANSAC enabled:
         try:
             print(f"[GUI DEBUG] Starting scraper with use_mimic={use_mimic}")
 
-            # Load config to check for Japanese text
+            # Load config to check for Japanese text and URL
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
                 keyword = config.get('keyword', '')
+                provided_url = config.get('search_url')
                 print(f"[GUI DEBUG] Keyword from config loaded")
                 print(f"[GUI DEBUG] Keyword has {len(keyword)} characters")
+
+                if provided_url and 'mandarake.co.jp' in provided_url:
+                    print(f"[MANDARAKE SEARCH] Using provided URL: {provided_url}")
+                else:
+                    print(f"[MANDARAKE SEARCH] Building URL from config params")
 
             scraper = MandarakeScraper(str(config_path), use_mimic=use_mimic)
             self.current_scraper = scraper  # Track scraper instance
@@ -1762,6 +1790,160 @@ With RANSAC enabled:
                 self.run_queue.put(("status", "Scrape cancelled."))
             else:
                 self.run_queue.put(("error", f"Scrape failed: {exc}"))
+        finally:
+            self.current_scraper = None
+            self.run_queue.put(("cleanup", str(config_path)))
+
+    def _run_surugaya_scraper(self, config_path: str):
+        """Run Suruga-ya scraper in background thread"""
+        config_path = Path(config_path)
+        try:
+            # Load config
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+            # Check if URL was provided directly
+            provided_url = config.get('search_url')
+
+            keyword = config.get('keyword', '')
+            category1 = config.get('category1', '7')  # Main category - default to Books
+            category2 = config.get('category2')  # Detailed category
+            shop_code = config.get('shop', 'all')
+            max_pages = config.get('max_pages', 5)
+            show_out_of_stock = config.get('show_out_of_stock', False)
+            exclude_word = config.get('exclude_word', '')
+            condition = config.get('condition', 'all')
+            adult_only = config.get('adult_only', False)
+
+            # Calculate max results from max_pages (assuming ~50 items per page)
+            max_results = max_pages * 50
+
+            # Initialize scraper
+            from scrapers.surugaya_scraper import SurugayaScraper
+            scraper = SurugayaScraper()
+            self.current_scraper = scraper
+            scraper._cancel_requested = False
+
+            # Use provided URL or build from params
+            if provided_url and 'suruga-ya.jp' in provided_url:
+                print(f"[SURUGA-YA SEARCH] Using provided URL: {provided_url}")
+                search_desc = f"Searching Suruga-ya with provided URL"
+
+                # Run search with provided URL
+                results = scraper.search(
+                    keyword=keyword,
+                    category1=category1,
+                    category2=category2,
+                    shop_code=shop_code,
+                    exclude_word=exclude_word,
+                    condition=condition,
+                    max_results=max_results,
+                    show_out_of_stock=show_out_of_stock,
+                    adult_only=adult_only,
+                    search_url=provided_url  # Pass the provided URL directly
+                )
+            else:
+                # Build URL with new parameters
+                from store_codes.surugaya_codes import build_surugaya_search_url
+                search_url = build_surugaya_search_url(
+                    keyword=keyword,
+                    category1=category1,
+                    category2=category2,
+                    shop_code=shop_code,
+                    exclude_word=exclude_word,
+                    condition=condition,
+                    in_stock_only=not show_out_of_stock,
+                    adult_only=adult_only
+                )
+                print(f"[SURUGA-YA SEARCH] Built URL from params: {search_url}")
+                search_desc = f"Searching Suruga-ya: {keyword}"
+                if exclude_word:
+                    search_desc += f" (excluding: {exclude_word})"
+
+                # Run search with built URL
+                results = scraper.search(
+                    keyword=keyword,
+                    category1=category1,
+                    category2=category2,
+                    shop_code=shop_code,
+                    exclude_word=exclude_word,
+                    condition=condition,
+                    max_results=max_results,
+                    show_out_of_stock=show_out_of_stock,
+                    adult_only=adult_only
+                )
+
+            self.run_queue.put(("status", search_desc))
+
+            # Save results to CSV and download images
+            if results:
+                csv_filename = config_path.stem + '.csv'
+                csv_path = Path('results') / csv_filename
+                csv_path.parent.mkdir(exist_ok=True)
+
+                # Download images and translate titles (default behavior for better UX)
+                images_dir = Path('images') / config_path.stem
+                images_dir.mkdir(parents=True, exist_ok=True)
+                import requests
+                from deep_translator import GoogleTranslator
+
+                translator = GoogleTranslator(source='ja', target='en')
+
+                for i, item in enumerate(results):
+                    # Download images
+                    image_url = item.get('image_url', '')
+                    if image_url:
+                        try:
+                            response = requests.get(image_url, timeout=10)
+                            if response.status_code == 200:
+                                img_filename = f"thumb_product_{i:04d}.jpg"
+                                img_path = images_dir / img_filename
+                                with open(img_path, 'wb') as img_file:
+                                    img_file.write(response.content)
+                                item['local_image'] = str(img_path)
+                                self.run_queue.put(("status", f"Downloaded image {i+1}/{len(results)}"))
+                        except Exception as e:
+                            print(f"[SURUGA-YA] Failed to download image {i+1}: {e}")
+
+                    # Translate title from Japanese to English
+                    title = item.get('title', '')
+                    if title:
+                        try:
+                            # Translate in chunks if title is too long (Google Translate has 5000 char limit)
+                            if len(title) > 4000:
+                                title_en = translator.translate(title[:4000])
+                            else:
+                                title_en = translator.translate(title)
+                            item['title_en'] = title_en
+                            self.run_queue.put(("status", f"Translated {i+1}/{len(results)}: {title_en[:50]}..."))
+                        except Exception as e:
+                            print(f"[SURUGA-YA] Failed to translate title {i+1}: {e}")
+                            item['title_en'] = title  # Fallback to original title
+
+                import csv
+                with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+                    fieldnames = ['title', 'title_en', 'price', 'condition', 'stock_status', 'url', 'image_url', 'local_image']
+                    writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+                    writer.writeheader()
+                    writer.writerows(results)
+
+                # Update config with CSV path
+                config['csv'] = str(csv_path)
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, ensure_ascii=False, indent=2)
+
+                self.run_queue.put(("status", f"Found {len(results)} items - saved to {csv_path.name}"))
+                self.run_queue.put(("results", str(config_path)))
+            else:
+                self.run_queue.put(("status", "No results found"))
+
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            if self.cancel_requested:
+                self.run_queue.put(("status", "Search cancelled."))
+            else:
+                self.run_queue.put(("error", f"Suruga-ya search failed: {exc}"))
         finally:
             self.current_scraper = None
             self.run_queue.put(("cleanup", str(config_path)))
@@ -2013,9 +2195,87 @@ With RANSAC enabled:
 
         self._update_preview()
 
+    def _on_store_changed(self, event=None):
+        """Handle store selection change - reload categories and shops."""
+        store = self.current_store.get()
+
+        if store == "Mandarake":
+            # Reload Mandarake categories and shops
+            self._populate_detail_categories()
+            self._populate_shop_list()
+            # Update main category dropdown
+            self.main_category_combo['values'] = [f"{name} ({code})" for code, name in MAIN_CATEGORY_OPTIONS]
+            # Auto-select "Everything" category
+            self.main_category_var.set("Everything (00)")
+            # Set results per page to 240 (Mandarake default)
+            self.results_per_page_var.set('240')
+            # Trigger category selection to populate detailed categories
+            self._on_main_category_selected()
+        elif store == "Suruga-ya":
+            # Load Suruga-ya categories and shops
+            from store_codes.surugaya_codes import SURUGAYA_MAIN_CATEGORIES
+            # Update main category dropdown with Suruga-ya categories
+            category_values = [f"{name} ({code})" for code, name in sorted(SURUGAYA_MAIN_CATEGORIES.items())]
+            self.main_category_combo['values'] = category_values
+            # Auto-select first category (Games)
+            if category_values:
+                self.main_category_var.set(category_values[0])
+            # Load Suruga-ya shops
+            self._populate_surugaya_shops()
+            # Set results per page to 50 (Suruga-ya fixed)
+            self.results_per_page_var.set('50')
+            # Trigger category selection to populate detailed categories
+            self._on_main_category_selected()
+
+    def _populate_surugaya_categories(self, main_code=None):
+        """Populate detail categories listbox with Suruga-ya categories based on main category."""
+        from store_codes.surugaya_codes import SURUGAYA_DETAILED_CATEGORIES
+        self.detail_listbox.delete(0, tk.END)
+        self.detail_code_map = []
+
+        if not main_code:
+            # No main category selected - show nothing or all
+            return
+
+        # Get subcategories for selected main category
+        subcategories = SURUGAYA_DETAILED_CATEGORIES.get(main_code, {})
+
+        for code, name in sorted(subcategories.items()):
+            label = f"{code} - {name}"
+            self.detail_listbox.insert(tk.END, label)
+            self.detail_code_map.append(code)
+
+    def _populate_surugaya_shops(self):
+        """Populate shop listbox with Suruga-ya shops."""
+        from store_codes.surugaya_codes import SURUGAYA_SHOPS
+        self.shop_listbox.delete(0, tk.END)
+        self.shop_code_map = []
+
+        # Add "All Stores" option first
+        self.shop_listbox.insert(tk.END, "All Stores")
+        self.shop_code_map.append("all")
+
+        # Add all individual stores
+        for code, name in sorted(SURUGAYA_SHOPS.items()):
+            label = f"{name} ({code})"
+            self.shop_listbox.insert(tk.END, label)
+            self.shop_code_map.append(code)
+
+        # Default selection: All Stores
+        self.shop_listbox.selection_set(0)
+
     def _on_main_category_selected(self, event=None):
         code = utils.extract_code(self.main_category_var.get())
-        self._populate_detail_categories(code)
+
+        # Check which store is selected
+        store = self.current_store.get()
+
+        if store == "Suruga-ya":
+            # Use Suruga-ya hierarchical categories
+            self._populate_surugaya_categories(code)
+        else:
+            # Use Mandarake categories
+            self._populate_detail_categories(code)
 
         # Auto-select the first detail category (the main category itself)
         if self.detail_listbox.size() > 0:
@@ -2065,11 +2325,31 @@ With RANSAC enabled:
 
         # Select detail categories and scroll to first selected
         first_selected_idx = None
+        unknown_categories = []
+
         for idx, code in enumerate(self.detail_code_map):
             if code in categories:
                 self.detail_listbox.selection_set(idx)
                 if first_selected_idx is None:
                     first_selected_idx = idx
+
+        # Handle unknown categories (not in current listbox)
+        for cat_code in categories:
+            if cat_code not in self.detail_code_map:
+                unknown_categories.append(cat_code)
+
+        # Add unknown categories to listbox temporarily
+        if unknown_categories:
+            for cat_code in unknown_categories:
+                # Add to detail_code_map and listbox
+                self.detail_code_map.append(cat_code)
+                display_text = f"Unknown Category ({cat_code})"
+                self.detail_listbox.insert(tk.END, display_text)
+                # Select the newly added item
+                new_idx = len(self.detail_code_map) - 1
+                self.detail_listbox.selection_set(new_idx)
+                if first_selected_idx is None:
+                    first_selected_idx = new_idx
 
         # Scroll to make the first selected category visible
         if first_selected_idx is not None:
@@ -2520,7 +2800,10 @@ With RANSAC enabled:
         # Language (default to english)
         language = config.get('language', 'en')
 
-        values = (path.name, keyword, category, shop, hide_sold, results_per_page, max_pages, latest_additions, language)
+        # Store (Mandarake or Suruga-ya)
+        store = config.get('store', 'Mandarake').title()
+
+        values = (store, path.name, keyword, category, shop, hide_sold, results_per_page, max_pages, latest_additions, language)
 
         if existing_item:
             # Update existing item
@@ -2535,85 +2818,34 @@ With RANSAC enabled:
             print(f"[CONFIG TREE] Added new config: {path.name}")
 
     def _load_config_tree(self):
-        if not hasattr(self, 'config_tree'):
+        """Load configuration tree using tree manager."""
+        if self.tree_manager:
+            self.tree_manager.load_config_tree()
+
+    def _filter_config_tree(self):
+        """Filter config tree based on store filter selection"""
+        if not hasattr(self, 'config_store_filter') or not hasattr(self, 'config_tree'):
             return
-        for item in self.config_tree.get_children():
-            self.config_tree.delete(item)
-        self.config_paths.clear()
 
-        configs_dir = Path('configs')
-        if not configs_dir.exists():
-            return
+        filter_value = self.config_store_filter.get()
 
-        # Get all config files
-        config_files = list(configs_dir.glob('*.json'))
+        # Get all items
+        all_items = list(self.config_paths.keys())
 
-        # Load custom order from metadata file
-        order_file = Path('.config_order.json')
-        custom_order = []
-        if order_file.exists():
-            try:
-                with order_file.open('r', encoding='utf-8') as f:
-                    custom_order = json.load(f)
-            except:
-                pass
+        # Show/hide items based on filter
+        for item in all_items:
+            # Get the store value (first column)
+            values = self.config_tree.item(item, 'values')
+            if values:
+                store = values[0]  # Store is the first column
 
-        # Sort: custom ordered items first, then new items by modification time
-        config_file_names = {f.name: f for f in config_files}
-        sorted_files = []
+                # Show item if it matches filter or filter is "All"
+                if filter_value == 'All' or store == filter_value:
+                    self.config_tree.reattach(item, '', 'end')
+                else:
+                    self.config_tree.detach(item)
 
-        # Add files in custom order if they still exist
-        for name in custom_order:
-            if name in config_file_names:
-                sorted_files.append(config_file_names[name])
-                del config_file_names[name]
-
-        # Add any new files not in custom order (sorted by modification time, newest first)
-        new_files = sorted(config_file_names.values(), key=lambda p: p.stat().st_mtime, reverse=True)
-        sorted_files.extend(new_files)
-
-        config_files = sorted_files
-
-        for cfg_path in config_files:
-            try:
-                with cfg_path.open('r', encoding='utf-8') as f:
-                    data = json.load(f)
-            except Exception:
-                continue
-
-            # Skip if data is not a dictionary (malformed config)
-            if not isinstance(data, dict):
-                continue
-
-            keyword = data.get('keyword', '')
-
-            # Use category name if available, otherwise show code
-            category = data.get('category_name', data.get('category', ''))
-            if isinstance(category, list):
-                category = ', '.join(category)
-
-            # Use shop name if available, otherwise show code
-            shop = data.get('shop_name', data.get('shop', ''))
-
-            # Hide sold out (affects search URL)
-            hide_sold = 'Yes' if data.get('hide_sold_out') else 'No'
-
-            # Results per page (default 48)
-            results_per_page = data.get('results_per_page', 48)
-
-            # Max pages (empty if not set)
-            max_pages = data.get('max_pages', '')
-
-            # Latest additions timeframe
-            recent_hours = data.get('recent_hours')
-            latest_additions = self._label_for_recent_hours(recent_hours) if recent_hours else ''
-
-            # Language (default to english)
-            language = data.get('language', 'en')
-
-            values = (cfg_path.name, keyword, category, shop, hide_sold, results_per_page, max_pages, latest_additions, language)
-            item = self.config_tree.insert('', tk.END, values=values)
-            self.config_paths[item] = cfg_path
+        print(f"[CONFIG FILTER] Filtered by: {filter_value}")
 
     def _setup_column_drag(self, tree):
         """Enable drag-to-reorder for treeview columns"""
@@ -2719,6 +2951,149 @@ With RANSAC enabled:
         if item:
             self.config_tree.selection_set(item)
             self.config_tree_menu.post(event.x_root, event.y_root)
+
+    def _on_config_tree_double_click(self, event):
+        """Handle double-click on config tree to edit category"""
+        # Identify which column was clicked
+        column = self.config_tree.identify_column(event.x)
+        item = self.config_tree.identify_row(event.y)
+
+        if not item:
+            return
+
+        # Check if category column was clicked (column #3, index starts at #1)
+        # Columns: store, file, keyword, category, shop...
+        if column != '#4':  # Category is the 4th column
+            return
+
+        # Get config path
+        config_path = self.config_paths.get(item)
+        if not config_path:
+            return
+
+        # Load config
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load config: {e}")
+            return
+
+        # Get current category value and store type
+        store = config.get('store', 'mandarake')
+        category_code = config.get('category', '')
+        category_name = config.get('category_name', '')
+
+        # Import category data
+        if store == 'suruga-ya':
+            from store_codes.surugaya_codes import SURUGAYA_CATEGORIES, SURUGAYA_DETAILED_CATEGORIES
+            all_categories = SURUGAYA_CATEGORIES
+        else:
+            from mandarake_codes import MANDARAKE_CATEGORIES
+            all_categories = MANDARAKE_CATEGORIES
+
+        # Check if unknown category (no name)
+        if not category_name and category_code:
+            # Unknown code - allow user to add a name
+            dialog = tk.Toplevel(self)
+            dialog.title("Add Category Name")
+            dialog.geometry("400x150")
+            dialog.transient(self)
+            dialog.grab_set()
+
+            ttk.Label(dialog, text=f"Unknown category code: {category_code}").pack(pady=10)
+            ttk.Label(dialog, text="Enter a name for this category:").pack(pady=5)
+
+            name_var = tk.StringVar()
+            name_entry = ttk.Entry(dialog, textvariable=name_var, width=40)
+            name_entry.pack(pady=5)
+            name_entry.focus()
+
+            def save_name():
+                name = name_var.get().strip()
+                if name:
+                    # Save to config
+                    config['category_name'] = name
+                    with open(config_path, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, ensure_ascii=False, indent=2)
+
+                    # Update tree
+                    self._update_tree_item(config_path, config)
+                    dialog.destroy()
+                    messagebox.showinfo("Success", f"Category name saved: {name}")
+
+            ttk.Button(dialog, text="Save", command=save_name).pack(pady=10)
+
+        else:
+            # Known category - show selection dialog
+            dialog = tk.Toplevel(self)
+            dialog.title("Edit Category")
+            dialog.geometry("500x400")
+            dialog.transient(self)
+            dialog.grab_set()
+
+            ttk.Label(dialog, text="Select a category or enter a code:").pack(pady=10)
+
+            # Entry for manual code input
+            code_frame = ttk.Frame(dialog)
+            code_frame.pack(fill=tk.X, padx=10, pady=5)
+            ttk.Label(code_frame, text="Code:").pack(side=tk.LEFT)
+            code_var = tk.StringVar(value=category_code)
+            code_entry = ttk.Entry(code_frame, textvariable=code_var, width=20)
+            code_entry.pack(side=tk.LEFT, padx=5)
+
+            # Listbox for category selection
+            ttk.Label(dialog, text="Or select from list:").pack(pady=5)
+
+            list_frame = ttk.Frame(dialog)
+            list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+            scrollbar = ttk.Scrollbar(list_frame)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+            category_list = tk.Listbox(list_frame, yscrollcommand=scrollbar.set)
+            category_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.config(command=category_list.yview)
+
+            # Populate category list
+            category_items = []
+            for code, name in sorted(all_categories.items(), key=lambda x: x[1]):
+                display = f"{code} - {name}"
+                category_items.append((code, display))
+                category_list.insert(tk.END, display)
+
+            def on_select(event):
+                selection = category_list.curselection()
+                if selection:
+                    selected_code = category_items[selection[0]][0]
+                    code_var.set(selected_code)
+
+            category_list.bind('<<ListboxSelect>>', on_select)
+
+            # Select current category in list
+            for i, (code, _) in enumerate(category_items):
+                if code == category_code:
+                    category_list.selection_set(i)
+                    category_list.see(i)
+                    break
+
+            def save_category():
+                new_code = code_var.get().strip()
+                if new_code:
+                    # Update config
+                    config['category'] = new_code
+                    # Get category name from lookup
+                    config['category_name'] = all_categories.get(new_code, '')
+
+                    with open(config_path, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, ensure_ascii=False, indent=2)
+
+                    # Update tree
+                    self._update_tree_item(config_path, config)
+                    dialog.destroy()
+                    messagebox.showinfo("Success", f"Category updated: {new_code}")
+
+            ttk.Button(dialog, text="Save", command=save_category).pack(pady=10)
 
     def _load_csv_from_config(self):
         """Load CSV file associated with selected config"""
@@ -3019,8 +3394,9 @@ With RANSAC enabled:
         recent_hours = config.get('recent_hours')
         timeframe = self._label_for_recent_hours(recent_hours) if recent_hours else ''
         language = config.get('language', 'en')
+        store = config.get('store', 'Mandarake').title()
 
-        values = (path.name, keyword, category, shop, hide, results_per_page, max_pages, timeframe, language)
+        values = (store, path.name, keyword, category, shop, hide, results_per_page, max_pages, timeframe, language)
         item = self.config_tree.insert('', tk.END, values=values)
         self.config_paths[item] = path
 
@@ -3126,90 +3502,152 @@ With RANSAC enabled:
             messagebox.showerror("Error", f"Failed to move file: {e}")
 
     def _load_from_url(self):
-        """Parse Mandarake URL and populate config fields"""
+        """Parse URL from either Mandarake or Suruga-ya and populate config fields"""
         url = self.mandarake_url_var.get().strip()
         if not url:
-            messagebox.showinfo("No URL", "Please enter a Mandarake URL")
+            messagebox.showinfo("No URL", "Please enter a store URL")
             return
 
         try:
-            from mandarake_scraper import parse_mandarake_url
-            config = parse_mandarake_url(url)
+            # Detect store type from URL
+            if 'suruga-ya.jp' in url:
+                # Parse Suruga-ya URL
+                from urllib.parse import urlparse, parse_qs
+                parsed = urlparse(url)
+                params = parse_qs(parsed.query)
+
+                config = {
+                    'search_url': url,  # Store the original URL
+                    'store': 'suruga-ya',
+                    'keyword': params.get('search_word', [''])[0],
+                    'category': params.get('category', [''])[0] or params.get('category2', [''])[0],
+                    'category1': params.get('category1', [''])[0],
+                    'category2': params.get('category2', [''])[0],
+                    'shop': params.get('tenpo_code', ['all'])[0],
+                    'exclude_word': params.get('exclude_word', [''])[0],
+                    'condition': params.get('sale_classified', ['all'])[0],
+                    'adult_only': params.get('adult_s', [''])[0] == '1',
+                }
+
+                # Update store selector
+                self.current_store.set("Suruga-ya")
+                self._on_store_changed()  # Load Suruga-ya categories
+
+            elif 'mandarake.co.jp' in url:
+                # Parse Mandarake URL
+                from mandarake_scraper import parse_mandarake_url
+                config = parse_mandarake_url(url)
+                config['search_url'] = url  # Store the original URL
+                config['store'] = 'mandarake'
+
+                # Update store selector
+                self.current_store.set("Mandarake")
+                self._on_store_changed()  # Load Mandarake categories
+            else:
+                messagebox.showerror("Error", "URL must be from Mandarake or Suruga-ya")
+                return
+
             self._populate_from_config(config)
-            self.status_var.set(f"Loaded URL parameters")
-            # Don't clear the URL - keep it in the field
+            self.status_var.set(f"Loaded URL parameters from {config['store']}")
+
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             messagebox.showerror("Error", f"Failed to parse URL: {e}")
 
     def _populate_from_config(self, config: dict):
-        self.keyword_var.set(config.get('keyword', ''))
+        # Set loading flag to prevent trace callbacks from regenerating URL
+        self._loading_config = True
 
-        category = config.get('category')
-        if isinstance(category, list):
-            categories = category
-        elif category:
-            categories = [category]
-        else:
-            categories = []
-        self._select_categories(categories)
+        try:
+            # Store provided URL if present
+            if 'search_url' in config:
+                self._provided_url = config['search_url']
+                self.url_var.set(config['search_url'])
+            else:
+                self._provided_url = None
 
-        self.max_pages_var.set(str(config.get('max_pages', '')))
-        self.recent_hours_var.set(self._label_for_recent_hours(config.get('recent_hours')))
+            self.keyword_var.set(config.get('keyword', ''))
+
+            category = config.get('category')
+            if isinstance(category, list):
+                categories = category
+            elif category:
+                categories = [category]
+            else:
+                categories = []
+            self._select_categories(categories)
+
+            self.max_pages_var.set(str(config.get('max_pages', '')))
+            self.recent_hours_var.set(self._label_for_recent_hours(config.get('recent_hours')))
 
         # Set shop selection in listbox
-        shop_value = config.get('shop', '')
-        matched = False
+            shop_value = config.get('shop', '')
+            matched = False
 
         # Try to find matching shop in listbox
-        for idx, code in enumerate(self.shop_code_map):
-            # Match by code (primary)
-            if str(shop_value) == str(code) or shop_value == 'all':
-                self.shop_listbox.selection_clear(0, tk.END)
-                self.shop_listbox.selection_set(idx)
-                self.shop_listbox.see(idx)
-                matched = True
-                break
-
-        # If not matched, try matching by name from shop_name field
-        if not matched and config.get('shop_name'):
-            shop_name = config.get('shop_name')
             for idx, code in enumerate(self.shop_code_map):
-                if code == "all" or code == "custom":
-                    continue
-                # Find the name for this code
-                for store_code, store_name in STORE_OPTIONS:
-                    if store_code == code and (shop_name == store_name or shop_name in store_name):
-                        self.shop_listbox.selection_clear(0, tk.END)
-                        self.shop_listbox.selection_set(idx)
-                        self.shop_listbox.see(idx)
-                        matched = True
-                        break
-                if matched:
+            # Match by code (primary)
+                if str(shop_value) == str(code) or shop_value == 'all':
+                    self.shop_listbox.selection_clear(0, tk.END)
+                    self.shop_listbox.selection_set(idx)
+                    self.shop_listbox.see(idx)
+                    matched = True
                     break
 
-        # If still not matched, default to "All Stores"
-        if not matched:
-            self.shop_listbox.selection_clear(0, tk.END)
-            self.shop_listbox.selection_set(0)
+        # If not matched, try matching by name from shop_name field
+            if not matched and config.get('shop_name'):
+                shop_name = config.get('shop_name')
+                for idx, code in enumerate(self.shop_code_map):
+                    if code == "all" or code == "custom":
+                        continue
+                # Find the name for this code
+                    for store_code, store_name in STORE_OPTIONS:
+                        if store_code == code and (shop_name == store_name or shop_name in store_name):
+                            self.shop_listbox.selection_clear(0, tk.END)
+                            self.shop_listbox.selection_set(idx)
+                            self.shop_listbox.see(idx)
+                            matched = True
+                            break
+                    if matched:
+                        break
 
-        self.hide_sold_var.set(config.get('hide_sold_out', False))
-        if hasattr(self, 'csv_in_stock_only'):
-            self.csv_in_stock_only.set(config.get('csv_show_in_stock_only', False))
-        if hasattr(self, 'csv_add_secondary_keyword'):
-            self.csv_add_secondary_keyword.set(config.get('csv_add_secondary_keyword', False))
-        self.language_var.set(config.get('language', 'en'))
-        self.fast_var.set(config.get('fast', False))
-        self.resume_var.set(config.get('resume', True))
-        self.debug_var.set(config.get('debug', False))
+        # If still not matched, default to "All Stores"
+            if not matched:
+                self.shop_listbox.selection_clear(0, tk.END)
+                self.shop_listbox.selection_set(0)
+
+            self.hide_sold_var.set(config.get('hide_sold_out', False))
+            if hasattr(self, 'csv_in_stock_only'):
+                self.csv_in_stock_only.set(config.get('csv_show_in_stock_only', False))
+            if hasattr(self, 'csv_add_secondary_keyword'):
+                self.csv_add_secondary_keyword.set(config.get('csv_add_secondary_keyword', False))
+            self.language_var.set(config.get('language', 'en'))
+            self.fast_var.set(config.get('fast', False))
+            self.resume_var.set(config.get('resume', True))
+            self.debug_var.set(config.get('debug', False))
+
+        # Load adult filter
+            if hasattr(self, 'adult_filter_var'):
+                adult_only = config.get('adult_only', False)
+                self.adult_filter_var.set("Adult Only" if adult_only else "All")
         # Note: eBay API credentials removed from GUI
 
-        self.csv_path_var.set(config.get('csv', ''))
-        self.download_dir_var.set(config.get('download_images', ''))
-        self.thumbnails_var.set(str(config.get('thumbnails', '')))
-        self.results_per_page_var.set(str(config.get('results_per_page', '240')))
+            self.csv_path_var.set(config.get('csv', ''))
+            self.download_dir_var.set(config.get('download_images', ''))
+            self.thumbnails_var.set(str(config.get('thumbnails', '')))
 
-        self.schedule_var.set(config.get('schedule', ''))
-        self._update_preview()
+            # Set results_per_page: 50 for Suruga-ya (fixed), 240 default for Mandarake
+            if config.get('store') == 'suruga-ya':
+                self.results_per_page_var.set('50')
+            else:
+                self.results_per_page_var.set(str(config.get('results_per_page', '240')))
+
+            self.schedule_var.set(config.get('schedule', ''))
+            self._update_preview()
+        finally:
+            # Always reset loading flag
+            self._loading_config = False
 
     # Browserless eBay Search methods
     def select_browserless_image(self):
@@ -3232,41 +3670,22 @@ With RANSAC enabled:
     def run_scrapy_text_search(self):
         """Run Scrapy eBay search (text only, no image comparison)"""
         query = self.browserless_query_var.get().strip()
-        if not query:
-            messagebox.showerror("Error", "Please enter a search query")
-            return
-
-        # Start search in background thread
-        self.browserless_progress.start()
-        self.browserless_status.set("Searching eBay...")
-        self._start_thread(self._run_scrapy_text_search_worker)
+        max_results = int(self.browserless_max_results.get())
+        search_method = self.ebay_search_method.get()  # "scrapy" or "api"
+        
+        if self.ebay_search_manager:
+            self.ebay_search_manager.run_text_search(query, max_results, search_method)
 
     def run_scrapy_search_with_compare(self):
         """Run Scrapy eBay search WITH image comparison"""
         query = self.browserless_query_var.get().strip()
-        if not query:
-            messagebox.showerror("Error", "Please enter a search query")
-            return
-
-        if not hasattr(self, 'browserless_image_path') or not self.browserless_image_path or not Path(self.browserless_image_path).exists():
-            messagebox.showerror("Error", "Please select a reference image first for comparison")
-            return
-
-        # Check if we have cached eBay results
-        has_cached_results = hasattr(self, 'browserless_results_data') and self.browserless_results_data and len(self.browserless_results_data) > 0
-
-        if has_cached_results:
-            # State 1: Use cached results - just run comparison
-            print(f"[SCRAPY COMPARE] Using {len(self.browserless_results_data)} cached eBay results")
-            self.browserless_progress.start()
-            self.browserless_status.set("Comparing cached results with reference image...")
-            self._start_thread(self._run_cached_compare_worker)
-        else:
-            # State 2: No cached results - run full search and compare
-            print(f"[SCRAPY COMPARE] No cached results, running full eBay search")
-            self.browserless_progress.start()
-            self.browserless_status.set("Searching eBay and comparing images...")
-            self._start_thread(self._run_scrapy_search_with_compare_worker)
+        max_results = int(self.browserless_max_results.get())
+        max_comparisons_str = self.browserless_max_comparisons.get()
+        max_comparisons = None if max_comparisons_str == "MAX" else int(max_comparisons_str)
+        reference_image_path = getattr(self, 'browserless_image_path', None)
+        
+        if self.ebay_search_manager:
+            self.ebay_search_manager.run_search_with_compare(query, max_results, max_comparisons, reference_image_path)
 
     def _run_scrapy_text_search_worker(self):
         """Worker method for eBay text-only search (runs in background thread)"""
@@ -3354,11 +3773,9 @@ With RANSAC enabled:
         )
 
     def clear_browserless_results(self):
-        """Clear browserless search results"""
-        for item in self.browserless_tree.get_children():
-            self.browserless_tree.delete(item)
-        self.browserless_results_data = []
-        self.browserless_status.set("Ready for eBay text search")
+        """Clear browserless search results using eBay search manager."""
+        if self.ebay_search_manager:
+            self.ebay_search_manager.clear_results()
 
     # CSV Batch Comparison methods
     def _load_csv_worker(self, csv_path: Path, autofill_from_config=None):
@@ -3476,15 +3893,32 @@ With RANSAC enabled:
                 except:
                     pass
 
-            title = row.get('title', '')
-            price = row.get('price_text', row.get('price', ''))
+            # Use English translated title if available, otherwise use original title
+            title = row.get('title_en', row.get('title', ''))
+
+            # Format price properly - handle both floats (Suruga-ya) and formatted strings (Mandarake)
+            price_raw = row.get('price_text', row.get('price', ''))
+            if isinstance(price_raw, (int, float)):
+                # Format as currency: ¥160,999
+                price = f"¥{price_raw:,.0f}"
+            elif isinstance(price_raw, str) and price_raw.replace('.', '').replace(',', '').isdigit():
+                # String but looks like a number (e.g., "160999.0")
+                try:
+                    price = f"¥{float(price_raw):,.0f}"
+                except:
+                    price = price_raw  # Fallback to original
+            else:
+                # Already formatted (e.g., "¥1,234")
+                price = price_raw
+
             shop = row.get('shop', row.get('shop_text', ''))
             stock_display = 'Yes' if row.get('in_stock', '').lower() in ('true', 'yes', '1') else 'No'
             category = row.get('category', '')
+            url = row.get('url', '')
 
             # Insert WITHOUT image for fast loading (use 0-based index as iid for proper mapping)
             self.csv_items_tree.insert('', 'end', iid=str(i), text=str(i+1),
-                                      values=(title, price, shop, stock_display, category))
+                                      values=(title, price, shop, stock_display, category, url))
 
         print(f"[CSV COMPARE] Displayed {len(filtered_items)} items (newly listed: {newly_listed_only}, in-stock: {in_stock_only})")
 
@@ -3499,16 +3933,43 @@ With RANSAC enabled:
 
     def _load_csv_thumbnails_worker(self, filtered_items):
         """Background worker to load CSV thumbnails without blocking UI"""
-        def update_image_callback(item_id, img):
+        def update_image_callback(item_id, pil_img):
             def update_image():
                 try:
                     # item_id is the tree item's iid (0-based index as string)
                     if item_id in self.csv_items_tree.get_children():
-                        self.csv_items_tree.item(item_id, image=img, text='')
-                        self.csv_images[item_id] = img
+                        # Create PhotoImage in main thread from PIL Image
+                        from PIL import ImageTk
+                        photo = ImageTk.PhotoImage(pil_img)
+                        self.csv_items_tree.item(item_id, image=photo, text='')
+                        self.csv_images[item_id] = photo  # Store to prevent garbage collection
                 except Exception as e:
                     print(f"[CSV THUMBNAILS] Error updating image for {item_id}: {e}")
             self.after(0, update_image)
+
+        def save_to_csv_callback(local_image_path, row_index):
+            """Callback to save downloaded image path to CSV file"""
+            def save_csv():
+                try:
+                    if not self.csv_compare_path:
+                        return
+
+                    # Update the in-memory data
+                    if row_index < len(self.csv_compare_data):
+                        self.csv_compare_data[row_index]['local_image'] = local_image_path
+
+                    # Write back to CSV file
+                    import csv
+                    with open(self.csv_compare_path, 'w', newline='', encoding='utf-8') as f:
+                        if self.csv_compare_data:
+                            fieldnames = list(self.csv_compare_data[0].keys())
+                            writer = csv.DictWriter(f, fieldnames=fieldnames)
+                            writer.writeheader()
+                            writer.writerows(self.csv_compare_data)
+                    print(f"[CSV SAVE] Updated CSV with local_image for row {row_index}")
+                except Exception as e:
+                    print(f"[CSV SAVE] Error saving image path to CSV: {e}")
+            self.after(0, save_csv)
 
         # Get current thumbnail column width
         thumb_width = self.csv_items_tree.column('#0', 'width')
@@ -3517,7 +3978,9 @@ With RANSAC enabled:
             filtered_items,
             self.csv_new_items,
             update_image_callback,
-            thumb_width
+            thumb_width,
+            csv_path=self.csv_compare_path,
+            save_to_csv_callback=save_to_csv_callback
         )
 
     def _on_csv_filter_changed(self):
@@ -3549,6 +4012,30 @@ With RANSAC enabled:
 
         # Debounce: wait 300ms after user stops dragging
         self._resize_timer = self.after(300, reload_thumbnails)
+
+    def _on_csv_item_double_click(self, event):
+        """Handle double-click on CSV item to open URL in browser"""
+        # Get the item that was double-clicked
+        region = self.csv_items_tree.identify('region', event.x, event.y)
+        item_id = self.csv_items_tree.identify_row(event.y)
+
+        if not item_id:
+            return
+
+        # Get the URL from the item's values (last column)
+        item_values = self.csv_items_tree.item(item_id, 'values')
+        if len(item_values) >= 6:  # Make sure URL column exists
+            url = item_values[5]  # URL is the 6th column (index 5)
+            if url:
+                # Open URL in default browser in a separate thread to avoid blocking
+                def open_url():
+                    import webbrowser
+                    webbrowser.open(url)
+                    print(f"[CSV] Opened URL: {url}")
+
+                import threading
+                thread = threading.Thread(target=open_url, daemon=True)
+                thread.start()
 
     def toggle_csv_thumbnails(self):
         """Toggle visibility of thumbnails in CSV treeview"""
@@ -4299,42 +4786,110 @@ With RANSAC enabled:
         # Also trigger auto-save when preview updates
         self._auto_save_config()
 
+        # If loading config with a provided URL, don't regenerate - keep the provided URL
+        if getattr(self, '_loading_config', False) and hasattr(self, '_provided_url') and self._provided_url:
+            return  # Keep the provided URL that was already set
+
+        # Clear provided URL when user makes changes to UI fields
+        # This allows regenerating the URL from current field values
+        if hasattr(self, '_provided_url') and self._provided_url:
+            self._provided_url = None  # Clear so URL gets regenerated
+
+        store = self.current_store.get()
         keyword = self.keyword_var.get().strip()
 
         params: list[tuple[str, str]] = []
         notes: list[str] = []
 
-        # Add keyword if present
-        if keyword:
-            params.append(("keyword", quote(keyword)))
+        if store == "Suruga-ya":
+            # Build Suruga-ya URL
+            if keyword:
+                params.append(("search_word", quote(keyword)))
+            params.append(("searchbox", "1"))
 
-        # Add category even without keyword
-        categories = self._get_selected_categories()
-        if categories:
-            params.append(("categoryCode", categories[0]))
-            if len(categories) > 1:
-                notes.append(f"+{len(categories) - 1} more categories")
+            # Main category (category1)
+            main_category_text = self.main_category_var.get()
+            if main_category_text:
+                from gui import utils
+                main_code = utils.extract_code(main_category_text)
+                if main_code:
+                    params.append(("category1", main_code))
 
-        shop_value = self._resolve_shop()
-        if shop_value:
-            params.append(("shop", quote(shop_value)))
+            # Detailed category (category2)
+            categories = self._get_selected_categories()
+            if categories:
+                params.append(("category2", categories[0]))
 
-        if self.hide_sold_var.get():
-            params.append(("soldOut", '1'))
+            # Exclude words
+            if hasattr(self, 'exclude_word_var'):
+                exclude = self.exclude_word_var.get().strip()
+                if exclude:
+                    params.append(("exclude_word", quote(exclude)))
+                    notes.append(f"exclude: {exclude}")
 
-        if self.language_var.get() == 'en':
-            params.append(("lang", "en"))
+            # Condition filter
+            if hasattr(self, 'condition_var'):
+                condition = self.condition_var.get()
+                if condition == "New Only":
+                    params.append(("sale_classified", "1"))
+                    notes.append("new only")
+                elif condition == "Used Only":
+                    params.append(("sale_classified", "2"))
+                    notes.append("used only")
 
-        recent_hours = self._get_recent_hours_value()
-        if recent_hours:
-            params.append(("upToMinutes", str(recent_hours * 60)))
-            notes.append(f"last {recent_hours}h")
+            # Adult filter for Suruga-ya
+            if hasattr(self, 'adult_filter_var') and self.adult_filter_var.get() == "Adult Only":
+                params.append(("adult_s", "1"))
+                notes.append("adult only")
 
-        # Build URL even if no params (will show base URL)
-        query = '&'.join(f"{key}={value}" for key, value in params)
-        url = "https://order.mandarake.co.jp/order/listPage/list"
-        if query:
-            url = f"{url}?{query}"
+            # Shop filter
+            shop_value = self._resolve_shop()
+            if shop_value and shop_value != 'all':
+                params.append(("tenpo_code", shop_value))
+
+            # Build URL
+            query = '&'.join(f"{key}={value}" for key, value in params)
+            url = "https://www.suruga-ya.jp/search"
+            if query:
+                url = f"{url}?{query}"
+
+        else:
+            # Build Mandarake URL
+            if keyword:
+                params.append(("keyword", quote(keyword)))
+
+            # Add category even without keyword
+            categories = self._get_selected_categories()
+            if categories:
+                params.append(("categoryCode", categories[0]))
+                if len(categories) > 1:
+                    notes.append(f"+{len(categories) - 1} more categories")
+
+            shop_value = self._resolve_shop()
+            if shop_value:
+                params.append(("shop", quote(shop_value)))
+
+            if self.hide_sold_var.get():
+                params.append(("soldOut", '1'))
+
+            if self.language_var.get() == 'en':
+                params.append(("lang", "en"))
+
+            recent_hours = self._get_recent_hours_value()
+            if recent_hours:
+                params.append(("upToMinutes", str(recent_hours * 60)))
+                notes.append(f"last {recent_hours}h")
+
+            # Adult content filter for Mandarake
+            if hasattr(self, 'adult_filter_var') and self.adult_filter_var.get() == "Adult Only":
+                params.append(("r18", "1"))
+                notes.append("adult only")
+
+            # Build URL
+            query = '&'.join(f"{key}={value}" for key, value in params)
+            url = "https://order.mandarake.co.jp/order/listPage/list"
+            if query:
+                url = f"{url}?{query}"
 
         note_str = f" ({'; '.join(notes)})" if notes else ''
         self.url_var.set(f"{url}{note_str}")
