@@ -368,16 +368,37 @@ With RANSAC enabled:
         notebook = ttk.Notebook(self)
         notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
+        # Get marketplace toggles
+        marketplace_toggles = self.settings.get_marketplace_toggles()
+
+        # Create tabs based on toggles
         basic_frame = ttk.Frame(notebook)
         browserless_frame = ttk.Frame(notebook)
         advanced_frame = ttk.Frame(notebook)
 
-        notebook.add(basic_frame, text="Mandarake")
-        notebook.add(browserless_frame, text="eBay Search & CSV")
-
-        # Alert/Review tab
+        # Always create alert tab first (other tabs may reference it)
         self.alert_tab = AlertTab(notebook)
-        notebook.add(self.alert_tab, text="Review/Alerts")
+
+        if marketplace_toggles.get('mandarake', True):
+            notebook.add(basic_frame, text="Mandarake")
+
+        if marketplace_toggles.get('ebay', True):
+            notebook.add(browserless_frame, text="eBay Search & CSV")
+
+        # Suruga-ya tab (new modular marketplace)
+        if marketplace_toggles.get('surugaya', False):
+            from gui.surugaya_tab import SurugayaTab
+            self.surugaya_tab = SurugayaTab(notebook, self.settings, self.alert_tab.alert_manager)
+            notebook.add(self.surugaya_tab, text="Suruga-ya")
+
+        # DejaJapan tab (placeholder for Phase 3)
+        if marketplace_toggles.get('dejapan', False):
+            # TODO: Implement DejaJapan tab in Phase 3
+            pass
+
+        # Add Alert/Review tab if enabled
+        if marketplace_toggles.get('alerts', True):
+            notebook.add(self.alert_tab, text="Review/Alerts")
 
         notebook.add(advanced_frame, text="Advanced")
 
@@ -923,6 +944,54 @@ With RANSAC enabled:
         ttk.Radiobutton(advanced_frame, text="eBay API (Active Listings - faster, official API)",
                        variable=self.ebay_search_method, value="api").grid(
             row=current_row, column=0, columnspan=2, sticky=tk.W, **pad)
+        current_row += 1
+
+        # Separator
+        ttk.Separator(advanced_frame, orient='horizontal').grid(
+            row=current_row, column=0, columnspan=4, sticky='ew', pady=10)
+        current_row += 1
+
+        # Marketplace Toggles Section
+        ttk.Label(advanced_frame, text="Enabled Marketplaces", font=('TkDefaultFont', 9, 'bold')).grid(
+            row=current_row, column=0, columnspan=4, sticky=tk.W, padx=5, pady=(0, 5))
+        current_row += 1
+
+        # Load current toggles
+        marketplace_toggles = self.settings.get_marketplace_toggles()
+
+        # Create toggle variables
+        self.mandarake_enabled = tk.BooleanVar(value=marketplace_toggles.get('mandarake', True))
+        self.ebay_enabled = tk.BooleanVar(value=marketplace_toggles.get('ebay', True))
+        self.surugaya_enabled = tk.BooleanVar(value=marketplace_toggles.get('surugaya', False))
+        self.dejapan_enabled = tk.BooleanVar(value=marketplace_toggles.get('dejapan', False))
+        self.alerts_enabled = tk.BooleanVar(value=marketplace_toggles.get('alerts', True))
+
+        # Create checkboxes
+        ttk.Checkbutton(advanced_frame, text="Mandarake", variable=self.mandarake_enabled,
+                       command=self._on_marketplace_toggle).grid(
+            row=current_row, column=0, sticky=tk.W, **pad)
+        ttk.Checkbutton(advanced_frame, text="eBay", variable=self.ebay_enabled,
+                       command=self._on_marketplace_toggle).grid(
+            row=current_row, column=1, sticky=tk.W, **pad)
+        current_row += 1
+
+        ttk.Checkbutton(advanced_frame, text="Suruga-ya", variable=self.surugaya_enabled,
+                       command=self._on_marketplace_toggle).grid(
+            row=current_row, column=0, sticky=tk.W, **pad)
+        ttk.Checkbutton(advanced_frame, text="DejaJapan", variable=self.dejapan_enabled,
+                       command=self._on_marketplace_toggle).grid(
+            row=current_row, column=1, sticky=tk.W, **pad)
+        current_row += 1
+
+        ttk.Checkbutton(advanced_frame, text="Review/Alerts Tab", variable=self.alerts_enabled,
+                       command=self._on_marketplace_toggle).grid(
+            row=current_row, column=0, sticky=tk.W, **pad)
+        current_row += 1
+
+        # Restart warning
+        ttk.Label(advanced_frame, text="(Restart required for changes to take effect)",
+                 foreground='gray', font=('TkDefaultFont', 8)).grid(
+            row=current_row, column=0, columnspan=2, sticky=tk.W, padx=5)
         current_row += 1
 
         # Separator
@@ -1853,6 +1922,24 @@ With RANSAC enabled:
     def _on_mimic_changed(self, *args):
         # Settings saved on close, no need to save on every change
         pass
+
+    def _on_marketplace_toggle(self):
+        """Handle marketplace toggle changes"""
+        # Save toggle state
+        toggles = {
+            'mandarake': self.mandarake_enabled.get(),
+            'ebay': self.ebay_enabled.get(),
+            'surugaya': self.surugaya_enabled.get(),
+            'dejapan': self.dejapan_enabled.get(),
+            'alerts': self.alerts_enabled.get()
+        }
+        self.settings.save_marketplace_toggles(toggles)
+
+        # Show restart required message
+        messagebox.showinfo(
+            "Restart Required",
+            "Marketplace changes will take effect after restarting the application."
+        )
 
     def _on_config_schedule_tab_changed(self, event):
         """Handle config/schedule tab change to show appropriate buttons."""
