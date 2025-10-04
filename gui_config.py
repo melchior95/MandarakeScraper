@@ -2012,157 +2012,39 @@ With RANSAC enabled:
     # Category helpers and preview
     # ------------------------------------------------------------------
     def _populate_detail_categories(self, main_code=None):
-        self.detail_listbox.delete(0, tk.END)
-        self.detail_code_map = []
-
-        def should_include(code: str) -> bool:
-            if not main_code:
-                return True
-            # If main_code is "00" (Everything), show all categories
-            if main_code == "00":
-                return True
-            return code.startswith(main_code)
-
-        for code, info in sorted(MANDARAKE_ALL_CATEGORIES.items()):
-            if should_include(code):
-                label = f"{code} - {info['en']}"
-                self.detail_listbox.insert(tk.END, label)
-                self.detail_code_map.append(code)
+        """Populate detail categories listbox."""
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._populate_detail_categories(main_code)
 
     def _populate_shop_list(self):
         """Populate shop listbox with all available stores."""
-        self.shop_listbox.delete(0, tk.END)
-        self.shop_code_map = []
-
-        # Add "All Stores" option first
-        self.shop_listbox.insert(tk.END, "All Stores")
-        self.shop_code_map.append("all")
-
-        # Add all individual stores
-        for code, name in STORE_OPTIONS:
-            label = f"{name} ({code})"
-            self.shop_listbox.insert(tk.END, label)
-            self.shop_code_map.append(code)
-
-        # Default selection: All Stores
-        self.shop_listbox.selection_set(0)
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._populate_shop_list()
 
     def _on_shop_selected(self, event=None):
         """Handle shop selection from listbox."""
-        selection = self.shop_listbox.curselection()
-        if not selection:
-            return
-
-        index = selection[0]
-        shop_code = self.shop_code_map[index]
-
-        self._update_preview()
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._on_shop_selected(event)
 
     def _on_store_changed(self, event=None):
         """Handle store selection change - reload categories and shops."""
-        store = self.current_store.get()
-
-        if store == "Mandarake":
-            # Reload Mandarake categories and shops
-            self._populate_detail_categories()
-            self._populate_shop_list()
-            # Update main category dropdown
-            self.main_category_combo['values'] = [f"{name} ({code})" for code, name in MAIN_CATEGORY_OPTIONS]
-            # Auto-select "Everything" category
-            self.main_category_var.set("Everything (00)")
-            # Set results per page to 240 (Mandarake default)
-            self.results_per_page_var.set('240')
-            # Trigger category selection to populate detailed categories
-            self._on_main_category_selected()
-
-            # Hide Suruga-ya specific fields
-            self.exclude_word_label.grid_remove()
-            self.exclude_word_entry.grid_remove()
-            self.condition_label.grid_remove()
-            self.condition_combo.grid_remove()
-
-        elif store == "Suruga-ya":
-            # Load Suruga-ya categories and shops
-            from store_codes.surugaya_codes import SURUGAYA_MAIN_CATEGORIES
-            # Update main category dropdown with Suruga-ya categories
-            category_values = [f"{name} ({code})" for code, name in sorted(SURUGAYA_MAIN_CATEGORIES.items())]
-            self.main_category_combo['values'] = category_values
-            # Auto-select first category (Games)
-            if category_values:
-                self.main_category_var.set(category_values[0])
-            # Load Suruga-ya shops
-            self._populate_surugaya_shops()
-            # Set results per page to 50 (Suruga-ya fixed)
-            self.results_per_page_var.set('50')
-            # Trigger category selection to populate detailed categories
-            self._on_main_category_selected()
-
-            # Show Suruga-ya specific fields
-            self.exclude_word_label.grid()
-            self.exclude_word_entry.grid()
-            self.condition_label.grid()
-            self.condition_combo.grid()
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._on_store_changed(event)
 
     def _populate_surugaya_categories(self, main_code=None):
         """Populate detail categories listbox with Suruga-ya categories based on main category."""
-        from store_codes.surugaya_codes import SURUGAYA_DETAILED_CATEGORIES
-        self.detail_listbox.delete(0, tk.END)
-        self.detail_code_map = []
-
-        if not main_code:
-            # No main category selected - show nothing or all
-            return
-
-        # Get subcategories for selected main category
-        subcategories = SURUGAYA_DETAILED_CATEGORIES.get(main_code, {})
-
-        for code, name in sorted(subcategories.items()):
-            label = f"{code} - {name}"
-            self.detail_listbox.insert(tk.END, label)
-            self.detail_code_map.append(code)
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._populate_surugaya_categories(main_code)
 
     def _populate_surugaya_shops(self):
         """Populate shop listbox with Suruga-ya shops."""
-        from store_codes.surugaya_codes import SURUGAYA_SHOPS
-        self.shop_listbox.delete(0, tk.END)
-        self.shop_code_map = []
-
-        # Add "All Stores" option first
-        self.shop_listbox.insert(tk.END, "All Stores")
-        self.shop_code_map.append("all")
-
-        # Add all individual stores
-        for code, name in sorted(SURUGAYA_SHOPS.items()):
-            label = f"{name} ({code})"
-            self.shop_listbox.insert(tk.END, label)
-            self.shop_code_map.append(code)
-
-        # Default selection: All Stores
-        self.shop_listbox.selection_set(0)
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._populate_surugaya_shops()
 
     def _on_main_category_selected(self, event=None):
-        # Don't auto-select during config loading - let _select_categories handle it
-        if getattr(self, '_loading_config', False):
-            return
-
-        code = utils.extract_code(self.main_category_var.get())
-
-        # Check which store is selected
-        store = self.current_store.get()
-
-        if store == "Suruga-ya":
-            # Use Suruga-ya hierarchical categories
-            self._populate_surugaya_categories(code)
-        else:
-            # Use Mandarake categories
-            self._populate_detail_categories(code)
-
-        # Auto-select the first detail category (the main category itself)
-        if self.detail_listbox.size() > 0:
-            self.detail_listbox.selection_clear(0, tk.END)
-            self.detail_listbox.selection_set(0)
-
-        self._update_preview()
+        """Handle main category selection."""
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._on_main_category_selected(event)
 
     def _extract_code(self, label: str | None):
         if not label:

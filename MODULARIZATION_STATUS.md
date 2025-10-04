@@ -76,8 +76,9 @@
 - **After Phase 2a (Mandarake UI)**: 4295 lines (-1115 lines total, -20.6%)
 - **After Phase 2b (Mandarake Methods)**: 4115 lines (-1295 lines total, -23.9%)
 - **After Phase 3 (Utility Delegation)**: 3945 lines (-1465 lines total, -27.1%)
+- **After Phase 3.5 (Suruga-ya Fix)**: 3827 lines (-1583 lines total, -29.3%)
 - **Target**: < 2000 lines
-- **Progress**: Phases 1, 2 & 3 Complete ✅
+- **Progress**: Phases 1, 2, 3 & 3.5 Complete ✅
 
 ### Breakdown by Section
 
@@ -254,16 +255,40 @@ For immediate impact with minimal effort:
 - Phase 5: Extract Advanced tab (~165 lines)
 - Phase 6: Extract Config Tree Manager (~370 lines)
 - Additional phases: Results manager, worker coordination, final cleanup
-- Target: <2000 lines (currently at 3945, need 1945 more lines removed)
+- Target: <2000 lines (currently at 3827, need 1827 more lines removed)
+
+## ✅ Phase 3.5 Complete (2025-10-04) - Suruga-ya Fix
+
+**Results:**
+- Fixed Suruga-ya store switching in Stores tab
+- Removed 118 additional lines (3945 → 3827)
+- Total reduction: 1583 lines (29.3% from original 5410 lines)
+
+**What was fixed:**
+- Delegated 5 more store-related methods to MandarakeTab:
+  - `_on_store_changed()` - ~44 lines → delegation
+  - `_populate_surugaya_categories()` - ~17 lines → delegation
+  - `_populate_surugaya_shops()` - ~17 lines → delegation
+  - `_on_main_category_selected()` - ~23 lines → delegation
+  - `_populate_detail_categories()` - ~17 lines → delegation
+  - `_populate_shop_list()` - ~17 lines → delegation
+  - `_on_shop_selected()` - ~9 lines → delegation
+
+- Fixed import bug in MandarakeTab: `SURUGAYA_STORES` → `SURUGAYA_SHOPS`
+
+**Impact:**
+- Suruga-ya store now works correctly
+- Removed duplicate implementations
+- All store switching logic now centralized in MandarakeTab
 
 ---
 
 ## 📋 Phase 4+ Strategic Plan
 
 ### Current Position
-- **3945 lines** (was 5410, removed 1465)
+- **3827 lines** (was 5410, removed 1583)
 - **Target**: <2000 lines
-- **Remaining**: Need to remove **1945 more lines (49.3%)**
+- **Remaining**: Need to remove **1827 more lines (47.7%)**
 
 ### Identified Extraction Opportunities
 

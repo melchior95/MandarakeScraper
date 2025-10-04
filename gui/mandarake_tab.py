@@ -522,7 +522,7 @@ class MandarakeTab(ttk.Frame):
 
     def _populate_surugaya_shops(self):
         """Populate Suruga-ya shops."""
-        from store_codes.surugaya_codes import SURUGAYA_STORES
+        from store_codes.surugaya_codes import SURUGAYA_SHOPS
 
         self.main.shop_listbox.delete(0, tk.END)
         self.main.shop_code_map = []
@@ -532,7 +532,7 @@ class MandarakeTab(ttk.Frame):
         self.main.shop_code_map.append("all")
 
         # Add all individual stores
-        for code, name in sorted(SURUGAYA_STORES.items()):
+        for code, name in sorted(SURUGAYA_SHOPS.items()):
             label = f"{name} ({code})"
             self.main.shop_listbox.insert(tk.END, label)
             self.main.shop_code_map.append(code)
