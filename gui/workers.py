@@ -1014,7 +1014,8 @@ def load_csv_thumbnails_worker(filtered_items: List[Dict], csv_new_items: set,
 
     # Calculate thumbnail size with padding (leave some margin)
     # Use square size to prevent horizontal images from overlapping text
-    thumb_size = max(20, thumb_width - 10)
+    # Increased padding to prevent overlap (14px total = 7px each side)
+    thumb_size = max(20, thumb_width - 14)
 
     # Track if we downloaded any new images
     downloaded_any = False
@@ -1035,20 +1036,27 @@ def load_csv_thumbnails_worker(filtered_items: List[Dict], csv_new_items: set,
         # Try local image first (fast)
         if local_image_path and Path(local_image_path).exists():
             try:
+                # Check if this is a new item (needs border)
+                item_id = str(i)
+                is_new = item_id in csv_new_items
+                border_width = 3 if is_new else 0
+
+                # Account for border in final size
+                inner_size = thumb_size - (border_width * 2)
+
                 pil_img = Image.open(local_image_path)
-                pil_img.thumbnail((thumb_size, thumb_size), Image.Resampling.LANCZOS)
+                pil_img.thumbnail((inner_size, inner_size), Image.Resampling.LANCZOS)
 
                 # Center image on square background to prevent horizontal images from overlapping
-                square_img = Image.new('RGB', (thumb_size, thumb_size), 'white')
-                offset_x = (thumb_size - pil_img.width) // 2
-                offset_y = (thumb_size - pil_img.height) // 2
+                square_img = Image.new('RGB', (inner_size, inner_size), 'white')
+                offset_x = (inner_size - pil_img.width) // 2
+                offset_y = (inner_size - pil_img.height) // 2
                 square_img.paste(pil_img, (offset_x, offset_y))
                 pil_img = square_img
 
-                # Add light blue border if item is NEW
-                item_id = str(i)
-                if item_id in csv_new_items:
-                    pil_img = ImageOps.expand(pil_img, border=3, fill='#87CEEB')
+                # Add light blue border if item is NEW (now fits perfectly within thumb_size)
+                if is_new:
+                    pil_img = ImageOps.expand(pil_img, border=border_width, fill='#87CEEB')
 
                 local_images[i] = pil_img
             except Exception as e:
@@ -1095,21 +1103,28 @@ def load_csv_thumbnails_worker(filtered_items: List[Dict], csv_new_items: set,
                     with open(img_path, 'wb') as img_file:
                         img_file.write(response.content)
 
+                    # Check if this is a new item (needs border)
+                    item_id = str(i)
+                    is_new = item_id in csv_new_items
+                    border_width = 3 if is_new else 0
+
+                    # Account for border in final size
+                    inner_size = thumb_size - (border_width * 2)
+
                     # Load image for display
                     pil_img = Image.open(BytesIO(response.content))
-                    pil_img.thumbnail((thumb_size, thumb_size), Image.Resampling.LANCZOS)
+                    pil_img.thumbnail((inner_size, inner_size), Image.Resampling.LANCZOS)
 
                     # Center image on square background to prevent horizontal images from overlapping
-                    square_img = Image.new('RGB', (thumb_size, thumb_size), 'white')
-                    offset_x = (thumb_size - pil_img.width) // 2
-                    offset_y = (thumb_size - pil_img.height) // 2
+                    square_img = Image.new('RGB', (inner_size, inner_size), 'white')
+                    offset_x = (inner_size - pil_img.width) // 2
+                    offset_y = (inner_size - pil_img.height) // 2
                     square_img.paste(pil_img, (offset_x, offset_y))
                     pil_img = square_img
 
-                    # Add light blue border if item is NEW
-                    item_id = str(i)
-                    if item_id in csv_new_items:
-                        pil_img = ImageOps.expand(pil_img, border=3, fill='#87CEEB')
+                    # Add light blue border if item is NEW (now fits perfectly within thumb_size)
+                    if is_new:
+                        pil_img = ImageOps.expand(pil_img, border=border_width, fill='#87CEEB')
 
                     # Update the row data
                     row['local_image'] = str(img_path)
