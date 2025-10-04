@@ -37,6 +37,7 @@ from gui import utils
 from gui import workers
 from gui.alert_tab import AlertTab
 from gui.mandarake_tab import MandarakeTab
+from gui.ebay_tab import EbayTab
 from gui.schedule_executor import ScheduleExecutor
 from gui.schedule_frame import ScheduleFrame
 from gui.configuration_manager import ConfigurationManager
@@ -87,8 +88,6 @@ class ScraperGUI(tk.Tk):
         self.current_scraper = None  # Track current scraper instance for cancellation
         self.cancel_requested = False  # Flag to signal cancellation
         self.detail_code_map: list[str] = []
-        self.browserless_images: dict[str, ImageTk.PhotoImage] = {}  # Store eBay search thumbnails
-        self.csv_images: dict[str, ImageTk.PhotoImage] = {}  # Store CSV comparison thumbnails
         self.last_saved_path: Path | None = None
         self.gui_settings: dict[str, bool] = {}
         self._settings_loaded = False
@@ -105,8 +104,6 @@ class ScraperGUI(tk.Tk):
         # Initialize modular components
         self.config_manager = ConfigurationManager(self.settings)
         self.tree_manager = None  # Will be initialized after tree widget is created
-        self.ebay_search_manager = None  # Will be initialized after eBay tree widget is created
-        self.csv_comparison_manager = None  # Will be initialized after CSV tree widget is created
 
         # Create menu bar
         self._create_menu_bar()
@@ -411,274 +408,10 @@ With RANSAC enabled:
             self.mandarake_tab = MandarakeTab(basic_frame, self)
             self.mandarake_tab.pack(fill=tk.BOTH, expand=True)
 
-        # eBay Search & CSV tab ------------------------------------------
-        ttk.Label(browserless_frame, text="Scrapy eBay Search (Sold Listings):").grid(row=0, column=0, columnspan=5, sticky=tk.W, **pad)
-
-        # Search input
-        ttk.Label(browserless_frame, text="Search query:").grid(row=1, column=0, sticky=tk.W, **pad)
-        self.browserless_query_var = tk.StringVar(value="")
-        browserless_entry = ttk.Entry(browserless_frame, textvariable=self.browserless_query_var, width=32)
-        browserless_entry.grid(row=1, column=1, columnspan=2, sticky=tk.W, **pad)
-
-        # Max results setting (for rate limiting)
-        ttk.Label(browserless_frame, text="Max results:").grid(row=1, column=3, sticky=tk.W, **pad)
-        self.browserless_max_results = tk.StringVar(value="10")
-        max_results_combo = ttk.Combobox(browserless_frame, textvariable=self.browserless_max_results,
-                                       values=["5", "10", "20", "30", "45", "60"], width=5, state="readonly")
-        max_results_combo.grid(row=1, column=4, sticky=tk.W, **pad)
-        max_results_combo.bind("<<ComboboxSelected>>", lambda e: None)  # Settings saved on close
-
-        # Action buttons
-        ttk.Button(browserless_frame, text="Search", command=self.run_scrapy_text_search).grid(row=2, column=0, sticky=tk.W, **pad)
-        ttk.Button(browserless_frame, text="Clear Results", command=self.clear_browserless_results).grid(row=2, column=1, sticky=tk.W, **pad)
-
-        # Alert Thresholds frame (row 3) - left side in labeled frame
-        alert_threshold_frame = ttk.LabelFrame(browserless_frame, text="Alert Threshold", padding=5)
-        alert_threshold_frame.grid(row=3, column=0, columnspan=3, sticky=tk.W, **pad)
-
-        # Toggle for alert thresholds
-        self.alert_threshold_active = tk.BooleanVar(value=True)
-        ttk.Checkbutton(alert_threshold_frame, text="Active", variable=self.alert_threshold_active).pack(side=tk.LEFT, padx=5)
-
-        # Load saved alert send settings
-        alert_settings = self.settings.get_alert_settings()
-        ebay_send_sim = alert_settings.get('ebay_send_min_similarity', 70.0)
-        ebay_send_profit = alert_settings.get('ebay_send_min_profit', 20.0)
-
-        # Min Similarity
-        ttk.Label(alert_threshold_frame, text="Min Similarity %:").pack(side=tk.LEFT, padx=5)
-        self.alert_min_similarity = tk.DoubleVar(value=ebay_send_sim)
-        ttk.Spinbox(alert_threshold_frame, from_=0, to=100, textvariable=self.alert_min_similarity, width=8).pack(side=tk.LEFT, padx=5)
-        self.alert_min_similarity.trace_add("write", lambda *args: self._save_ebay_alert_settings())
-
-        # Min Profit
-        ttk.Label(alert_threshold_frame, text="Min Profit %:").pack(side=tk.LEFT, padx=5)
-        self.alert_min_profit = tk.DoubleVar(value=ebay_send_profit)
-        ttk.Spinbox(alert_threshold_frame, from_=-100, to=1000, textvariable=self.alert_min_profit, width=8).pack(side=tk.LEFT, padx=5)
-        self.alert_min_profit.trace_add("write", lambda *args: self._save_ebay_alert_settings())
-
-        # Progress bar (row 4)
-        self.browserless_progress = ttk.Progressbar(browserless_frame, mode='indeterminate')
-        self.browserless_progress.grid(row=4, column=0, columnspan=6, sticky=tk.EW, **pad)
-
-        # Create PanedWindow to split eBay results and CSV comparison sections
-        self.ebay_paned = tk.PanedWindow(browserless_frame, orient=tk.VERTICAL, sashwidth=5, sashrelief=tk.RAISED)
-        self.ebay_paned.grid(row=5, column=0, columnspan=6, sticky=tk.NSEW, **pad)
-
-        # Configure grid weights for proper resizing
-        browserless_frame.rowconfigure(5, weight=1)
-        browserless_frame.columnconfigure(2, weight=1)
-
-        # Results section (top pane)
-        browserless_results_frame = ttk.LabelFrame(self.ebay_paned, text="eBay Search Results")
-        browserless_results_frame.rowconfigure(0, weight=1)
-        browserless_results_frame.columnconfigure(0, weight=1)
-
-        # Results treeview with thumbnail support
-        browserless_columns = ('title', 'price', 'shipping', 'mandarake_price', 'profit_margin', 'sold_date', 'similarity', 'url', 'mandarake_url')
-
-        # Create custom style for eBay results treeview with thumbnails
-        style = ttk.Style()
-        style.configure('Browserless.Treeview', rowheight=70)  # Match output tree height
-
-        self.browserless_tree = ttk.Treeview(browserless_results_frame, columns=browserless_columns, show='tree headings', height=8, style='Browserless.Treeview')
-
-        self.browserless_tree.heading('#0', text='Thumb')
-        self.browserless_tree.column('#0', width=130, stretch=False)  # Wide enough for side-by-side thumbnails
-
-        browserless_headings = {
-            'title': 'Title',
-            'price': 'eBay Price',
-            'shipping': 'Shipping',
-            'mandarake_price': 'Mandarake ¥',
-            'profit_margin': 'Profit %',
-            'sold_date': 'Sold Date',
-            'similarity': 'Similarity %',
-            'url': 'eBay URL',
-            'mandarake_url': 'Mandarake URL'
-        }
-
-        browserless_widths = {
-            'title': 280,
-            'price': 80,
-            'shipping': 70,
-            'mandarake_price': 90,
-            'profit_margin': 80,
-            'sold_date': 100,
-            'similarity': 90,
-            'url': 180,
-            'mandarake_url': 180
-        }
-
-        for col, heading in browserless_headings.items():
-            self.browserless_tree.heading(col, text=heading)
-            width = browserless_widths.get(col, 100)
-            self.browserless_tree.column(col, width=width, stretch=False)
-
-        self.browserless_tree.grid(row=0, column=0, sticky=tk.NSEW)
-
-        # Scrollbars for results
-        browserless_v_scroll = ttk.Scrollbar(browserless_results_frame, orient=tk.VERTICAL, command=self.browserless_tree.yview)
-        browserless_v_scroll.grid(row=0, column=1, sticky=tk.NS)
-        self.browserless_tree.configure(yscrollcommand=browserless_v_scroll.set)
-
-        browserless_h_scroll = ttk.Scrollbar(browserless_results_frame, orient=tk.HORIZONTAL, command=self.browserless_tree.xview)
-        browserless_h_scroll.grid(row=1, column=0, sticky=tk.EW)
-        self.browserless_tree.configure(xscrollcommand=browserless_h_scroll.set)
-
-        # Status area for browserless search
-        self.browserless_status = tk.StringVar(value="Ready for eBay text search")
-        browserless_status_label = ttk.Label(browserless_results_frame, textvariable=self.browserless_status, relief=tk.SUNKEN, anchor='w')
-        browserless_status_label.grid(row=3, column=0, columnspan=2, sticky=tk.EW, pady=(5, 0))
-
-        # Initialize eBay search manager after eBay tree widget is created
-        self.ebay_search_manager = EbaySearchManager(
-            self.browserless_tree, 
-            self.browserless_progress, 
-            self.browserless_status, 
-            self
-        )
-        
-        # Bind double-click to open URL
-        self.browserless_tree.bind('<Double-1>', self.open_browserless_url)
-        # Bind right-click for context menu
-        self.browserless_tree.bind('<Button-3>', self._show_browserless_context_menu)
-        # Prevent space from affecting tree selection when it has focus
-        # Space key handled globally via bind_class
-        # Allow deselect by clicking empty area
-        self.browserless_tree.bind("<Button-1>", lambda e: self._deselect_if_empty(e, self.browserless_tree))
-
-        # Enable column drag-to-reorder for browserless tree
-        self._setup_column_drag(self.browserless_tree)
-
-        # Add the results frame to the paned window
-        self.ebay_paned.add(browserless_results_frame, minsize=200)
-
-        # CSV Batch Comparison section (bottom pane) --------------------------------
-        csv_compare_frame = ttk.LabelFrame(self.ebay_paned, text="CSV Batch Comparison")
-        csv_compare_frame.rowconfigure(1, weight=1)
-        csv_compare_frame.columnconfigure(3, weight=1)  # Weight on filename column instead
-
-        # CSV controls - all left-justified
-        ttk.Checkbutton(csv_compare_frame, text="Newly listed", variable=self.csv_newly_listed_only, command=self._on_csv_filter_changed).grid(row=0, column=0, sticky=tk.W, **pad)
-        ttk.Checkbutton(csv_compare_frame, text="In-stock only", variable=self.csv_in_stock_only, command=self._on_csv_filter_changed).grid(row=0, column=1, sticky=tk.W, **pad)
-        ttk.Button(csv_compare_frame, text="Load CSV...", command=self.load_csv_for_comparison).grid(row=0, column=2, sticky=tk.W, **pad)
-        self.csv_compare_label = ttk.Label(csv_compare_frame, text="No file loaded", foreground="gray")
-        self.csv_compare_label.grid(row=0, column=3, columnspan=2, sticky=tk.W, **pad)
-
-        # CSV items treeview
-        csv_items_frame = ttk.Frame(csv_compare_frame)
-        csv_items_frame.grid(row=1, column=0, columnspan=7, sticky=tk.NSEW, **pad)
-
-        # Create custom style for CSV treeview with thumbnails
-        style.configure('CSV.Treeview', rowheight=70)  # Match other trees
-
-        csv_columns = ('title', 'price', 'shop', 'stock', 'category', 'compared', 'url')
-        self.csv_items_tree = ttk.Treeview(csv_items_frame, columns=csv_columns, show='tree headings', height=6, style='CSV.Treeview')
-
-        self.csv_items_tree.heading('#0', text='Thumb')
-        self.csv_items_tree.column('#0', width=70, stretch=False)
-
-        csv_headings = {
-            'title': 'Title',
-            'price': 'Store Price',
-            'shop': 'Shop',
-            'stock': 'Stock',
-            'category': 'Category',
-            'compared': 'eBay✓',
-            'url': 'URL'
-        }
-
-        for col, heading in csv_headings.items():
-            self.csv_items_tree.heading(col, text=heading)
-
-        self.csv_items_tree.column('title', width=280)
-        self.csv_items_tree.column('price', width=100)
-        self.csv_items_tree.column('shop', width=80)
-        self.csv_items_tree.column('stock', width=60)
-        self.csv_items_tree.column('category', width=120)
-        self.csv_items_tree.column('compared', width=50)
-        self.csv_items_tree.column('url', width=300)
-
-        self.csv_items_tree.grid(row=0, column=0, sticky=tk.NSEW)
-        csv_items_frame.rowconfigure(0, weight=1)
-        csv_items_frame.columnconfigure(0, weight=1)
-
-        # Scrollbars
-        csv_v_scroll = ttk.Scrollbar(csv_items_frame, orient=tk.VERTICAL, command=self.csv_items_tree.yview)
-        csv_v_scroll.grid(row=0, column=1, sticky=tk.NS)
-        self.csv_items_tree.configure(yscrollcommand=csv_v_scroll.set)
-
-        csv_h_scroll = ttk.Scrollbar(csv_items_frame, orient=tk.HORIZONTAL, command=self.csv_items_tree.xview)
-        csv_h_scroll.grid(row=1, column=0, sticky=tk.EW)
-        self.csv_items_tree.configure(xscrollcommand=csv_h_scroll.set)
-
-        # Bind selection to auto-fill search query
-        self.csv_items_tree.bind('<<TreeviewSelect>>', self.on_csv_item_selected)
-
-        # Bind column resize to reload thumbnails with new size
-        self.csv_items_tree.bind('<ButtonRelease-1>', self._on_csv_column_resize)
-
-        # Enable column drag-to-reorder for CSV items tree
-        self._setup_column_drag(self.csv_items_tree)
-
-        # Add right-click context menu for CSV tree
-        self.csv_tree_menu = tk.Menu(self.csv_items_tree, tearoff=0)
-        self.csv_tree_menu.add_command(label="Add Full Title to Search", command=self._add_full_title_to_search)
-        self.csv_tree_menu.add_command(label="Add Secondary Keyword", command=self._add_secondary_keyword_from_csv)
-        self.csv_tree_menu.add_separator()
-        self.csv_tree_menu.add_command(label="Delete Selected Items", command=self._delete_csv_items)
-        self.csv_tree_menu.add_separator()
-        self.csv_tree_menu.add_command(label="Download Missing Images", command=self._download_missing_csv_images)
-        self.csv_tree_menu.add_separator()
-        self.csv_tree_menu.add_command(label="Search by Image on eBay (API)", command=self._search_csv_by_image_api)
-        self.csv_tree_menu.add_command(label="Search by Image on eBay (Web)", command=self._search_csv_by_image_web)
-        self.csv_items_tree.bind("<Button-3>", self._show_csv_tree_menu)
-        self.csv_items_tree.bind('<Double-1>', self._on_csv_double_click)
-        # Prevent space from affecting tree selection when it has focus
-        # Space key handled globally via bind_class
-        # Allow deselect by clicking empty area
-        self.csv_items_tree.bind("<Button-1>", lambda e: self._deselect_if_empty(e, self.csv_items_tree))
-
-        # Comparison action buttons
-        button_frame = ttk.Frame(csv_compare_frame)
-        button_frame.grid(row=2, column=0, columnspan=7, sticky=tk.W, **pad)
-
-        # Add 2nd keyword toggle before compare buttons
-        ttk.Checkbutton(button_frame, text="2nd keyword", variable=self.csv_add_secondary_keyword).grid(row=0, column=0, sticky=tk.W, padx=(0, 15))
-
-        # RANSAC toggle before compare buttons
-        self.ransac_var = tk.BooleanVar(value=False)
-        ransac_check = ttk.Checkbutton(button_frame, text="RANSAC", variable=self.ransac_var)
-        ransac_check.grid(row=0, column=1, sticky=tk.W, padx=(0, 5))
-
-        # Info label for RANSAC
-        ransac_info = ttk.Label(button_frame, text="ℹ️", foreground="blue", cursor="hand2")
-        ransac_info.grid(row=0, column=2, sticky=tk.W, padx=(0, 15))
-        ransac_info.bind("<Button-1>", lambda e: self._show_ransac_info())
-
-        ttk.Button(button_frame, text="Compare Selected", command=self.compare_selected_csv_item).grid(row=0, column=3, sticky=tk.W, **pad)
-        ttk.Button(button_frame, text="Compare All", command=self.compare_all_csv_items).grid(row=0, column=4, sticky=tk.W, **pad)
-
-        # Second row for smart comparison controls
-        ttk.Button(button_frame, text="Compare New Only", command=self.compare_new_csv_items).grid(row=1, column=3, sticky=tk.W, **pad)
-        ttk.Button(button_frame, text="Clear Results", command=self.clear_comparison_results).grid(row=1, column=4, sticky=tk.W, **pad)
-
-        self.csv_compare_progress = ttk.Progressbar(button_frame, mode='indeterminate', length=200)
-        self.csv_compare_progress.grid(row=0, column=5, rowspan=2, sticky=tk.W, padx=(10, 5))
-
-        # Add the CSV comparison frame to the paned window
-        self.ebay_paned.add(csv_compare_frame, minsize=200)
-
-        # Initialize CSV comparison manager
-        self.csv_comparison_manager = CSVComparisonManager(self)
-
-        # Initialize variables
-        self.browserless_image_path = None
-        self.browserless_results_data = []
-        self.all_comparison_results = []  # Store unfiltered results for filtering
-        self.csv_compare_data = []
-        self.csv_compare_path = None
+        # eBay Search & CSV tab - Create using EbayTab module
+        if marketplace_toggles.get('ebay', True):
+            self.ebay_tab = EbayTab(browserless_frame, self.settings, self.alert_tab, self)
+            self.ebay_tab.pack(fill=tk.BOTH, expand=True)
 
         # Advanced tab --------------------------------------------------
         current_row = 0
@@ -1012,7 +745,7 @@ With RANSAC enabled:
 
             if ebay_paned_pos is not None:
                 # Set the sash position
-                self.ebay_paned.sash_place(0, 0, ebay_paned_pos)
+                self.ebay_tab.ebay_paned.sash_place(0, 0, ebay_paned_pos)
                 print(f"[GUI] Restored eBay paned window position: {ebay_paned_pos}")
         except Exception as e:
             print(f"[GUI] Could not restore paned position: {e}")
@@ -1032,7 +765,7 @@ With RANSAC enabled:
             if hasattr(self, 'ebay_paned'):
                 try:
                     # Get sash position (distance from top)
-                    sash_coords = self.ebay_paned.sash_coord(0)  # First sash
+                    sash_coords = self.ebay_tab.ebay_paned.sash_coord(0)  # First sash
                     if sash_coords:
                         ebay_paned_pos = sash_coords[1]  # Y coordinate
                 except:
@@ -1072,8 +805,8 @@ With RANSAC enabled:
         """Save eBay alert threshold settings when they change."""
         try:
             self.settings.save_alert_settings(
-                ebay_send_min_similarity=self.alert_min_similarity.get(),
-                ebay_send_min_profit=self.alert_min_profit.get()
+                ebay_send_min_similarity=self.ebay_tab.alert_min_similarity.get(),
+                ebay_send_min_profit=self.ebay_tab.alert_min_profit.get()
             )
         except:
             pass  # Ignore errors during saving
@@ -1295,9 +1028,9 @@ With RANSAC enabled:
             return
 
         # Check if a CSV is loaded - if so, use its corresponding config
-        if hasattr(self, 'csv_compare_path') and self.csv_compare_path:
+        if hasattr(self, 'csv_compare_path') and self.ebay_tab.csv_compare_path:
             # Try to find the matching config by CSV path
-            csv_filename = self.csv_compare_path.stem  # Get filename without extension
+            csv_filename = self.ebay_tab.csv_compare_path.stem  # Get filename without extension
             potential_config = Path('configs') / f"{csv_filename}.json"
 
             if potential_config.exists():
@@ -1830,9 +1563,9 @@ With RANSAC enabled:
                 elif message_type == "browserless_results":
                     self._display_browserless_results(payload)
                 elif message_type == "browserless_status":
-                    self.browserless_status.set(payload)
+                    self.ebay_tab.browserless_status.set(payload)
                 elif message_type == "browserless_progress_stop":
-                    self.browserless_progress.stop()
+                    self.ebay_tab.browserless_progress.stop()
         except queue.Empty:
             pass
         self.after(500, self._poll_queue)
@@ -1855,15 +1588,15 @@ With RANSAC enabled:
 
             # Load eBay search settings if they exist
             if hasattr(self, 'browserless_max_results'):
-                self.browserless_max_results.set(settings.get('ebay_max_results', "10"))
+                self.ebay_tab.browserless_max_results.set(settings.get('ebay_max_results', "10"))
             if hasattr(self, 'browserless_max_comparisons'):
                 self.browserless_max_comparisons.set(settings.get('ebay_max_comparisons', "MAX"))
 
             # Load CSV filter settings
             if hasattr(self, 'csv_in_stock_only'):
-                self.csv_in_stock_only.set(settings.get('csv_in_stock_only', True))
+                self.ebay_tab.csv_in_stock_only.set(settings.get('csv_in_stock_only', True))
             if hasattr(self, 'csv_add_secondary_keyword'):
-                self.csv_add_secondary_keyword.set(settings.get('csv_add_secondary_keyword', False))
+                self.ebay_tab.csv_add_secondary_keyword.set(settings.get('csv_add_secondary_keyword', False))
         finally:
             self._settings_loaded = True
 
@@ -1905,10 +1638,10 @@ With RANSAC enabled:
 
             data = {
                 'mimic': bool(self.mimic_var.get()),
-                'ebay_max_results': self.browserless_max_results.get() if hasattr(self, 'browserless_max_results') else "10",
+                'ebay_max_results': self.ebay_tab.browserless_max_results.get() if hasattr(self, 'browserless_max_results') else "10",
                 'ebay_max_comparisons': self.browserless_max_comparisons.get() if hasattr(self, 'browserless_max_comparisons') else "MAX",
-                'csv_in_stock_only': bool(self.csv_in_stock_only.get()) if hasattr(self, 'csv_in_stock_only') else True,
-                'csv_add_secondary_keyword': bool(self.csv_add_secondary_keyword.get()) if hasattr(self, 'csv_add_secondary_keyword') else False,
+                'csv_in_stock_only': bool(self.ebay_tab.csv_in_stock_only.get()) if hasattr(self, 'csv_in_stock_only') else True,
+                'csv_add_secondary_keyword': bool(self.ebay_tab.csv_add_secondary_keyword.get()) if hasattr(self, 'csv_add_secondary_keyword') else False,
                 'listbox_paned_ratio': listbox_ratio
             }
             with SETTINGS_PATH.open('w', encoding='utf-8') as f:
@@ -2248,48 +1981,48 @@ With RANSAC enabled:
     # CSV tree methods
     def _show_csv_tree_menu(self, event):
         """Show the context menu on the CSV tree"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._show_csv_tree_menu(event)
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._show_csv_tree_menu(event)
 
     def _delete_csv_items(self):
         """Delete selected CSV items (supports multi-select)"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._delete_csv_items()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._delete_csv_items()
 
     def _on_csv_double_click(self, event=None):
         """Open product link on double click"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.on_csv_item_double_click(event)
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager.on_csv_item_double_click(event)
 
     def _search_csv_by_image_api(self):
         """Search selected CSV item by image using eBay API"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._search_csv_by_image_api()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._search_csv_by_image_api()
 
     def _search_csv_by_image_web(self):
         """Search selected CSV item by image using web method"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._search_csv_by_image_web()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._search_csv_by_image_web()
 
     def _run_csv_web_image_search(self, image_path):
         """Run CSV web image search (helper for threaded execution)"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._run_csv_web_image_search(image_path)
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._run_csv_web_image_search(image_path)
 
     def _download_missing_csv_images(self):
         """Download missing images from web and save them locally"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._download_missing_csv_images()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._download_missing_csv_images()
 
     def _download_missing_images_worker(self):
         """Background worker to download missing images"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._download_missing_images_worker()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._download_missing_images_worker()
 
     def _save_updated_csv(self):
         """Save the updated CSV with new local_image paths"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._save_updated_csv()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._save_updated_csv()
 
     def _save_comparison_results_to_csv(self, comparison_results):
         """Save eBay comparison results back to the CSV file
@@ -2297,7 +2030,7 @@ With RANSAC enabled:
         Args:
             comparison_results: List of dicts with comparison data including 'mandarake_item', 'similarity', 'best_match', etc.
         """
-        if not self.csv_compare_path or not self.csv_compare_data:
+        if not self.ebay_tab.csv_compare_path or not self.ebay_tab.csv_compare_data:
             print("[COMPARISON SAVE] No CSV loaded, skipping save")
             return
 
@@ -2322,7 +2055,7 @@ With RANSAC enabled:
 
             # Update csv_compare_data with comparison results
             updated_count = 0
-            for row in self.csv_compare_data:
+            for row in self.ebay_tab.csv_compare_data:
                 url = row.get('url', row.get('product_url', ''))
                 if url in url_to_results:
                     row.update(url_to_results[url])
@@ -2697,7 +2430,7 @@ With RANSAC enabled:
             success = self._load_csv_worker(csv_path, autofill_from_config=config)
 
             if success:
-                self.status_var.set(f"CSV loaded successfully: {len(self.csv_compare_data)} items")
+                self.status_var.set(f"CSV loaded successfully: {len(self.ebay_tab.csv_compare_data)} items")
             else:
                 self.status_var.set(f"Error loading CSV: {csv_path.name}")
 
@@ -2707,13 +2440,13 @@ With RANSAC enabled:
 
     def _autofill_search_query_from_config(self, config):
         """Auto-fill eBay search query from config keyword and optionally add secondary keyword"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._autofill_search_query_from_config(config)
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._autofill_search_query_from_config(config)
 
     def _autofill_search_query_from_csv(self):
         """Auto-fill eBay search query from first CSV item's keyword and optionally add secondary keyword"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._autofill_search_query_from_csv()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._autofill_search_query_from_csv()
 
     def _auto_save_config(self, *args):
         """Auto-save the current config when fields change (with 50ms debounce)"""
@@ -2984,9 +2717,9 @@ With RANSAC enabled:
 
             self.hide_sold_var.set(config.get('hide_sold_out', False))
             if hasattr(self, 'csv_in_stock_only'):
-                self.csv_in_stock_only.set(config.get('csv_show_in_stock_only', False))
+                self.ebay_tab.csv_in_stock_only.set(config.get('csv_show_in_stock_only', False))
             if hasattr(self, 'csv_add_secondary_keyword'):
-                self.csv_add_secondary_keyword.set(config.get('csv_add_secondary_keyword', False))
+                self.ebay_tab.csv_add_secondary_keyword.set(config.get('csv_add_secondary_keyword', False))
             self.language_var.set(config.get('language', 'en'))
             self.fast_var.set(config.get('fast', False))
             self.resume_var.set(config.get('resume', True))
@@ -3042,47 +2775,47 @@ With RANSAC enabled:
         )
 
         if file_path:
-            self.browserless_image_path = Path(file_path)
-            self.browserless_image_label.config(text=f"Selected: {self.browserless_image_path.name}", foreground="black")
-            print(f"[BROWSERLESS SEARCH] Loaded reference image: {self.browserless_image_path}")
+            self.ebay_tab.browserless_image_path = Path(file_path)
+            self.browserless_image_label.config(text=f"Selected: {self.ebay_tab.browserless_image_path.name}", foreground="black")
+            print(f"[BROWSERLESS SEARCH] Loaded reference image: {self.ebay_tab.browserless_image_path}")
 
     def run_scrapy_text_search(self):
         """Run Scrapy eBay search (text only, no image comparison)"""
-        query = self.browserless_query_var.get().strip()
-        max_results = int(self.browserless_max_results.get())
+        query = self.ebay_tab.browserless_query_var.get().strip()
+        max_results = int(self.ebay_tab.browserless_max_results.get())
         search_method = self.ebay_search_method.get()  # "scrapy" or "api"
         
-        if self.ebay_search_manager:
-            self.ebay_search_manager.run_text_search(query, max_results, search_method)
+        if self.ebay_tab.ebay_search_manager:
+            self.ebay_tab.ebay_search_manager.run_text_search(query, max_results, search_method)
 
     def run_scrapy_search_with_compare(self):
         """Run Scrapy eBay search WITH image comparison"""
-        query = self.browserless_query_var.get().strip()
-        max_results = int(self.browserless_max_results.get())
+        query = self.ebay_tab.browserless_query_var.get().strip()
+        max_results = int(self.ebay_tab.browserless_max_results.get())
         max_comparisons_str = self.browserless_max_comparisons.get()
         max_comparisons = None if max_comparisons_str == "MAX" else int(max_comparisons_str)
         reference_image_path = getattr(self, 'browserless_image_path', None)
         
-        if self.ebay_search_manager:
-            self.ebay_search_manager.run_search_with_compare(query, max_results, max_comparisons, reference_image_path)
+        if self.ebay_tab.ebay_search_manager:
+            self.ebay_tab.ebay_search_manager.run_search_with_compare(query, max_results, max_comparisons, reference_image_path)
 
     def _run_scrapy_text_search_worker(self):
         """Worker method for eBay text-only search (runs in background thread)"""
-        query = self.browserless_query_var.get().strip()
-        max_results = int(self.browserless_max_results.get())
+        query = self.ebay_tab.browserless_query_var.get().strip()
+        max_results = int(self.ebay_tab.browserless_max_results.get())
         search_method = self.ebay_search_method.get()  # "scrapy" or "api"
 
         def update_callback(message):
-            self.after(0, lambda: self.browserless_status.set(message))
+            self.after(0, lambda: self.ebay_tab.browserless_status.set(message))
 
         def display_callback(results):
             self.after(0, lambda: self._display_browserless_results(results))
-            self.after(0, self.browserless_progress.stop)
+            self.after(0, self.ebay_tab.browserless_progress.stop)
 
         def show_message_callback(title, message):
             # Log to status instead of popup
-            self.after(0, lambda: self.browserless_status.set(message))
-            self.after(0, self.browserless_progress.stop)
+            self.after(0, lambda: self.ebay_tab.browserless_status.set(message))
+            self.after(0, self.ebay_tab.browserless_progress.stop)
 
         workers.run_scrapy_text_search_worker(
             query, max_results,
@@ -3094,29 +2827,29 @@ With RANSAC enabled:
 
     def _run_scrapy_search_with_compare_worker(self):
         """Worker method for Scrapy search WITH image comparison (runs in background thread)"""
-        query = self.browserless_query_var.get().strip()
-        max_results = int(self.browserless_max_results.get())
+        query = self.ebay_tab.browserless_query_var.get().strip()
+        max_results = int(self.ebay_tab.browserless_max_results.get())
         max_comparisons_str = self.browserless_max_comparisons.get()
         max_comparisons = None if max_comparisons_str == "MAX" else int(max_comparisons_str)
 
         def update_callback(message):
-            self.after(0, lambda: self.browserless_status.set(message))
+            self.after(0, lambda: self.ebay_tab.browserless_status.set(message))
 
         def display_callback(results):
             self.after(0, lambda: self._display_browserless_results(results))
-            self.after(0, self.browserless_progress.stop)
+            self.after(0, self.ebay_tab.browserless_progress.stop)
 
         def show_message_callback(title, message):
             # Log to status instead of popup
-            self.after(0, lambda: self.browserless_status.set(message))
-            self.after(0, self.browserless_progress.stop)
+            self.after(0, lambda: self.ebay_tab.browserless_status.set(message))
+            self.after(0, self.ebay_tab.browserless_progress.stop)
 
         def create_debug_folder_callback(query):
             return self._create_debug_folder(query)
 
         workers.run_scrapy_search_with_compare_worker(
             query, max_results, max_comparisons,
-            self.browserless_image_path,
+            self.ebay_tab.browserless_image_path,
             update_callback,
             display_callback,
             show_message_callback,
@@ -3125,28 +2858,28 @@ With RANSAC enabled:
 
     def _run_cached_compare_worker(self):
         """Worker method to compare reference image with CACHED eBay results (State 1)"""
-        query = self.browserless_query_var.get().strip()
+        query = self.ebay_tab.browserless_query_var.get().strip()
         max_comparisons_str = self.browserless_max_comparisons.get()
         max_comparisons = None if max_comparisons_str == "MAX" else int(max_comparisons_str)
 
         def update_callback(message):
-            self.after(0, lambda: self.browserless_status.set(message))
+            self.after(0, lambda: self.ebay_tab.browserless_status.set(message))
 
         def display_callback(results):
             self.after(0, lambda: self._display_browserless_results(results))
-            self.after(0, self.browserless_progress.stop)
+            self.after(0, self.ebay_tab.browserless_progress.stop)
 
         def show_message_callback(title, message):
             self.after(0, lambda: messagebox.showerror(title, message))
-            self.after(0, self.browserless_progress.stop)
+            self.after(0, self.ebay_tab.browserless_progress.stop)
 
         def create_debug_folder_callback(query):
             return self._create_debug_folder(query)
 
         workers.run_cached_compare_worker(
             query, max_comparisons,
-            self.browserless_image_path,
-            self.browserless_results_data,
+            self.ebay_tab.browserless_image_path,
+            self.ebay_tab.browserless_results_data,
             update_callback,
             display_callback,
             show_message_callback,
@@ -3155,8 +2888,8 @@ With RANSAC enabled:
 
     def clear_browserless_results(self):
         """Clear browserless search results using eBay search manager."""
-        if self.ebay_search_manager:
-            self.ebay_search_manager.clear_results()
+        if self.ebay_tab.ebay_search_manager:
+            self.ebay_tab.ebay_search_manager.clear_results()
 
     # CSV Batch Comparison methods
     def _load_csv_worker(self, csv_path: Path, autofill_from_config=None):
@@ -3169,21 +2902,21 @@ With RANSAC enabled:
                                  and set in-stock filter
         """
         try:
-            self.csv_compare_path = csv_path
-            self.csv_compare_label.config(text=f"Loaded: {csv_path.name}", foreground="black")
+            self.ebay_tab.csv_compare_path = csv_path
+            self.ebay_tab.csv_compare_label.config(text=f"Loaded: {csv_path.name}", foreground="black")
             print(f"[CSV WORKER] Loading CSV: {csv_path}")
 
             # Load CSV data
-            self.csv_compare_data = []
+            self.ebay_tab.csv_compare_data = []
             with open(csv_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    self.csv_compare_data.append(row)
+                    self.ebay_tab.csv_compare_data.append(row)
 
             # Set in-stock filter from config if provided
             if autofill_from_config:
                 show_in_stock_only = autofill_from_config.get('csv_show_in_stock_only', False)
-                self.csv_in_stock_only.set(show_in_stock_only)
+                self.ebay_tab.csv_in_stock_only.set(show_in_stock_only)
                 print(f"[CSV WORKER] Set in-stock filter to: {show_in_stock_only}")
 
             # Display with filter applied
@@ -3195,7 +2928,7 @@ With RANSAC enabled:
             else:
                 self._autofill_search_query_from_csv()
 
-            print(f"[CSV WORKER] Loaded {len(self.csv_compare_data)} items")
+            print(f"[CSV WORKER] Loaded {len(self.ebay_tab.csv_compare_data)} items")
             return True
 
         except Exception as e:
@@ -3204,25 +2937,25 @@ With RANSAC enabled:
 
     def load_csv_for_comparison(self):
         """Load CSV file for batch comparison"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.load_csv_for_comparison()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager.load_csv_for_comparison()
         else:
             messagebox.showerror("Error", "CSV comparison manager not initialized")
 
     def filter_csv_items(self):
         """Filter and display CSV items based on in-stock filter - fast load, thumbnails loaded on demand"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.filter_csv_items()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager.filter_csv_items()
 
     def _load_csv_thumbnails_worker(self, filtered_items):
         """Background worker to load CSV thumbnails without blocking UI"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._load_csv_thumbnails_worker(filtered_items)
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._load_csv_thumbnails_worker(filtered_items)
 
     def _on_csv_filter_changed(self):
         """Handle CSV filter changes - filter items (settings saved on close)"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.on_csv_filter_changed()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager.on_csv_filter_changed()
 
     def _on_recent_hours_changed(self, *args):
         """Handle latest additions timeframe change - refresh CSV view if loaded"""
@@ -3230,23 +2963,23 @@ With RANSAC enabled:
         if getattr(self, '_loading_config', False):
             return
         # Only refresh if CSV is loaded
-        if hasattr(self, 'csv_compare_data') and self.csv_compare_data:
+        if hasattr(self, 'csv_compare_data') and self.ebay_tab.csv_compare_data:
             self.filter_csv_items()
 
     def _on_csv_column_resize(self, event):
         """Handle column resize event to reload thumbnails with new size"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.on_csv_column_resize(event)
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager.on_csv_column_resize(event)
 
     def _on_csv_item_double_click(self, event):
         """Handle double-click on CSV item to open URL in browser"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.on_csv_item_double_click(event)
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager.on_csv_item_double_click(event)
 
     def toggle_csv_thumbnails(self):
         """Toggle visibility of thumbnails in CSV treeview"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.toggle_csv_thumbnails()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager.toggle_csv_thumbnails()
 
     def _load_publisher_list(self):
         """Load publisher list from file"""
@@ -3302,13 +3035,13 @@ With RANSAC enabled:
 
     def _add_full_title_to_search(self):
         """Replace eBay search query with full title from selected CSV item"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._add_full_title_to_search()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._add_full_title_to_search()
 
     def _add_secondary_keyword_from_csv(self):
         """Add selected CSV item's secondary keyword to the eBay search query field"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._add_secondary_keyword_from_csv()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._add_secondary_keyword_from_csv()
 
     def _extract_secondary_keyword(self, title, primary_keyword):
         """Extract secondary keyword from title by removing primary keyword and common terms"""
@@ -3358,13 +3091,13 @@ With RANSAC enabled:
 
     def on_csv_item_selected(self, event):
         """Auto-fill search query when CSV item is selected"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.on_csv_item_selected(event)
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager.on_csv_item_selected(event)
 
     def compare_selected_csv_item(self):
         """Compare selected CSV item with eBay"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.compare_selected_csv_item()
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager.compare_selected_csv_item()
 
     def _run_csv_comparison_async(self):
         """Run CSV comparison without confirmation (for scheduled tasks)"""
@@ -3372,30 +3105,30 @@ With RANSAC enabled:
 
     def compare_all_csv_items(self, skip_confirmation=False):
         """Compare all visible CSV items with eBay"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.compare_all_csv_items(skip_confirmation)
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager.compare_all_csv_items(skip_confirmation)
 
     def compare_new_csv_items(self):
         """Compare only items that haven't been compared yet"""
-        if self.csv_comparison_manager:
+        if self.ebay_tab.csv_comparison_manager:
             # CSV manager's method has slightly different logic than compare_all
             # It tracks which items have been compared before
             # For now, delegate to compare_all as a fallback
             # TODO: Implement proper compare_new_items() in CSV manager if needed
-            self.csv_comparison_manager.compare_all_csv_items(skip_confirmation=False)
+            self.ebay_tab.csv_comparison_manager.compare_all_csv_items(skip_confirmation=False)
 
     def clear_comparison_results(self):
         """Clear all eBay comparison results from the loaded CSV"""
-        if not self.csv_compare_data or not self.csv_compare_path:
+        if not self.ebay_tab.csv_compare_data or not self.ebay_tab.csv_compare_path:
             messagebox.showwarning("No CSV", "Please load a CSV file first")
             return
 
         # Count items with comparison results
-        compared_count = sum(1 for item in self.csv_compare_data if item.get('ebay_compared'))
+        compared_count = sum(1 for item in self.ebay_tab.csv_compare_data if item.get('ebay_compared'))
 
         if compared_count == 0:
             # Log to status instead of popup
-            self.browserless_status.set("No comparison results to clear")
+            self.ebay_tab.browserless_status.set("No comparison results to clear")
             print("[CLEAR RESULTS] No results to clear")
             return
 
@@ -3410,7 +3143,7 @@ With RANSAC enabled:
         if response:
             try:
                 # Clear comparison fields for all items
-                for item in self.csv_compare_data:
+                for item in self.ebay_tab.csv_compare_data:
                     item['ebay_compared'] = ''
                     item['ebay_match_found'] = ''
                     item['ebay_best_match_title'] = ''
@@ -3422,7 +3155,7 @@ With RANSAC enabled:
                 self._save_updated_csv()
 
                 # Log to status instead of popup
-                self.browserless_status.set(f"Cleared comparison results for {compared_count} items")
+                self.ebay_tab.browserless_status.set(f"Cleared comparison results for {compared_count} items")
                 print(f"[CLEAR RESULTS] Cleared comparison results for {compared_count} items")
 
             except Exception as e:
@@ -3431,13 +3164,13 @@ With RANSAC enabled:
 
     def _compare_csv_items_worker(self, items, search_query):
         """Worker to compare CSV items with eBay - OPTIMIZED with caching (runs in background thread)"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._compare_csv_items_worker(items, search_query)
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._compare_csv_items_worker(items, search_query)
 
     def _compare_csv_items_individually_worker(self, items, base_search_query):
         """Worker to compare CSV items individually - each item gets its own eBay search"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager._compare_csv_items_individually_worker(items, base_search_query)
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager._compare_csv_items_individually_worker(items, base_search_query)
 
     def _fetch_exchange_rate(self):
         """Fetch current USD to JPY exchange rate"""
@@ -3483,23 +3216,23 @@ With RANSAC enabled:
 
     def apply_results_filter(self):
         """Display comparison results sorted by similarity and profit"""
-        if not self.all_comparison_results:
+        if not self.ebay_tab.all_comparison_results:
             return
 
         # Check if results have similarity/profit data (from comparison)
-        has_comparison_data = any('similarity' in r and 'profit_margin' in r for r in self.all_comparison_results)
+        has_comparison_data = any('similarity' in r and 'profit_margin' in r for r in self.ebay_tab.all_comparison_results)
 
         if has_comparison_data:
             # Sort results by similarity (descending), then by profit margin (descending)
             sorted_results = sorted(
-                self.all_comparison_results,
+                self.ebay_tab.all_comparison_results,
                 key=lambda x: (x.get('similarity', 0), x.get('profit_margin', 0)),
                 reverse=True
             )
             self._display_csv_comparison_results(sorted_results)
         else:
             # No comparison data yet, show all results
-            self._display_csv_comparison_results(self.all_comparison_results)
+            self._display_csv_comparison_results(self.ebay_tab.all_comparison_results)
 
     def _display_csv_comparison_results(self, results):
         """Display CSV comparison results in the browserless tree"""
@@ -3524,20 +3257,20 @@ With RANSAC enabled:
 
     def open_browserless_url(self, event):
         """Open eBay or Mandarake URL based on which column is double-clicked"""
-        selection = self.browserless_tree.selection()
+        selection = self.ebay_tab.browserless_tree.selection()
         if not selection:
             return
 
         item_id = selection[0]
 
         # Identify which column was clicked
-        column = self.browserless_tree.identify_column(event.x)
+        column = self.ebay_tab.browserless_tree.identify_column(event.x)
         # Column format is '#0', '#1', '#2', etc. where #0 is thumbnail, #1 is first data column
 
         try:
             index = int(item_id) - 1
-            if 0 <= index < len(self.browserless_results_data):
-                result = self.browserless_results_data[index]
+            if 0 <= index < len(self.ebay_tab.browserless_results_data):
+                result = self.ebay_tab.browserless_results_data[index]
 
                 # Determine which URL to open based on column
                 # Columns: title(#1), price(#2), shipping(#3), mandarake_price(#4), profit_margin(#5),
@@ -3555,7 +3288,7 @@ With RANSAC enabled:
                 else:
                     print(f"[BROWSERLESS SEARCH] Cannot open {url_type} URL: {url}")
             else:
-                print(f"[URL DEBUG] Index {index} out of range (data length: {len(self.browserless_results_data)})")
+                print(f"[URL DEBUG] Index {index} out of range (data length: {len(self.ebay_tab.browserless_results_data)})")
         except (ValueError, IndexError) as e:
             print(f"[BROWSERLESS SEARCH] Error opening URL: {e}")
             pass
@@ -3563,17 +3296,17 @@ With RANSAC enabled:
     def _show_browserless_context_menu(self, event):
         """Show context menu for eBay results treeview"""
         # Select the item under cursor
-        item = self.browserless_tree.identify_row(event.y)
+        item = self.ebay_tab.browserless_tree.identify_row(event.y)
         if item:
-            self.browserless_tree.selection_set(item)
+            self.ebay_tab.browserless_tree.selection_set(item)
 
             # Create context menu
             menu = tk.Menu(self, tearoff=0)
             menu.add_command(label="Send to Review/Alerts", command=self._send_browserless_to_review)
             menu.add_separator()
             menu.add_command(label="Open eBay URL", command=lambda: self.open_browserless_url(event))
-            if self.browserless_results_data and int(item) - 1 < len(self.browserless_results_data):
-                result = self.browserless_results_data[int(item) - 1]
+            if self.ebay_tab.browserless_results_data and int(item) - 1 < len(self.ebay_tab.browserless_results_data):
+                result = self.ebay_tab.browserless_results_data[int(item) - 1]
                 if result.get('mandarake_url'):
                     menu.add_command(label="Open Mandarake URL", command=lambda: webbrowser.open(result['mandarake_url']))
 
@@ -3582,16 +3315,16 @@ With RANSAC enabled:
 
     def _send_browserless_to_review(self):
         """Send selected eBay result to Review/Alerts tab"""
-        selection = self.browserless_tree.selection()
+        selection = self.ebay_tab.browserless_tree.selection()
         if not selection:
-            self.browserless_status.set("No item selected")
+            self.ebay_tab.browserless_status.set("No item selected")
             return
 
         item_id = selection[0]
         try:
             index = int(item_id) - 1
-            if 0 <= index < len(self.browserless_results_data):
-                result = self.browserless_results_data[index]
+            if 0 <= index < len(self.ebay_tab.browserless_results_data):
+                result = self.ebay_tab.browserless_results_data[index]
 
                 # Check if this is a comparison result (has similarity/profit data)
                 if 'similarity' in result or 'profit_margin' in result:
@@ -3607,27 +3340,27 @@ With RANSAC enabled:
                         self.alert_tab.add_filtered_alerts([matching_result])
                         # Explicitly refresh the alert tab to ensure it displays the new item
                         self.alert_tab._load_alerts()
-                        self.browserless_status.set(f"Sent '{result['title'][:50]}...' to Review/Alerts")
+                        self.ebay_tab.browserless_status.set(f"Sent '{result['title'][:50]}...' to Review/Alerts")
                         print(f"[SEND TO REVIEW] Added item to alerts: {result['title']}")
                     else:
-                        self.browserless_status.set("Could not find comparison data for this item")
+                        self.ebay_tab.browserless_status.set("Could not find comparison data for this item")
                 else:
                     # This is a raw eBay search result without comparison data
-                    self.browserless_status.set("Item has no comparison data - use 'Compare Selected' first")
+                    self.ebay_tab.browserless_status.set("Item has no comparison data - use 'Compare Selected' first")
                     print("[SEND TO REVIEW] Item has no comparison data")
         except (ValueError, IndexError) as e:
             print(f"[SEND TO REVIEW] Error: {e}")
-            self.browserless_status.set(f"Error sending to review: {e}")
+            self.ebay_tab.browserless_status.set(f"Error sending to review: {e}")
 
     def _display_browserless_results(self, results):
         """Display browserless search results in the tree view with thumbnails"""
         # Clear existing results and images
-        for item in self.browserless_tree.get_children():
-            self.browserless_tree.delete(item)
-        self.browserless_images.clear()
+        for item in self.ebay_tab.browserless_tree.get_children():
+            self.ebay_tab.browserless_tree.delete(item)
+        self.ebay_tab.browserless_images.clear()
 
         # Store results for URL opening
-        self.browserless_results_data = results
+        self.ebay_tab.browserless_results_data = results
 
         # Add new results with thumbnails
         for i, result in enumerate(results, 1):
@@ -3695,12 +3428,12 @@ With RANSAC enabled:
 
             # Insert with or without image
             if photo:
-                self.browserless_tree.insert('', 'end', iid=str(i), text='', values=values, image=photo)
-                self.browserless_images[str(i)] = photo  # Keep reference to prevent garbage collection
+                self.ebay_tab.browserless_tree.insert('', 'end', iid=str(i), text='', values=values, image=photo)
+                self.ebay_tab.browserless_images[str(i)] = photo  # Keep reference to prevent garbage collection
             else:
-                self.browserless_tree.insert('', 'end', iid=str(i), text=str(i), values=values)
+                self.ebay_tab.browserless_tree.insert('', 'end', iid=str(i), text=str(i), values=values)
 
-        print(f"[SCRAPY SEARCH] Displayed {len(results)} results in tree view ({len(self.browserless_images)} with thumbnails)")
+        print(f"[SCRAPY SEARCH] Displayed {len(results)} results in tree view ({len(self.ebay_tab.browserless_images)} with thumbnails)")
 
     def _clean_ebay_url(self, url: str) -> str:
         """Clean and validate eBay URL"""

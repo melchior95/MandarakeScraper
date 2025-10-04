@@ -1393,6 +1393,8 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
                         'mandarake_thumbnail': item.get('image_url', ''),
                         'ebay_title': ebay_item.get('product_title') or ebay_item.get('title', 'N/A'),
                         'mandarake_title': item.get('title', 'N/A'),
+                        'mandarake_title_en': item.get('title_en', item.get('title', 'N/A')),
+                        'mandarake_images': item.get('images', [item.get('image_url', '')]),
                         'mandarake_price': f"¥{mandarake_price:,.0f}",
                         'ebay_price': ebay_price_text,
                         'shipping': shipping_text,
