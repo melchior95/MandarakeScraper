@@ -769,9 +769,11 @@ class MandarakeTab(ttk.Frame):
             total_width = self.listbox_paned.winfo_width()
             if total_width > 500:
                 sash_pos = self.listbox_paned.sash_coord(0)[0]
-                self.main._user_sash_ratio = sash_pos / total_width
-        except Exception:
-            pass
+                ratio = sash_pos / total_width
+                self.main._user_sash_ratio = ratio
+                print(f"[LISTBOX SASH MOVED] New ratio: {ratio:.2f} (sash={sash_pos}px, width={total_width}px)")
+        except Exception as e:
+            print(f"[LISTBOX SASH MOVED] Error: {e}")
 
     def _resolve_shop(self):
         """Get the selected shop code from the listbox."""

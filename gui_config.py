@@ -1157,26 +1157,45 @@ With RANSAC enabled:
         try:
             ratio = self.gui_settings.get('vertical_paned_ratio', 0.5)  # Default 50/50 split
             total_height = self.mandarake_tab.vertical_paned.winfo_height()
+
+            # If height is too small, the window hasn't been laid out yet - schedule retry
+            if total_height < 100:
+                print(f"[VERTICAL PANED] Height too small ({total_height}px), retrying in 200ms...")
+                self.after(200, self._restore_vertical_paned_position)
+                return
+
             sash_pos = int(total_height * ratio)
             self.mandarake_tab.vertical_paned.sash_place(0, 0, sash_pos)
             self._user_vertical_sash_ratio = ratio  # Initialize user ratio to the restored value
-            print(f"[VERTICAL PANED] Restored position with ratio: {ratio:.2f}")
+            print(f"[VERTICAL PANED] Restored position with ratio: {ratio:.2f} (height={total_height}px, sash={sash_pos}px)")
         except Exception as e:
             print(f"[VERTICAL PANED] Error restoring position: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _restore_listbox_paned_position(self):
         """Restore the listbox paned window sash position from saved settings."""
         if not hasattr(self, 'mandarake_tab') or not hasattr(self.mandarake_tab, 'listbox_paned'):
+            print(f"[LISTBOX PANED] Widget not found - skipping restore")
             return
         try:
             ratio = self.gui_settings.get('listbox_paned_ratio', 0.65)  # Default 65% for categories, 35% for shops
             total_width = self.mandarake_tab.listbox_paned.winfo_width()
+
+            # If width is too small, the window hasn't been laid out yet - schedule retry
+            if total_width < 100:
+                print(f"[LISTBOX PANED] Width too small ({total_width}px), retrying in 200ms...")
+                self.after(200, self._restore_listbox_paned_position)
+                return
+
             sash_pos = int(total_width * ratio)
             self.mandarake_tab.listbox_paned.sash_place(0, sash_pos, 0)
             self._user_sash_ratio = ratio  # Initialize user ratio to the restored value
-            print(f"[LISTBOX PANED] Restored position with ratio: {ratio:.2f}")
+            print(f"[LISTBOX PANED] Restored position with ratio: {ratio:.2f} (width={total_width}px, sash={sash_pos}px)")
         except Exception as e:
             print(f"[LISTBOX PANED] Error restoring position: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _save_gui_settings(self):
         if not getattr(self, '_settings_loaded', False):
