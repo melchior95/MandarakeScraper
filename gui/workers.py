@@ -174,7 +174,8 @@ def compare_images(ref_image: np.ndarray, compare_image: np.ndarray, use_ransac:
                 best_match = max(best_match, max_val)
 
             template_score = max(0.0, best_match)
-        except:
+        except (cv2.error, ValueError, TypeError) as e:
+            logging.debug(f"Template matching failed: {e}")
             template_score = 0.0
 
         # === Weighted combination ===
@@ -1278,6 +1279,67 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
         if len(ebay_image_cache) != len(ebay_results):
             print(f"[CSV BATCH DEBUG] WARNING: Cache has {len(ebay_image_cache)} unique images but {len(ebay_results)} eBay results!")
 
+        # **Cache all CSV images at once (check local disk first, then download in parallel)**
+        update_callback(f"Loading {len(items)} CSV images...")
+        csv_image_cache = {}  # item_idx -> cv2 image
+        images_to_download = []  # (item_idx, item, image_url) for items needing download
+
+        # First pass: load from local disk (fast)
+        for item_idx, item in enumerate(items, 1):
+            local_image_path = item.get('local_image', '').strip()
+            item_image_url = item.get('image_url', '')
+            ref_image = None
+
+            # Try loading from local disk first (much faster)
+            if local_image_path and Path(local_image_path).exists():
+                try:
+                    ref_image = cv2.imread(local_image_path)
+                    if ref_image is not None:
+                        csv_image_cache[item_idx] = ref_image
+                        print(f"[CSV BATCH] Loaded CSV image {item_idx}/{len(items)} from disk: {Path(local_image_path).name}")
+                except Exception as e:
+                    print(f"[CSV BATCH] Error loading local CSV image {item_idx}: {e}")
+
+            # Queue for download if local load failed
+            if ref_image is None and item_image_url:
+                images_to_download.append((item_idx, item, item_image_url))
+
+        # Second pass: download missing images in parallel
+        if images_to_download:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            print(f"[CSV BATCH] Downloading {len(images_to_download)} CSV images in parallel...")
+
+            def download_csv_image(args):
+                item_idx, item, image_url = args
+                try:
+                    response = requests.get(image_url, timeout=10)
+                    if response.status_code == 200:
+                        img_array = np.frombuffer(response.content, np.uint8)
+                        ref_image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                        if ref_image is not None:
+                            return (item_idx, ref_image, item)
+                except Exception as e:
+                    print(f"[CSV BATCH] Error downloading CSV image {item_idx}: {e}")
+                return (item_idx, None, item)
+
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {executor.submit(download_csv_image, args): args for args in images_to_download}
+                for future in as_completed(futures):
+                    item_idx, ref_image, item = future.result()
+                    if ref_image is not None:
+                        csv_image_cache[item_idx] = ref_image
+                        print(f"[CSV BATCH] Downloaded CSV image {item_idx}/{len(items)} from web")
+
+        # Save all CSV debug images
+        for item_idx, ref_image in csv_image_cache.items():
+            item = items[item_idx - 1]
+            csv_title = item.get('title', 'unknown')
+            csv_title_safe = "".join(c for c in csv_title[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
+            csv_debug_path = debug_folder / f"CSV_{item_idx:02d}_REF_{csv_title_safe}.jpg"
+            cv2.imwrite(str(csv_debug_path), ref_image)
+
+        print(f"[CSV BATCH] Cached {len(csv_image_cache)}/{len(items)} CSV images")
+
         # **Now compare each CSV item with cached eBay images**
         comparison_results = []
 
@@ -1288,34 +1350,19 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
                 csv_title = item.get('title', 'unknown')
                 print(f"\n[CSV BATCH] === Processing CSV item {item_idx}/{len(items)}: {csv_title[:50]} ===")
 
-                # Load CSV item image
-                item_image_url = item.get('image_url', '')
-                ref_image = None
-
-                if item_image_url:
-                    try:
-                        response = requests.get(item_image_url, timeout=5)
-                        if response.status_code == 200:
-                            img_array = np.frombuffer(response.content, np.uint8)
-                            ref_image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
-                            if ref_image is not None:
-                                # Save CSV reference image to debug folder
-                                csv_title_safe = "".join(c for c in csv_title[:50] if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
-                                csv_debug_path = debug_folder / f"CSV_{item_idx:02d}_REF_{csv_title_safe}.jpg"
-                                cv2.imwrite(str(csv_debug_path), ref_image)
-                                print(f"[CSV BATCH] Saved CSV reference image: {csv_debug_path.name}")
-                                print(f"[CSV BATCH] CSV image shape: {ref_image.shape}")
-                    except Exception as e:
-                        print(f"[CSV BATCH] Error loading CSV item {item_idx} image: {e}")
+                # Get cached CSV image
+                ref_image = csv_image_cache.get(item_idx)
 
                 if ref_image is None:
                     print(f"[CSV BATCH] WARNING: No reference image for CSV item {item_idx}, skipping comparisons")
                     continue
 
-                # Compare with all cached eBay images
-                item_comparisons = []
-                for ebay_idx, ebay_item in enumerate(ebay_results):
+                print(f"[CSV BATCH] CSV image shape: {ref_image.shape}")
+
+                # Compare with all cached eBay images in parallel
+                def compare_with_ebay_item(args):
+                    """Worker function to compare CSV item with one eBay item."""
+                    ebay_idx, ebay_item = args
                     similarity = 0.0
 
                     # Support both 'main_image' (from search) and 'image_url' (from cached browserless_results_data)
@@ -1353,9 +1400,23 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
                                 print(f"[CSV BATCH DEBUG]   CSV image shape: {ref_image.shape}, eBay image shape: {ebay_img.shape}")
                                 print(f"[CSV BATCH DEBUG]   eBay URL: {ebay_image_url[:100]}")
 
-                            item_comparisons.append((similarity, ebay_idx, ebay_item.get('product_title', 'unknown')[:50]))
+                            return (similarity, ebay_idx, ebay_item.get('product_title', 'unknown')[:50])
                         except Exception as e:
                             print(f"[CSV BATCH] Error comparing with eBay item {ebay_idx+1}: {e}")
+                    return (0.0, ebay_idx, '')
+
+                # Parallelize comparisons for this CSV item against all eBay items
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                item_comparisons = []
+
+                with ThreadPoolExecutor(max_workers=8) as executor:
+                    comparison_tasks = [(ebay_idx, ebay_item) for ebay_idx, ebay_item in enumerate(ebay_results)]
+                    futures = {executor.submit(compare_with_ebay_item, task): task for task in comparison_tasks}
+
+                    for future in as_completed(futures):
+                        result = future.result()
+                        if result[0] > 0:  # Only add non-zero similarities
+                            item_comparisons.append(result)
 
                 # Sort by similarity and show top 5
                 item_comparisons.sort(reverse=True)
@@ -1390,12 +1451,12 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
 
                     comparison_results.append({
                         'thumbnail': ebay_item.get('main_image') or ebay_item.get('image_url', ''),
-                        'mandarake_thumbnail': item.get('image_url', ''),
+                        'store_thumbnail': item.get('image_url', ''),
                         'ebay_title': ebay_item.get('product_title') or ebay_item.get('title', 'N/A'),
-                        'mandarake_title': item.get('title', 'N/A'),
-                        'mandarake_title_en': item.get('title_en', item.get('title', 'N/A')),
-                        'mandarake_images': item.get('images', [item.get('image_url', '')]),
-                        'mandarake_price': f"¥{mandarake_price:,.0f}",
+                        'store_title': item.get('title', 'N/A'),
+                        'store_title_en': item.get('title_en', item.get('title', 'N/A')),
+                        'store_images': item.get('images', [item.get('image_url', '')]),
+                        'store_price': f"¥{mandarake_price:,.0f}",
                         'ebay_price': ebay_price_text,
                         'shipping': shipping_text,
                         'sold_date': ebay_item.get('sold_date', ''),
@@ -1403,7 +1464,7 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
                         'similarity_display': f"{similarity:.1f}%" if similarity > 0 else '-',
                         'profit_margin': profit_margin,  # Keep as number for sorting
                         'profit_display': f"{profit_margin:.1f}%",
-                        'mandarake_link': item.get('product_url', ''),
+                        'store_link': item.get('product_url', ''),
                         'ebay_link': ebay_item.get('product_url') or ebay_item.get('url', '')
                     })
 
@@ -1601,9 +1662,9 @@ def compare_csv_items_individually_worker(items: List[Dict], max_results: int, u
 
                 comparison_results.append({
                     'thumbnail': ebay_item.get('main_image') or ebay_item.get('image_url', ''),
-                    'csv_title': csv_title,
+                    'store_title': csv_title,
                     'ebay_title': ebay_item.get('product_title') or ebay_item.get('title', 'N/A'),
-                    'mandarake_price': f"¥{mandarake_price:,.0f}",
+                    'store_price': f"¥{mandarake_price:,.0f}",
                     'ebay_price': ebay_price_text,
                     'shipping': shipping_text,
                     'sold_date': ebay_item.get('sold_date', ''),
@@ -1611,7 +1672,7 @@ def compare_csv_items_individually_worker(items: List[Dict], max_results: int, u
                     'similarity_display': f"{similarity:.1f}%" if similarity > 0 else '-',
                     'profit_margin': profit_margin,
                     'profit_display': f"{profit_margin:.1f}%",
-                    'mandarake_link': item.get('product_url', ''),
+                    'store_link': item.get('product_url', ''),
                     'ebay_link': ebay_item.get('product_url') or ebay_item.get('url', '')
                 })
 

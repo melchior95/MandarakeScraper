@@ -36,11 +36,11 @@ class CSVComparisonManager:
         
     def load_csv_worker(self, csv_path: Path, autofill_from_config: Optional[Dict] = None) -> bool:
         """Load CSV data into comparison tree.
-        
+
         Args:
             csv_path: Path to CSV file
             autofill_from_config: Optional config dict to autofill eBay query from config keyword
-            
+
         Returns:
             bool: True if successful, False otherwise
         """
@@ -49,6 +49,9 @@ class CSVComparisonManager:
             if hasattr(self.gui, 'csv_compare_label'):
                 self.gui.csv_compare_label.config(text=f"Loaded: {csv_path.name}", foreground="black")
             print(f"[CSV WORKER] Loading CSV: {csv_path}")
+
+            # Clear image cache when loading new CSV file
+            self.csv_images.clear()
 
             # Load CSV data
             self.csv_compare_data = []
@@ -84,10 +87,10 @@ class CSVComparisonManager:
         if not hasattr(self.gui, 'csv_items_tree'):
             return
 
-        # Clear existing items and images
+        # Clear existing tree items (but keep image cache for performance)
         for item in self.gui.csv_items_tree.get_children():
             self.gui.csv_items_tree.delete(item)
-        self.csv_images.clear()
+        # NOTE: Don't clear self.csv_images - it's a persistent cache cleared only on new CSV load
 
         if not self.csv_compare_data:
             return
@@ -203,11 +206,19 @@ class CSVComparisonManager:
                 try:
                     # item_id is the tree item's iid (0-based index as string)
                     if item_id in self.gui.csv_items_tree.get_children():
-                        # Create PhotoImage in main thread from PIL Image
-                        from PIL import ImageTk
-                        photo = ImageTk.PhotoImage(pil_img)
+                        # Get stable cache key from item (use URL as unique identifier)
+                        item_idx = int(item_id)
+                        cache_key = filtered_items[item_idx].get('product_url', f'item_{item_id}')
+
+                        # Reuse cached PhotoImage if available, otherwise create new one
+                        if cache_key in self.csv_images:
+                            photo = self.csv_images[cache_key]
+                        else:
+                            from PIL import ImageTk
+                            photo = ImageTk.PhotoImage(pil_img)
+                            self.csv_images[cache_key] = photo  # Cache by stable key
+
                         self.gui.csv_items_tree.item(item_id, image=photo, text='')
-                        self.csv_images[item_id] = photo  # Store to prevent garbage collection
                 except Exception as e:
                     print(f"[CSV THUMBNAILS] Error updating image for {item_id}: {e}")
             self.gui.after(0, update_image)
