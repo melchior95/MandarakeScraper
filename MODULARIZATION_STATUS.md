@@ -78,8 +78,10 @@
 - **After Phase 3 (Utility Delegation)**: 3945 lines (-1465 lines total, -27.1%)
 - **After Phase 3.5 (Suruga-ya Fix)**: 3827 lines (-1583 lines total, -29.3%)
 - **After Phase 4 (EbayTab Integration)**: 3560 lines (-1850 lines total, -34.2%)
+- **After Phase 5 (AdvancedTab Extraction)**: 3405 lines (-2005 lines total, -37.0%)
+- **After Phase 6 (ConfigTreeManager Extraction)**: 3126 lines (-2284 lines total, -42.2%)
 - **Target**: < 2000 lines
-- **Progress**: Phases 1, 2, 3, 3.5 & 4 Complete ✅
+- **Progress**: Phases 1-6 Complete ✅
 
 ### Breakdown by Section
 
@@ -347,12 +349,48 @@ See `PHASE_5_AUDIT.md` for detailed analysis and path to <2000 lines.
 
 ---
 
-## 📋 Phase 5+ Strategic Plan
+## ✅ Phase 6 Complete (2025-10-04) - ConfigTreeManager Extraction
+
+**Results:**
+- Created and integrated ConfigTreeManager module
+- Replaced 9 config tree methods with delegations
+- Removed 279 lines from gui_config.py (3405 → 3126)
+- Total reduction: 2284 lines (42.2% from original 5410 lines)
+
+**What was extracted:**
+- Created `gui/config_tree_manager.py` (442 lines) for all config tree operations
+- Extracted 9 methods (~324 lines total):
+  - `_filter_config_tree()` - Store-based tree filtering
+  - `_setup_column_drag()` - Column drag-to-reorder functionality
+  - `_reorder_columns()` - Column reordering logic
+  - `_show_config_tree_menu()` - Context menu display
+  - `_edit_category_from_menu()` - Category editing from menu
+  - `_show_edit_category_dialog()` - Category edit dialog (102 lines!)
+  - `_on_config_tree_double_click()` - Double-click category editing
+  - `_load_csv_from_config()` - CSV loading from selected config
+  - `_autofill_search_query_from_config()` - eBay search query autofill
+
+**Impact:**
+- Config tree operations fully modularized
+- gui/config_tree_manager.py: 442 lines (complete tree management)
+- All config tree filtering, editing, and CSV loading centralized
+- Complex category editing dialog logic extracted
+- Category code file updating logic preserved
+
+**Next Steps:**
+- Phase 7: Extract Worker Coordinator (~350 lines) - Background thread operations
+- Phase 8: Extract Results Manager (~150 lines) - Results display logic
+- Phase 9: Extract Settings Manager (~200 lines) - Window/GUI settings
+- **Remaining: Need 1126 more lines to reach <2000 target (36.0% remaining)**
+
+---
+
+## 📋 Phase 6+ Strategic Plan
 
 ### Current Position
-- **3405 lines** (was 5410, removed 2005)
+- **3126 lines** (was 5410, removed 2284)
 - **Target**: <2000 lines
-- **Remaining**: Need to remove **1405 more lines (41.2%)**
+- **Remaining**: Need to remove **1126 more lines (36.0%)**
 
 ### Identified Extraction Opportunities
 
