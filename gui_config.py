@@ -41,11 +41,6 @@ from gui.schedule_frame import ScheduleFrame
 from gui.configuration_manager import ConfigurationManager
 from gui.tree_manager import TreeManager
 from gui.ebay_search_manager import EbaySearchManager
-from gui.csv_comparison_manager import CSVComparisonManager
-from gui.ui_construction_manager import UIConstructionManager
-from gui.event_handlers_manager import EventHandlersManager
-from gui.results_display_manager import ResultsDisplayManager
-from gui.settings_preferences_manager import SettingsPreferencesManager
 
 
 class ScraperGUI(tk.Tk):
@@ -109,11 +104,6 @@ class ScraperGUI(tk.Tk):
         self.config_manager = ConfigurationManager(self.settings)
         self.tree_manager = None  # Will be initialized after tree widget is created
         self.ebay_search_manager = None  # Will be initialized after eBay tree widget is created
-        self.csv_comparison_manager = None  # Will be initialized after CSV tree widget is created
-        self.ui_construction_manager = UIConstructionManager(self)
-        self.event_handlers_manager = EventHandlersManager(self)
-        self.results_display_manager = ResultsDisplayManager(self)
-        self.settings_preferences_manager = SettingsPreferencesManager(self)
 
         # Create menu bar
         self._create_menu_bar()
@@ -852,9 +842,6 @@ With RANSAC enabled:
             self.browserless_status, 
             self
         )
-        
-        # Initialize CSV comparison manager after CSV tree widget is created
-        self.csv_comparison_manager = CSVComparisonManager(self)
         
         # Bind double-click to open URL
         self.browserless_tree.bind('<Double-1>', self.open_browserless_url)
@@ -3998,13 +3985,116 @@ With RANSAC enabled:
 
     def load_csv_for_comparison(self):
         """Load CSV file for batch comparison"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.load_csv_for_comparison()
+        file_path = filedialog.askopenfilename(
+            title="Select CSV file for comparison",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialdir="results"
+        )
+
+        if file_path:
+            success = self._load_csv_worker(Path(file_path))
+            if not success:
+                messagebox.showerror("Error", f"Failed to load CSV: {file_path}")
 
     def filter_csv_items(self):
         """Filter and display CSV items based on in-stock filter - fast load, thumbnails loaded on demand"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.filter_csv_items()
+        # Clear existing items and images
+        for item in self.csv_items_tree.get_children():
+            self.csv_items_tree.delete(item)
+        self.csv_images.clear()
+
+        if not self.csv_compare_data:
+            return
+
+        # Apply filters
+        from datetime import datetime, timedelta
+        current_time = datetime.now()
+        cutoff_time = current_time - timedelta(hours=24)  # 24 hours for newly listed filter
+
+        in_stock_only = self.csv_in_stock_only.get()
+        newly_listed_only = self.csv_newly_listed_only.get()
+        filtered_items = []
+
+        for row in self.csv_compare_data:
+            # In-stock filter
+            stock = row.get('in_stock', '').lower()
+            if in_stock_only and stock not in ('true', 'yes', '1'):
+                continue
+
+            # Newly listed filter (24 hours)
+            if newly_listed_only:
+                first_seen_str = row.get('first_seen', '')
+                if first_seen_str:
+                    try:
+                        first_seen = datetime.fromisoformat(first_seen_str)
+                        if first_seen < cutoff_time:
+                            continue  # Skip items older than 24 hours
+                    except:
+                        continue  # Skip items with invalid dates
+                else:
+                    continue  # Skip items without first_seen date
+
+            filtered_items.append(row)
+
+        # Display filtered items WITHOUT thumbnails first (fast load)
+        # Use recent_hours setting for CSV "new items" visual indicator
+        recent_hours = self._get_recent_hours_value()
+        new_indicator_cutoff = current_time - timedelta(hours=recent_hours) if recent_hours else current_time - timedelta(hours=12)
+
+        # Store NEW status for each item for thumbnail border rendering
+        self.csv_new_items = set()
+
+        for i, row in enumerate(filtered_items):
+            # Calculate NEW indicator dynamically
+            first_seen_str = row.get('first_seen', '')
+            if first_seen_str:
+                try:
+                    first_seen = datetime.fromisoformat(first_seen_str)
+                    if first_seen >= new_indicator_cutoff:
+                        self.csv_new_items.add(str(i))  # Mark as new
+                except:
+                    pass
+
+            # Use English translated title if available, otherwise use original title
+            title = row.get('title_en', row.get('title', ''))
+
+            # Format price properly - handle both floats (Suruga-ya) and formatted strings (Mandarake)
+            price_raw = row.get('price_text', row.get('price', ''))
+            if isinstance(price_raw, (int, float)):
+                # Format as currency: ¥160,999
+                price = f"¥{price_raw:,.0f}"
+            elif isinstance(price_raw, str) and price_raw.replace('.', '').replace(',', '').isdigit():
+                # String but looks like a number (e.g., "160999.0")
+                try:
+                    price = f"¥{float(price_raw):,.0f}"
+                except:
+                    price = price_raw  # Fallback to original
+            else:
+                # Already formatted (e.g., "¥1,234")
+                price = price_raw
+
+            shop = row.get('shop', row.get('shop_text', ''))
+            stock_display = 'Yes' if row.get('in_stock', '').lower() in ('true', 'yes', '1') else 'No'
+            category = row.get('category', '')
+            url = row.get('url', '')
+
+            # Check if item has been compared with eBay
+            compared_status = '✓' if row.get('ebay_compared') else ''
+
+            # Insert WITHOUT image for fast loading (use 0-based index as iid for proper mapping)
+            self.csv_items_tree.insert('', 'end', iid=str(i), text=str(i+1),
+                                      values=(title, price, shop, stock_display, category, compared_status, url))
+
+        print(f"[CSV COMPARE] Displayed {len(filtered_items)} items (newly listed: {newly_listed_only}, in-stock: {in_stock_only})")
+
+        # Store filtered items for thumbnail toggling
+        self.csv_filtered_items = filtered_items
+
+        # Load thumbnails in background thread if enabled
+        if self.csv_show_thumbnails.get():
+            self._start_thread(self._load_csv_thumbnails_worker, filtered_items)
+        else:
+            print(f"[CSV THUMBNAILS] Thumbnails disabled, skipping load")
 
     def _load_csv_thumbnails_worker(self, filtered_items):
         """Background worker to load CSV thumbnails without blocking UI"""
@@ -4060,8 +4150,7 @@ With RANSAC enabled:
 
     def _on_csv_filter_changed(self):
         """Handle CSV filter changes - filter items (settings saved on close)"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.on_csv_filter_changed()
+        self.filter_csv_items()
 
     def _on_recent_hours_changed(self, *args):
         """Handle latest additions timeframe change - refresh CSV view if loaded"""
@@ -4071,18 +4160,69 @@ With RANSAC enabled:
 
     def _on_csv_column_resize(self, event):
         """Handle column resize event to reload thumbnails with new size"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.on_csv_column_resize(event)
+        # Only handle if we're resizing the thumbnail column (#0)
+        # Use a timer to avoid reloading on every pixel change
+        if hasattr(self, '_resize_timer'):
+            self.after_cancel(self._resize_timer)
+
+        def reload_thumbnails():
+            # Check if thumbnail column was resized and thumbnails are enabled
+            if self.csv_show_thumbnails.get() and hasattr(self, 'csv_filtered_items') and self.csv_filtered_items:
+                current_width = self.csv_items_tree.column('#0', 'width')
+                # Only reload if width changed significantly (more than 5px)
+                if not hasattr(self, '_last_thumb_width') or abs(current_width - self._last_thumb_width) > 5:
+                    self._last_thumb_width = current_width
+                    print(f"[CSV THUMBNAILS] Column resized to {current_width}px, reloading thumbnails...")
+                    self._start_thread(self._load_csv_thumbnails_worker, self.csv_filtered_items)
+
+        # Debounce: wait 300ms after user stops dragging
+        self._resize_timer = self.after(300, reload_thumbnails)
 
     def _on_csv_item_double_click(self, event):
         """Handle double-click on CSV item to open URL in browser"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.on_csv_item_double_click(event)
+        # Get the item that was double-clicked
+        region = self.csv_items_tree.identify('region', event.x, event.y)
+        item_id = self.csv_items_tree.identify_row(event.y)
+
+        if not item_id:
+            return
+
+        # Get the URL from the item's values (last column)
+        item_values = self.csv_items_tree.item(item_id, 'values')
+        if len(item_values) >= 6:  # Make sure URL column exists
+            url = item_values[5]  # URL is the 6th column (index 5)
+            if url:
+                # Open URL in default browser in a separate thread to avoid blocking
+                def open_url():
+                    import webbrowser
+                    webbrowser.open(url)
+                    print(f"[CSV] Opened URL: {url}")
+
+                import threading
+                thread = threading.Thread(target=open_url, daemon=True)
+                thread.start()
 
     def toggle_csv_thumbnails(self):
         """Toggle visibility of thumbnails in CSV treeview"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.toggle_csv_thumbnails()
+        show_thumbnails = self.csv_show_thumbnails.get()
+
+        if show_thumbnails:
+            # Show thumbnails - set column width and rowheight
+            self.csv_items_tree.column('#0', width=70, stretch=False)
+            style = ttk.Style()
+            style.configure('CSV.Treeview', rowheight=70)
+
+            # Reload thumbnails if we have CSV items loaded
+            if hasattr(self, 'csv_filtered_items') and self.csv_filtered_items:
+                print(f"[CSV THUMBNAILS] Loading thumbnails for {len(self.csv_filtered_items)} items...")
+                self._start_thread(self._load_csv_thumbnails_worker, self.csv_filtered_items)
+        else:
+            # Hide thumbnails - set column width to 0
+            self.csv_items_tree.column('#0', width=0, stretch=False)
+            style = ttk.Style()
+            style.configure('CSV.Treeview', rowheight=25)
+
+        print(f"[CSV THUMBNAILS] Thumbnails {'shown' if show_thumbnails else 'hidden'}")
 
     def _load_publisher_list(self):
         """Load publisher list from file"""
@@ -4274,22 +4414,154 @@ With RANSAC enabled:
 
     def on_csv_item_selected(self, event):
         """Auto-fill search query when CSV item is selected"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.on_csv_item_selected(event)
+        selection = self.csv_items_tree.selection()
+        if not selection:
+            return
+
+        item_id = selection[0]
+        try:
+            # item_id is now 0-based index directly
+            index = int(item_id)
+            # Use filtered items if available
+            items_list = self.csv_filtered_items if hasattr(self, 'csv_filtered_items') and self.csv_filtered_items else self.csv_compare_data
+            if 0 <= index < len(items_list):
+                row = items_list[index]
+
+                # Extract core word from title and category keyword
+                title = row.get('title', '')
+                category = row.get('category', '')
+                keyword = row.get('keyword', '')  # Use extracted keyword if available
+
+                # Use keyword if available, otherwise extract from title
+                if keyword:
+                    core_words = keyword
+                else:
+                    core_words = ' '.join(title.split()[:3]) if title else ''
+
+                # Get category keyword from mapping
+                category_keyword = CATEGORY_KEYWORDS.get(category, '')
+
+                # Build search query: keyword + category keyword
+                search_query = f"{core_words} {category_keyword}".strip()
+
+                # Add secondary keyword if toggle is on
+                if hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get():
+                    if title and keyword:
+                        secondary = self._extract_secondary_keyword(title, keyword)
+                        if secondary:
+                            search_query = f"{search_query} {secondary}".strip()
+                            print(f"[CSV COMPARE] Added secondary keyword: {secondary}")
+
+                if search_query:
+                    self.browserless_query_var.set(search_query)
+                    print(f"[CSV COMPARE] Auto-filled search: {search_query}")
+
+        except (ValueError, IndexError) as e:
+            print(f"[CSV COMPARE] Error selecting item: {e}")
 
     def compare_selected_csv_item(self):
         """Compare selected CSV item with eBay"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.compare_selected_csv_item()
+        selection = self.csv_items_tree.selection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select an item to compare")
+            return
+
+        # Get selected item data
+        item_id = selection[0]
+        try:
+            # Need to find the actual item from filtered display
+            # The iid in tree might not match csv_compare_data index due to filtering
+            values = self.csv_items_tree.item(item_id)['values']
+            if not values:
+                messagebox.showerror("Error", "Could not get item data")
+                return
+
+            # Find matching item in csv_compare_data by title
+            title_prefix = values[0]  # Truncated title from display
+            item = None
+            for row in self.csv_compare_data:
+                if row.get('title', '').startswith(title_prefix.replace('...', '')):
+                    item = row
+                    break
+
+            if not item:
+                messagebox.showerror("Error", "Could not find selected item")
+                return
+
+            # Extract search query from eBay query field
+            search_query = self.browserless_query_var.get().strip()
+            if not search_query:
+                messagebox.showwarning("No Query", "Please enter a search query")
+                return
+
+            # Run comparison in background
+            self.csv_compare_progress.start()
+            self._start_thread(lambda: self._compare_csv_items_worker([item], search_query))
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Invalid selection: {e}")
 
     def _run_csv_comparison_async(self):
         """Run CSV comparison without confirmation (for scheduled tasks)"""
         self.compare_all_csv_items(skip_confirmation=True)
 
     def compare_all_csv_items(self, skip_confirmation=False):
-        """Compare all visible CSV items with eBay"""
-        if self.csv_comparison_manager:
-            self.csv_comparison_manager.compare_all_csv_items(skip_confirmation)
+        """Compare all visible CSV items with eBay
+
+        Args:
+            skip_confirmation: If True, skip confirmation dialogs (for scheduled tasks)
+        """
+        if not self.csv_compare_data:
+            if not skip_confirmation:
+                messagebox.showinfo("No Data", "Please load a CSV file first")
+            return
+
+        # Use already filtered items from the display
+        # This respects both in-stock and newly listed filters
+        items_to_compare = self.csv_filtered_items if hasattr(self, 'csv_filtered_items') else self.csv_compare_data
+
+        if not items_to_compare:
+            if not skip_confirmation:
+                messagebox.showinfo("No Items", "No items to compare (check filter settings)")
+            return
+
+        # Extract search query from the eBay query field (already populated by CSV load)
+        search_query = self.browserless_query_var.get().strip()
+        if not search_query:
+            messagebox.showwarning("No Query", "Please load a CSV or enter a search query")
+            return
+
+        # Check if 2nd keyword is enabled
+        add_secondary = hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get()
+
+        # Choose comparison method based on 2nd keyword setting
+        if add_secondary:
+            # With 2nd keyword: Each item needs individual eBay search (different keywords)
+            if skip_confirmation:
+                response = True
+            else:
+                response = messagebox.askyesno(
+                    "Individual Batch Comparison",
+                    f"Compare {len(items_to_compare)} items with individual eBay searches?\n\n"
+                    f"2nd keyword is enabled, so each item will have a separate search.\n"
+                    f"This will take longer."
+                )
+            if response:
+                self.csv_compare_progress.start()
+                self._start_thread(lambda: self._compare_csv_items_individually_worker(items_to_compare, search_query))
+        else:
+            # Without 2nd keyword: Use single cached eBay search for all items
+            if skip_confirmation:
+                response = True
+            else:
+                response = messagebox.askyesno(
+                    "Batch Comparison",
+                    f"Compare {len(items_to_compare)} items with cached eBay search?\n\n"
+                    f"All items use the same keyword, so we'll reuse eBay results."
+                )
+            if response:
+                self.csv_compare_progress.start()
+                self._start_thread(lambda: self._compare_csv_items_worker(items_to_compare, search_query))
 
     def compare_new_csv_items(self):
         """Compare only items that haven't been compared yet (no ebay_compared timestamp)"""

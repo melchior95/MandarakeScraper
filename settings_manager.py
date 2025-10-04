@@ -44,7 +44,8 @@ class SettingsManager:
                 "default_output_format": "google_sheets",
                 "resume_enabled": True,
                 "fast_mode": False,
-                "download_thumbnails": True
+                "download_thumbnails": True,
+                "max_csv_items": 0
             },
 
             # UI preferences
