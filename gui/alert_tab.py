@@ -43,21 +43,21 @@ class AlertTab(ttk.Frame):
             alert_settings = settings_manager.get_alert_settings()
             min_sim = alert_settings.get('filter_min_similarity', 70.0)
             min_profit = alert_settings.get('filter_min_profit', 20.0)
-            notifications_enabled = alert_settings.get('notifications_enabled', False)
-            notify_min_sim = alert_settings.get('notify_min_similarity', 80.0)
-            notify_min_profit = alert_settings.get('notify_min_profit', 30.0)
+            self.notifications_enabled = alert_settings.get('notifications_enabled', False)
+            self.notify_min_sim = alert_settings.get('notify_min_similarity', 80.0)
+            self.notify_min_profit = alert_settings.get('notify_min_profit', 30.0)
         else:
             min_sim = 70.0
             min_profit = 20.0
-            notifications_enabled = False
-            notify_min_sim = 80.0
-            notify_min_profit = 30.0
+            self.notifications_enabled = False
+            self.notify_min_sim = 80.0
+            self.notify_min_profit = 30.0
 
         # Initialize alert manager with notification settings
         self.alert_manager = AlertManager(
-            notifications_enabled=notifications_enabled,
-            notify_min_similarity=notify_min_sim,
-            notify_min_profit=notify_min_profit
+            notifications_enabled=self.notifications_enabled,
+            notify_min_similarity=self.notify_min_sim,
+            notify_min_profit=self.notify_min_profit
         )
 
         # Threshold variables
@@ -128,7 +128,7 @@ class AlertTab(ttk.Frame):
         notify_frame = ttk.LabelFrame(controls_frame, text="Notifications:", padding=5)
         notify_frame.pack(side=tk.LEFT, padx=(10, 0))
 
-        self.notify_enabled_var = tk.BooleanVar(value=notifications_enabled)
+        self.notify_enabled_var = tk.BooleanVar(value=self.notifications_enabled)
         notify_check = ttk.Checkbutton(
             notify_frame,
             text="Enable",
@@ -138,7 +138,7 @@ class AlertTab(ttk.Frame):
         notify_check.pack(side=tk.LEFT, padx=5)
 
         ttk.Label(notify_frame, text="Min Sim:").pack(side=tk.LEFT, padx=(10, 2))
-        self.notify_sim_var = tk.DoubleVar(value=notify_min_sim)
+        self.notify_sim_var = tk.DoubleVar(value=self.notify_min_sim)
         notify_sim_spin = ttk.Spinbox(
             notify_frame,
             from_=0,
@@ -151,7 +151,7 @@ class AlertTab(ttk.Frame):
         ttk.Label(notify_frame, text="%").pack(side=tk.LEFT)
 
         ttk.Label(notify_frame, text="Min Profit:").pack(side=tk.LEFT, padx=(10, 2))
-        self.notify_profit_var = tk.DoubleVar(value=notify_min_profit)
+        self.notify_profit_var = tk.DoubleVar(value=self.notify_min_profit)
         notify_profit_spin = ttk.Spinbox(
             notify_frame,
             from_=-100,
