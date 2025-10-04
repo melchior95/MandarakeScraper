@@ -1449,14 +1449,9 @@ With RANSAC enabled:
 
     def _resolve_shop(self):
         """Get the selected shop code from the listbox."""
-        selection = self.shop_listbox.curselection()
-        if not selection:
-            return "all"  # Default to all stores if nothing selected
-
-        index = selection[0]
-        shop_code = self.shop_code_map[index]
-
-        return shop_code if shop_code else "all"
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._resolve_shop()
+        return "all"
 
     def _resolve_shop_old(self):
         """Old method - keeping for reference during migration."""
@@ -1909,15 +1904,8 @@ With RANSAC enabled:
 
     def _on_listbox_sash_moved(self, event=None):
         """Track when user manually moves the sash."""
-        if not hasattr(self, 'listbox_paned'):
-            return
-        try:
-            total_width = self.listbox_paned.winfo_width()
-            if total_width > 500:
-                sash_pos = self.listbox_paned.sash_coord(0)[0]
-                self._user_sash_ratio = sash_pos / total_width
-        except Exception:
-            pass
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._on_listbox_sash_moved(event)
 
     def _restore_listbox_paned_position(self):
         """Restore the listbox paned window sash position from saved settings."""
@@ -2220,60 +2208,9 @@ With RANSAC enabled:
         return None
 
     def _select_categories(self, categories):
-        self.detail_listbox.selection_clear(0, tk.END)
-        if not categories:
-            self.main_category_var.set('')
-            self._populate_detail_categories()
-            return
-
-        # Select main category
-        first_code = categories[0]
-        main_code = utils.match_main_code(first_code)
-        if main_code:
-            # Find the exact matching value from the combobox list
-            # This ensures the value matches the dropdown format exactly
-            for code, name in MAIN_CATEGORY_OPTIONS:
-                if code == main_code:
-                    label = f"{name} ({code})"
-                    self.main_category_var.set(label)
-                    break
-        else:
-            self.main_category_var.set('')
-
-        # Populate detail categories based on main category
-        self._populate_detail_categories(utils.extract_code(self.main_category_var.get()))
-
-        # Select detail categories and scroll to first selected
-        first_selected_idx = None
-        unknown_categories = []
-
-        for idx, code in enumerate(self.detail_code_map):
-            if code in categories:
-                self.detail_listbox.selection_set(idx)
-                if first_selected_idx is None:
-                    first_selected_idx = idx
-
-        # Handle unknown categories (not in current listbox)
-        for cat_code in categories:
-            if cat_code not in self.detail_code_map:
-                unknown_categories.append(cat_code)
-
-        # Add unknown categories to listbox temporarily
-        if unknown_categories:
-            for cat_code in unknown_categories:
-                # Add to detail_code_map and listbox
-                self.detail_code_map.append(cat_code)
-                display_text = f"Unknown Category ({cat_code})"
-                self.detail_listbox.insert(tk.END, display_text)
-                # Select the newly added item
-                new_idx = len(self.detail_code_map) - 1
-                self.detail_listbox.selection_set(new_idx)
-                if first_selected_idx is None:
-                    first_selected_idx = new_idx
-
-        # Scroll to make the first selected category visible
-        if first_selected_idx is not None:
-            self.detail_listbox.see(first_selected_idx)
+        """Select categories in the detail listbox."""
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._select_categories(categories)
 
     def _get_selected_categories(self):
         indices = self.detail_listbox.curselection()
@@ -2977,58 +2914,8 @@ With RANSAC enabled:
 
     def _commit_keyword_changes(self, event=None):
         """Trim trailing spaces from keyword and rename file if needed (called on blur)"""
-        if not hasattr(self, 'last_saved_path') or not self.last_saved_path:
-            return
-
-        # Don't rename during initial load
-        if not getattr(self, '_settings_loaded', False):
-            return
-
-        # Don't rename while loading a config
-        if getattr(self, '_loading_config', False):
-            return
-
-        try:
-            # Trim trailing spaces from keyword
-            current_keyword = self.keyword_var.get()
-            trimmed_keyword = current_keyword.rstrip()
-
-            # Only update if there were trailing spaces
-            if current_keyword != trimmed_keyword:
-                self.keyword_var.set(trimmed_keyword)
-
-            # Now check if filename should be updated
-            config = self._collect_config()
-            if config:
-                suggested_filename = utils.suggest_config_filename(config)
-                current_filename = self.last_saved_path.name
-
-                # If the suggested filename is different, rename the file
-                if suggested_filename != current_filename:
-                    new_path = self.last_saved_path.parent / suggested_filename
-
-                    # Only rename if new path doesn't exist or is the same file
-                    if not new_path.exists() or new_path == self.last_saved_path:
-                        old_path = self.last_saved_path
-
-                        # Find the tree item with the old path and update its mapping
-                        for item in self.config_tree.get_children():
-                            if self.config_paths.get(item) == old_path:
-                                self.config_paths[item] = new_path
-                                break
-
-                        # Delete old file if renaming
-                        if new_path != self.last_saved_path and self.last_saved_path.exists():
-                            self.last_saved_path.unlink()
-
-                        # Update the path
-                        self.last_saved_path = new_path
-                        print(f"[COMMIT] Renamed config to: {suggested_filename}")
-
-                        # Save and update tree
-                        self._save_config_to_path(config, self.last_saved_path, update_tree=True)
-        except Exception as e:
-            print(f"[COMMIT] Error: {e}")
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._commit_keyword_changes(event)
 
     def _on_config_selected(self, event=None):
         """Load config when selected (single click)"""
@@ -3167,57 +3054,8 @@ With RANSAC enabled:
 
     def _load_from_url(self):
         """Parse URL from either Mandarake or Suruga-ya and populate config fields"""
-        url = self.mandarake_url_var.get().strip()
-        if not url:
-            messagebox.showinfo("No URL", "Please enter a store URL")
-            return
-
-        try:
-            # Detect store type from URL
-            if 'suruga-ya.jp' in url:
-                # Parse Suruga-ya URL
-                from urllib.parse import urlparse, parse_qs
-                parsed = urlparse(url)
-                params = parse_qs(parsed.query)
-
-                config = {
-                    'search_url': url,  # Store the original URL
-                    'store': 'suruga-ya',
-                    'keyword': params.get('search_word', [''])[0],
-                    'category': params.get('category', [''])[0] or params.get('category2', [''])[0],
-                    'category1': params.get('category1', [''])[0],
-                    'category2': params.get('category2', [''])[0],
-                    'shop': params.get('tenpo_code', ['all'])[0],
-                    'exclude_word': params.get('exclude_word', [''])[0],
-                    'condition': params.get('sale_classified', ['all'])[0],
-                    'adult_only': params.get('adult_s', [''])[0] == '1',
-                }
-
-                # Update store selector
-                self.current_store.set("Suruga-ya")
-                self._on_store_changed()  # Load Suruga-ya categories
-
-            elif 'mandarake.co.jp' in url:
-                # Parse Mandarake URL
-                from mandarake_scraper import parse_mandarake_url
-                config = parse_mandarake_url(url)
-                config['search_url'] = url  # Store the original URL
-                config['store'] = 'mandarake'
-
-                # Update store selector
-                self.current_store.set("Mandarake")
-                self._on_store_changed()  # Load Mandarake categories
-            else:
-                messagebox.showerror("Error", "URL must be from Mandarake or Suruga-ya")
-                return
-
-            self._populate_from_config(config)
-            self.status_var.set(f"Loaded URL parameters from {config['store']}")
-
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            messagebox.showerror("Error", f"Failed to parse URL: {e}")
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._load_from_url()
 
     def _populate_from_config(self, config: dict):
         # Set loading flag to prevent trace callbacks from regenerating URL
@@ -3595,36 +3433,18 @@ With RANSAC enabled:
 
     def _show_keyword_menu(self, event):
         """Show context menu on keyword entry"""
-        try:
-            # Always show menu - user can select text before right-clicking
-            self.keyword_menu.post(event.x_root, event.y_root)
-        except:
-            pass
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._show_keyword_menu(event)
 
     def _add_to_publisher_list(self):
         """Add selected text from keyword entry to publisher list"""
-        try:
-            if self.keyword_entry.selection_present():
-                selected_text = self.keyword_entry.selection_get().strip()
-                if selected_text and len(selected_text) > 1:
-                    self.publisher_list.add(selected_text)
-                    self._save_publisher_list()
-                    messagebox.showinfo("Publisher Added", f"'{selected_text}' has been added to the publisher list.")
-                    print(f"[PUBLISHERS] Added: {selected_text}")
-        except Exception as e:
-            print(f"[PUBLISHERS] Error adding publisher: {e}")
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._add_to_publisher_list()
 
     def _set_keyword_field(self, text):
         """Helper function to reliably set the keyword field"""
-        # Method 1: Use StringVar
-        self.keyword_var.set(text)
-
-        # Method 2: Direct widget manipulation (more reliable)
-        self.keyword_entry.delete(0, tk.END)
-        self.keyword_entry.insert(0, text)
-
-        # Force update
-        self.keyword_entry.update_idletasks()
+        if hasattr(self, 'mandarake_tab'):
+            return self.mandarake_tab._set_keyword_field(text)
 
     def _add_full_title_to_search(self):
         """Replace eBay search query with full title from selected CSV item"""

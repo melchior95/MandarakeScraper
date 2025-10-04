@@ -71,24 +71,25 @@
 
 ## 📊 Current gui_config.py Size
 
-- **Previous**: 5410 lines
-- **Current**: 4621 lines (-789 lines, -14.6%)
+- **Starting**: 5410 lines
+- **After Phase 1 (CSV)**: 4621 lines (-789 lines, -14.6%)
+- **After Phase 2a (Mandarake UI)**: 4295 lines (-1115 lines total, -20.6%)
+- **After Phase 2b (Mandarake Methods)**: 4115 lines (-1295 lines total, -23.9%)
 - **Target**: < 2000 lines
-- **Progress**: Phase 1 Complete ✅
+- **Progress**: Phases 1 & 2 Complete ✅
 
 ### Breakdown by Section
 
 | Section | Lines (est.) | Status |
 |---------|--------------|--------|
 | Window/Menu Management | ~200 | ✅ Keep in main (acceptable) |
-| Mandarake Tab | ~800 | ⚠️ Could extract to `gui/mandarake_tab.py` |
+| Mandarake Tab | ~500 | ✅ Extracted to `gui/mandarake_tab.py` (840 lines) |
 | eBay Search UI | ~300 | ✅ Logic extracted, UI acceptable |
-| CSV Comparison | ~400 | ⚠️ Logic extracted but delegation incomplete |
+| CSV Comparison | ~400 | ✅ Fully delegated to `CSVComparisonManager` |
 | Alert Tab | ~10 | ✅ Delegated to `AlertTab` |
 | Advanced Tab | ~300 | ✅ Settings-heavy, acceptable |
 | Event Handlers | ~500 | ⚠️ Mixed UI/logic |
 | Utility Methods | ~1500 | ⚠️ Some could move to `gui/utils.py` |
-| CSV Methods (duplicate) | ~900 | ❌ Should be removed (delegated to manager) |
 
 ---
 
@@ -111,15 +112,25 @@ Delegated methods to `CSVComparisonManager`:
 
 **Benefit**: Reduced `gui_config.py` by 789 lines, improved testability and maintainability
 
-### Priority 2: Extract Mandarake Tab (4-5 hours)
-**Goal**: Remove ~800 lines from `gui_config.py`
+### ✅ Priority 2: Extract Mandarake Tab - COMPLETE
+**Goal**: Remove ~500 lines from `gui_config.py`
+**Result**: Removed 506 lines (11.8% reduction from 4621 → 4115 lines)
 
-Create `gui/mandarake_tab.py`:
-- Move UI construction for Stores tab
-- Move Mandarake-specific methods
-- Pattern similar to `AlertTab`
+Created `gui/mandarake_tab.py` (840 lines):
+- ✅ Extracted UI construction for Stores tab (330+ lines)
+- ✅ Extracted Mandarake-specific methods (180+ lines)
+- ✅ Pattern similar to `AlertTab` with `self.main` delegation
 
-**Benefit**: Reduces `gui_config.py` by 15%, clearer separation
+**Extracted Methods:**
+- ✅ `_load_from_url()` - Parse Mandarake/Suruga-ya URLs
+- ✅ `_commit_keyword_changes()` - Trim keyword and rename config
+- ✅ `_show_keyword_menu()`, `_add_to_publisher_list()`, `_set_keyword_field()`
+- ✅ `_resolve_shop()`, `_select_categories()`
+- ✅ `_on_listbox_sash_moved()` - Track sash position
+- ✅ All category/shop population methods
+- ✅ Store switching logic (Mandarake ↔ Suruga-ya)
+
+**Benefit**: Reduced `gui_config.py` by 11.8%, clearer separation of concerns
 
 ### Priority 3: Clean Up Utility Methods (2-3 hours)
 **Goal**: Remove ~500 lines from `gui_config.py`
@@ -140,10 +151,11 @@ Move to `gui/utils.py`:
 - ✅ Alert system: Fully modularized (700 lines extracted)
 - ✅ eBay search: Fully modularized (386 lines extracted)
 - ✅ CSV comparison: 100% complete (1072 lines module, 789 lines removed from main)
+- ✅ Mandarake tab: 100% complete (840 lines module, 506 lines removed from main)
 - ✅ Workers: Fully modularized (800 lines extracted)
 - ✅ Other utilities: Fully modularized (~500 lines extracted)
 
-**Total extracted so far**: ~4189 lines (was 5410, now 4621)
+**Total extracted so far**: ~4695 lines (was 5410, now 4115)
 
 ### If Priority 1-3 Completed
 - **gui_config.py** would be: ~2900 lines (down from 5410)
@@ -195,9 +207,25 @@ For immediate impact with minimal effort:
 - All CSV comparison functionality now fully modularized
 - GUI tested and working correctly
 
+## ✅ Phase 2 Complete (2025-10-04)
+
+**Results:**
+- Created `gui/mandarake_tab.py` (840 lines)
+- Removed 506 lines from `gui_config.py` (11.8% reduction from Phase 2 start)
+- Total reduction: 1295 lines (23.9% from original 5410 lines)
+- Extracted all Mandarake-specific UI and methods
+
+**Extracted Components:**
+- Complete UI construction for Stores tab
+- URL parsing for Mandarake and Suruga-ya
+- Keyword management and publisher list
+- Category/shop selection logic
+- Store switching functionality
+- All helper methods delegated
+
 **Next Steps:**
-- Phase 2: Extract Mandarake Tab (~800 lines)
 - Phase 3: Clean up utility methods (~500 lines)
+- Phase 4: Extract eBay tab UI (~300 lines)
 
 ---
 

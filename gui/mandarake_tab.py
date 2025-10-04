@@ -582,8 +582,59 @@ class MandarakeTab(ttk.Frame):
 
     def _load_from_url(self):
         """Load configuration from Mandarake/Suruga-ya URL."""
-        # TODO: Extract from gui_config.py
-        pass
+        from tkinter import messagebox
+        from urllib.parse import urlparse, parse_qs
+
+        url = self.main.mandarake_url_var.get().strip()
+        if not url:
+            messagebox.showinfo("No URL", "Please enter a store URL")
+            return
+
+        try:
+            # Detect store type from URL
+            if 'suruga-ya.jp' in url:
+                # Parse Suruga-ya URL
+                parsed = urlparse(url)
+                params = parse_qs(parsed.query)
+
+                config = {
+                    'search_url': url,  # Store the original URL
+                    'store': 'suruga-ya',
+                    'keyword': params.get('search_word', [''])[0],
+                    'category': params.get('category', [''])[0] or params.get('category2', [''])[0],
+                    'category1': params.get('category1', [''])[0],
+                    'category2': params.get('category2', [''])[0],
+                    'shop': params.get('tenpo_code', ['all'])[0],
+                    'exclude_word': params.get('exclude_word', [''])[0],
+                    'condition': params.get('sale_classified', ['all'])[0],
+                    'adult_only': params.get('adult_s', [''])[0] == '1',
+                }
+
+                # Update store selector
+                self.main.current_store.set("Suruga-ya")
+                self._on_store_changed()  # Load Suruga-ya categories
+
+            elif 'mandarake.co.jp' in url:
+                # Parse Mandarake URL
+                from mandarake_scraper import parse_mandarake_url
+                config = parse_mandarake_url(url)
+                config['search_url'] = url  # Store the original URL
+                config['store'] = 'mandarake'
+
+                # Update store selector
+                self.main.current_store.set("Mandarake")
+                self._on_store_changed()  # Load Mandarake categories
+            else:
+                messagebox.showerror("Error", "URL must be from Mandarake or Suruga-ya")
+                return
+
+            self.main._populate_from_config(config)
+            self.main.status_var.set(f"Loaded URL parameters from {config['store']}")
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Error", f"Failed to parse URL: {e}")
 
     def _update_preview(self, *args):
         """Update search URL preview based on current configuration."""
@@ -592,18 +643,100 @@ class MandarakeTab(ttk.Frame):
             self.main._update_preview(*args)
 
     def _commit_keyword_changes(self, event=None):
-        """Trim and commit keyword changes when focus leaves the field."""
-        # TODO: Extract from gui_config.py
-        pass
+        """Trim trailing spaces from keyword and rename file if needed (called on blur)."""
+        from gui import utils
+
+        if not hasattr(self.main, 'last_saved_path') or not self.main.last_saved_path:
+            return
+
+        # Don't rename during initial load
+        if not getattr(self.main, '_settings_loaded', False):
+            return
+
+        # Don't rename while loading a config
+        if getattr(self.main, '_loading_config', False):
+            return
+
+        try:
+            # Trim trailing spaces from keyword
+            current_keyword = self.main.keyword_var.get()
+            trimmed_keyword = current_keyword.rstrip()
+
+            # Only update if there were trailing spaces
+            if current_keyword != trimmed_keyword:
+                self.main.keyword_var.set(trimmed_keyword)
+
+            # Now check if filename should be updated
+            config = self.main._collect_config()
+            if config:
+                suggested_filename = utils.suggest_config_filename(config)
+                current_filename = self.main.last_saved_path.name
+
+                # If the suggested filename is different, rename the file
+                if suggested_filename != current_filename:
+                    new_path = self.main.last_saved_path.parent / suggested_filename
+
+                    # Only rename if new path doesn't exist or is the same file
+                    if not new_path.exists() or new_path == self.main.last_saved_path:
+                        old_path = self.main.last_saved_path
+
+                        # Find the tree item with the old path and update its mapping
+                        for item in self.main.config_tree.get_children():
+                            if self.main.config_paths.get(item) == old_path:
+                                self.main.config_paths[item] = new_path
+                                break
+
+                        # Delete old file if renaming
+                        if new_path != self.main.last_saved_path and self.main.last_saved_path.exists():
+                            self.main.last_saved_path.unlink()
+
+                        # Update the path
+                        self.main.last_saved_path = new_path
+                        print(f"[COMMIT] Renamed config to: {suggested_filename}")
+
+                        # Save and update tree
+                        self.main._save_config_to_path(config, self.main.last_saved_path, update_tree=True)
+        except Exception as e:
+            print(f"[COMMIT] Error: {e}")
 
     def _save_config_on_enter(self, event=None):
         """Auto-save config with new filename when Enter is pressed in keyword field."""
         return self.main._save_config_on_enter(event)
 
     def _show_keyword_menu(self, event):
-        """Show context menu for keyword entry."""
-        # TODO: Extract from gui_config.py
-        pass
+        """Show context menu on keyword entry."""
+        try:
+            # Always show menu - user can select text before right-clicking
+            self.main.keyword_menu.post(event.x_root, event.y_root)
+        except:
+            pass
+
+    def _add_to_publisher_list(self):
+        """Add selected text from keyword entry to publisher list."""
+        from tkinter import messagebox
+
+        try:
+            if self.main.keyword_entry.selection_present():
+                selected_text = self.main.keyword_entry.selection_get().strip()
+                if selected_text and len(selected_text) > 1:
+                    self.main.publisher_list.add(selected_text)
+                    self.main._save_publisher_list()
+                    messagebox.showinfo("Publisher Added", f"'{selected_text}' has been added to the publisher list.")
+                    print(f"[PUBLISHERS] Added: {selected_text}")
+        except Exception as e:
+            print(f"[PUBLISHERS] Error adding publisher: {e}")
+
+    def _set_keyword_field(self, text):
+        """Helper function to reliably set the keyword field."""
+        # Method 1: Use StringVar
+        self.main.keyword_var.set(text)
+
+        # Method 2: Direct widget manipulation (more reliable)
+        self.main.keyword_entry.delete(0, tk.END)
+        self.main.keyword_entry.insert(0, text)
+
+        # Force update
+        self.main.keyword_entry.update_idletasks()
 
     def _on_recent_hours_changed(self, *args):
         """Handle recent hours filter change."""
@@ -614,26 +747,94 @@ class MandarakeTab(ttk.Frame):
     # ==================== Helper Methods ====================
 
     def _on_listbox_sash_moved(self, event=None):
-        """Track user's manual sash position changes."""
-        # TODO: Extract from gui_config.py
-        pass
+        """Track when user manually moves the sash."""
+        if not hasattr(self.main, 'listbox_paned'):
+            return
+        try:
+            total_width = self.main.listbox_paned.winfo_width()
+            if total_width > 500:
+                sash_pos = self.main.listbox_paned.sash_coord(0)[0]
+                self.main._user_sash_ratio = sash_pos / total_width
+        except Exception:
+            pass
 
     def _resolve_shop(self):
-        """Resolve selected shop to code or 'all'."""
-        # TODO: Extract from gui_config.py
-        pass
+        """Get the selected shop code from the listbox."""
+        selection = self.main.shop_listbox.curselection()
+        if not selection:
+            return "all"  # Default to all stores if nothing selected
+
+        index = selection[0]
+        shop_code = self.main.shop_code_map[index]
+
+        return shop_code if shop_code else "all"
 
     def _extract_code(self, label: str | None):
         """Extract code from label string."""
-        # TODO: Extract from gui_config.py
-        pass
+        from gui import utils
+        return utils.extract_code(label)
 
     def _match_main_code(self, code: str | None):
         """Match category code to main category."""
-        # TODO: Extract from gui_config.py
-        pass
+        from gui import utils
+        return utils.match_main_code(code)
 
     def _select_categories(self, categories):
-        """Select categories in the listbox."""
-        # TODO: Extract from gui_config.py
-        pass
+        """Select categories in the detail listbox."""
+        from gui import utils
+        from gui.constants import MAIN_CATEGORY_OPTIONS
+
+        self.main.detail_listbox.selection_clear(0, tk.END)
+        if not categories:
+            self.main.main_category_var.set('')
+            self._populate_detail_categories()
+            return
+
+        # Select main category
+        first_code = categories[0]
+        main_code = utils.match_main_code(first_code)
+        if main_code:
+            # Find the exact matching value from the combobox list
+            # This ensures the value matches the dropdown format exactly
+            for code, name in MAIN_CATEGORY_OPTIONS:
+                if code == main_code:
+                    label = f"{name} ({code})"
+                    self.main.main_category_var.set(label)
+                    break
+        else:
+            self.main.main_category_var.set('')
+
+        # Populate detail categories based on main category
+        self._populate_detail_categories(utils.extract_code(self.main.main_category_var.get()))
+
+        # Select detail categories and scroll to first selected
+        first_selected_idx = None
+        unknown_categories = []
+
+        for idx, code in enumerate(self.main.detail_code_map):
+            if code in categories:
+                self.main.detail_listbox.selection_set(idx)
+                if first_selected_idx is None:
+                    first_selected_idx = idx
+
+        # Handle unknown categories (not in current listbox)
+        for cat_code in categories:
+            if cat_code not in self.main.detail_code_map:
+                unknown_categories.append(cat_code)
+
+        # Add unknown categories to listbox temporarily
+        if unknown_categories:
+            for cat_code in unknown_categories:
+                # Add to detail_code_map and listbox
+                self.main.detail_code_map.append(cat_code)
+                display_text = f"Unknown Category ({cat_code})"
+                self.main.detail_listbox.insert(tk.END, display_text)
+                # Select the newly added item
+                new_idx = len(self.main.detail_code_map) - 1
+                self.main.detail_listbox.selection_set(new_idx)
+                if first_selected_idx is None:
+                    first_selected_idx = new_idx
+
+        # Scroll to make the first selected category visible
+        if first_selected_idx is not None:
+            self.main.detail_listbox.see(first_selected_idx)
