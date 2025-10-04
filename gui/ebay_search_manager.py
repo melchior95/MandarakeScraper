@@ -466,5 +466,103 @@ class EbaySearchManager:
             r for r in results
             if r.get('similarity', 0) >= min_sim and r.get('profit_margin', 0) >= min_profit
         ]
-        
+
         return filtered
+
+    def search_ebay_sold(self, title: str) -> dict | None:
+        """Search eBay for sold listings of an item with optional lazy search optimization.
+
+        Args:
+            title: Product title to search for
+
+        Returns:
+            dict: Search results with sold_count, median_price, etc., or None if failed
+        """
+        try:
+            # Import required modules
+            from mandarake_scraper import EbayAPI
+
+            # Create a dummy EbayAPI instance. No credentials needed for web scraping.
+            ebay_api = EbayAPI("", "")
+
+            # Get settings from main GUI
+            try:
+                days_back = int(self.main.ebay_days_back.get()) if hasattr(self.main, 'ebay_days_back') else 90
+            except (ValueError, AttributeError):
+                days_back = 90
+
+            # Check if lazy search is enabled
+            lazy_search_enabled = getattr(self.main, 'lazy_search_enabled', None)
+            use_lazy_search = lazy_search_enabled.get() if lazy_search_enabled else False
+
+            print(f"[EBAY DEBUG] Searching eBay for: '{title}' (last {days_back} days) using WEB SCRAPING")
+            if use_lazy_search:
+                print(f"[LAZY SEARCH] Enabled - will try optimized terms if initial search fails")
+
+            # Search for sold listings using web scraping
+            result = ebay_api.search_sold_listings_web(title, days_back=days_back)
+
+            # If lazy search is enabled and we got poor results OR eBay is blocking, try optimized search terms
+            if use_lazy_search and (not result or result.get('sold_count', 0) < 3 or result.get('error')):
+                error_info = f" (Error: {result.get('error')})" if result and result.get('error') else ""
+                print(f"[LAZY SEARCH] Initial search yielded {result.get('sold_count', 0) if result else 0} results{error_info} - trying optimized terms")
+
+                try:
+                    from search_optimizer import SearchOptimizer
+                    optimizer = SearchOptimizer()
+
+                    # Get optimized search terms
+                    optimization = optimizer.optimize_search_term(title, lazy_mode=True)
+                    optimized_terms = optimization['confidence_order'][:5]  # Try top 5 optimized terms
+
+                    print(f"[LAZY SEARCH] Trying {len(optimized_terms)} optimized terms: {optimized_terms}")
+
+                    best_result = result  # Keep original result as fallback
+                    best_count = result.get('sold_count', 0) if result else 0
+
+                    for optimized_term in optimized_terms:
+                        if optimized_term != title:  # Skip if same as original
+                            print(f"[LAZY SEARCH] Trying optimized term: '{optimized_term}'")
+
+                            opt_result = ebay_api.search_sold_listings_web(optimized_term, days_back=days_back)
+
+                            if opt_result and opt_result.get('sold_count', 0) > best_count:
+                                print(f"[LAZY SEARCH] Better result found: {opt_result['sold_count']} items vs {best_count}")
+                                best_result = opt_result
+                                best_result['search_term_used'] = optimized_term
+                                best_count = opt_result['sold_count']
+
+                                # If we found good results (5+ items), stop searching
+                                if best_count >= 5:
+                                    break
+
+                    result = best_result
+
+                except Exception as e:
+                    print(f"[LAZY SEARCH] Error during optimization: {e}")
+                    # Continue with original result
+
+                    # If eBay is blocking, explain why lazy search can't help
+                    if result and result.get('error') and any(term in str(result.get('error')).lower() for term in ['captcha', 'blocked', 'error page']):
+                        print(f"[LAZY SEARCH] Note: eBay is blocking automated access entirely. Lazy search cannot overcome CAPTCHA/blocking issues.")
+                        print(f"[LAZY SEARCH] Recommendation: Use the regular eBay Analysis tab with manual product titles instead.")
+
+            if result and result.get('error'):
+                print(f"[EBAY DEBUG] eBay web scrape error: {result['error']}")
+                return None
+
+            if not result or result.get('sold_count', 0) == 0:
+                search_term_used = result.get('search_term_used', title) if result else title
+                print(f"[EBAY DEBUG] No sold listings found for: {search_term_used}")
+                return None
+
+            search_term_used = result.get('search_term_used', title)
+            if search_term_used != title:
+                print(f"[LAZY SEARCH] Success! Used optimized term: '{search_term_used}'")
+
+            print(f"[EBAY DEBUG] Found {result['sold_count']} sold items, median price: ${result['median_price']}")
+            return result
+
+        except Exception as e:
+            print(f"[EBAY DEBUG] eBay search error: {e}")
+            return None

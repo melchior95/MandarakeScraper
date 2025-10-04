@@ -943,3 +943,125 @@ class MandarakeTab(ttk.Frame):
             self.main.status_var.set(f'Loaded results from {csv_path}')
         except Exception as exc:
             messagebox.showerror('Error', f'Failed to load results: {exc}')
+
+    def update_preview(self, *args):
+        """Update the search URL preview based on current form fields.
+
+        Builds Mandarake or Suruga-ya URLs from current field values and displays
+        in the preview label at bottom of window.
+
+        Args:
+            *args: Variable args from tkinter trace callbacks
+        """
+        from urllib.parse import quote
+
+        # Also trigger auto-save when preview updates
+        self.main._auto_save_config()
+
+        # If loading config with a provided URL, don't regenerate - keep the provided URL
+        if getattr(self.main, '_loading_config', False) and hasattr(self.main, '_provided_url') and self.main._provided_url:
+            return  # Keep the provided URL that was already set
+
+        # Clear provided URL when user makes changes to UI fields
+        # This allows regenerating the URL from current field values
+        if hasattr(self.main, '_provided_url') and self.main._provided_url:
+            self.main._provided_url = None  # Clear so URL gets regenerated
+
+        store = self.main.current_store.get()
+        keyword = self.main.keyword_var.get().strip()
+
+        params: list[tuple[str, str]] = []
+        notes: list[str] = []
+
+        if store == "Suruga-ya":
+            # Build Suruga-ya URL
+            if keyword:
+                params.append(("search_word", quote(keyword)))
+            params.append(("searchbox", "1"))
+
+            # Main category (category1)
+            main_category_text = self.main.main_category_var.get()
+            if main_category_text:
+                from gui import utils
+                main_code = utils.extract_code(main_category_text)
+                if main_code:
+                    params.append(("category1", main_code))
+
+            # Detailed category (category2)
+            categories = self.main._get_selected_categories()
+            if categories:
+                params.append(("category2", categories[0]))
+
+            # Exclude words
+            if hasattr(self.main, 'exclude_word_var'):
+                exclude = self.main.exclude_word_var.get().strip()
+                if exclude:
+                    params.append(("exclude_word", quote(exclude)))
+                    notes.append(f"exclude: {exclude}")
+
+            # Condition filter
+            if hasattr(self.main, 'condition_var'):
+                condition = self.main.condition_var.get()
+                if condition == "New Only":
+                    params.append(("sale_classified", "1"))
+                    notes.append("new only")
+                elif condition == "Used Only":
+                    params.append(("sale_classified", "2"))
+                    notes.append("used only")
+
+            # Adult filter for Suruga-ya
+            if hasattr(self.main, 'adult_filter_var') and self.main.adult_filter_var.get() == "Adult Only":
+                params.append(("adult_s", "1"))
+                notes.append("adult only")
+
+            # Shop filter
+            shop_value = self._resolve_shop()
+            if shop_value and shop_value != 'all':
+                params.append(("tenpo_code", shop_value))
+
+            # Build URL
+            query = '&'.join(f"{key}={value}" for key, value in params)
+            url = "https://www.suruga-ya.jp/search"
+            if query:
+                url = f"{url}?{query}"
+
+        else:
+            # Build Mandarake URL
+            if keyword:
+                params.append(("keyword", quote(keyword)))
+
+            # Add category even without keyword
+            categories = self.main._get_selected_categories()
+            if categories:
+                params.append(("categoryCode", categories[0]))
+                if len(categories) > 1:
+                    notes.append(f"+{len(categories) - 1} more categories")
+
+            shop_value = self._resolve_shop()
+            if shop_value:
+                params.append(("shop", quote(shop_value)))
+
+            if self.main.hide_sold_var.get():
+                params.append(("soldOut", '1'))
+
+            if self.main.language_var.get() == 'en':
+                params.append(("lang", "en"))
+
+            recent_hours = self.main._get_recent_hours_value()
+            if recent_hours:
+                params.append(("upToMinutes", str(recent_hours * 60)))
+                notes.append(f"last {recent_hours}h")
+
+            # Adult content filter for Mandarake
+            if hasattr(self.main, 'adult_filter_var') and self.main.adult_filter_var.get() == "Adult Only":
+                params.append(("r18", "1"))
+                notes.append("adult only")
+
+            # Build URL
+            query = '&'.join(f"{key}={value}" for key, value in params)
+            url = "https://order.mandarake.co.jp/order/listPage/list"
+            if query:
+                url = f"{url}?{query}"
+
+        note_str = f" ({'; '.join(notes)})" if notes else ''
+        self.main.url_var.set(f"{url}{note_str}")
