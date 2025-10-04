@@ -38,6 +38,7 @@ from gui import workers
 from gui.alert_tab import AlertTab
 from gui.mandarake_tab import MandarakeTab
 from gui.ebay_tab import EbayTab
+from gui.advanced_tab import AdvancedTab
 from gui.schedule_executor import ScheduleExecutor
 from gui.schedule_frame import ScheduleFrame
 from gui.configuration_manager import ConfigurationManager
@@ -413,165 +414,9 @@ With RANSAC enabled:
             self.ebay_tab = EbayTab(browserless_frame, self.settings, self.alert_tab, self)
             self.ebay_tab.pack(fill=tk.BOTH, expand=True)
 
-        # Advanced tab --------------------------------------------------
-        current_row = 0
-
-        # Scraper Options Section
-        ttk.Label(advanced_frame, text="Scraper Options", font=('TkDefaultFont', 9, 'bold')).grid(
-            row=current_row, column=0, columnspan=4, sticky=tk.W, padx=5, pady=(0, 5))
-        current_row += 1
-
-        self.fast_var = tk.BooleanVar(value=False)
-        self.resume_var = tk.BooleanVar(value=True)
-        self.debug_var = tk.BooleanVar(value=False)
-        self.mimic_var = tk.BooleanVar(value=True)  # Enable by default for Unicode support
-
-        ttk.Checkbutton(advanced_frame, text="Fast mode (skip eBay)", variable=self.fast_var).grid(
-            row=current_row, column=0, sticky=tk.W, **pad)
-        ttk.Checkbutton(advanced_frame, text="Resume interrupted runs", variable=self.resume_var).grid(
-            row=current_row, column=1, sticky=tk.W, **pad)
-        current_row += 1
-
-        ttk.Checkbutton(advanced_frame, text="Debug logging", variable=self.debug_var).grid(
-            row=current_row, column=0, sticky=tk.W, **pad)
-        ttk.Checkbutton(advanced_frame, text="Use browser mimic (recommended for Japanese text)",
-                       variable=self.mimic_var).grid(row=current_row, column=1, columnspan=2, sticky=tk.W, **pad)
-        self.mimic_var.trace_add('write', self._on_mimic_changed)
-        current_row += 1
-
-        # Max CSV items control
-        ttk.Label(advanced_frame, text="Max CSV items (0 = unlimited):").grid(
-            row=current_row, column=0, sticky=tk.W, **pad)
-        self.max_csv_items_var = tk.StringVar(value=str(self.settings.get_setting('scraper.max_csv_items', 0)))
-        max_csv_entry = ttk.Entry(advanced_frame, textvariable=self.max_csv_items_var, width=10)
-        max_csv_entry.grid(row=current_row, column=1, sticky=tk.W, **pad)
-        self.max_csv_items_var.trace_add('write', self._on_max_csv_items_changed)
-        current_row += 1
-
-        # Separator
-        ttk.Separator(advanced_frame, orient='horizontal').grid(
-            row=current_row, column=0, columnspan=4, sticky='ew', pady=10)
-        current_row += 1
-
-        # eBay Search Method Section
-        ttk.Label(advanced_frame, text="eBay Search Method", font=('TkDefaultFont', 9, 'bold')).grid(
-            row=current_row, column=0, columnspan=4, sticky=tk.W, padx=5, pady=(0, 5))
-        current_row += 1
-
-        self.ebay_search_method = tk.StringVar(value="scrapy")
-        ttk.Radiobutton(advanced_frame, text="Scrapy (Sold Listings - slower, more complete)",
-                       variable=self.ebay_search_method, value="scrapy").grid(
-            row=current_row, column=0, columnspan=2, sticky=tk.W, **pad)
-        current_row += 1
-        ttk.Radiobutton(advanced_frame, text="eBay API (Active Listings - faster, official API)",
-                       variable=self.ebay_search_method, value="api").grid(
-            row=current_row, column=0, columnspan=2, sticky=tk.W, **pad)
-        current_row += 1
-
-        # Separator
-        ttk.Separator(advanced_frame, orient='horizontal').grid(
-            row=current_row, column=0, columnspan=4, sticky='ew', pady=10)
-        current_row += 1
-
-        # Marketplace Toggles Section
-        ttk.Label(advanced_frame, text="Enabled Marketplaces", font=('TkDefaultFont', 9, 'bold')).grid(
-            row=current_row, column=0, columnspan=4, sticky=tk.W, padx=5, pady=(0, 5))
-        current_row += 1
-
-        # Load current toggles
-        marketplace_toggles = self.settings.get_marketplace_toggles()
-
-        # Create toggle variables
-        self.mandarake_enabled = tk.BooleanVar(value=marketplace_toggles.get('mandarake', True))
-        self.ebay_enabled = tk.BooleanVar(value=marketplace_toggles.get('ebay', True))
-        self.surugaya_enabled = tk.BooleanVar(value=marketplace_toggles.get('surugaya', False))
-        self.dejapan_enabled = tk.BooleanVar(value=marketplace_toggles.get('dejapan', False))
-        self.alerts_enabled = tk.BooleanVar(value=marketplace_toggles.get('alerts', True))
-
-        # Create checkboxes
-        ttk.Checkbutton(advanced_frame, text="Mandarake", variable=self.mandarake_enabled,
-                       command=self._on_marketplace_toggle).grid(
-            row=current_row, column=0, sticky=tk.W, **pad)
-        ttk.Checkbutton(advanced_frame, text="eBay", variable=self.ebay_enabled,
-                       command=self._on_marketplace_toggle).grid(
-            row=current_row, column=1, sticky=tk.W, **pad)
-        current_row += 1
-
-        ttk.Checkbutton(advanced_frame, text="Suruga-ya", variable=self.surugaya_enabled,
-                       command=self._on_marketplace_toggle).grid(
-            row=current_row, column=0, sticky=tk.W, **pad)
-        ttk.Checkbutton(advanced_frame, text="DejaJapan", variable=self.dejapan_enabled,
-                       command=self._on_marketplace_toggle).grid(
-            row=current_row, column=1, sticky=tk.W, **pad)
-        current_row += 1
-
-        ttk.Checkbutton(advanced_frame, text="Review/Alerts Tab", variable=self.alerts_enabled,
-                       command=self._on_marketplace_toggle).grid(
-            row=current_row, column=0, sticky=tk.W, **pad)
-        current_row += 1
-
-        # Restart warning
-        ttk.Label(advanced_frame, text="(Restart required for changes to take effect)",
-                 foreground='gray', font=('TkDefaultFont', 8)).grid(
-            row=current_row, column=0, columnspan=2, sticky=tk.W, padx=5)
-        current_row += 1
-
-        # Separator
-        ttk.Separator(advanced_frame, orient='horizontal').grid(
-            row=current_row, column=0, columnspan=4, sticky='ew', pady=10)
-        current_row += 1
-
-        # Scheduling Section
-        ttk.Label(advanced_frame, text="Scheduling", font=('TkDefaultFont', 9, 'bold')).grid(
-            row=current_row, column=0, columnspan=4, sticky=tk.W, padx=5, pady=(0, 5))
-        current_row += 1
-
-        self.schedule_var = tk.StringVar()
-        ttk.Label(advanced_frame, text="Schedule (HH:MM):").grid(
-            row=current_row, column=0, sticky=tk.W, **pad)
-        ttk.Entry(advanced_frame, textvariable=self.schedule_var, width=10).grid(
-            row=current_row, column=1, sticky=tk.W, **pad)
-        ttk.Label(advanced_frame, text="(Daily run time)", foreground='gray').grid(
-            row=current_row, column=2, sticky=tk.W, padx=(5, 0))
-        current_row += 1
-
-        # Separator
-        ttk.Separator(advanced_frame, orient='horizontal').grid(
-            row=current_row, column=0, columnspan=4, sticky='ew', pady=10)
-        current_row += 1
-
-        # Output Settings Section
-        ttk.Label(advanced_frame, text="Output Settings", font=('TkDefaultFont', 9, 'bold')).grid(
-            row=current_row, column=0, columnspan=4, sticky=tk.W, padx=5, pady=(0, 5))
-        current_row += 1
-
-        ttk.Label(advanced_frame, text="CSV Output:").grid(
-            row=current_row, column=0, sticky=tk.W, **pad)
-        ttk.Entry(advanced_frame, textvariable=self.csv_path_var, width=32, state='readonly').grid(
-            row=current_row, column=1, columnspan=2, sticky=tk.W, **pad)
-        ttk.Label(advanced_frame, text="(Auto-generated)", foreground='gray').grid(
-            row=current_row, column=3, sticky=tk.W, padx=(5, 0))
-        current_row += 1
-
-        ttk.Label(advanced_frame, text="Image Download Folder:").grid(
-            row=current_row, column=0, sticky=tk.W, **pad)
-        ttk.Entry(advanced_frame, textvariable=self.download_dir_var, width=32, state='readonly').grid(
-            row=current_row, column=1, columnspan=2, sticky=tk.W, **pad)
-        ttk.Label(advanced_frame, text="(Auto-generated)", foreground='gray').grid(
-            row=current_row, column=3, sticky=tk.W, padx=(5, 0))
-        current_row += 1
-
-        ttk.Label(advanced_frame, text="Thumbnail width (px):").grid(
-            row=current_row, column=0, sticky=tk.W, **pad)
-        ttk.Entry(advanced_frame, textvariable=self.thumbnails_var, width=10).grid(
-            row=current_row, column=1, sticky=tk.W, **pad)
-        current_row += 1
-
-        # CSV Thumbnails toggle
-        self.csv_show_thumbnails = tk.BooleanVar(value=True)
-        ttk.Checkbutton(advanced_frame, text="Show CSV thumbnails", variable=self.csv_show_thumbnails, command=self.toggle_csv_thumbnails).grid(
-            row=current_row, column=0, columnspan=2, sticky=tk.W, **pad)
-        current_row += 1
+        # Advanced tab - Create using AdvancedTab module
+        self.advanced_tab = AdvancedTab(advanced_frame, self.settings, self)
+        self.advanced_tab.pack(fill=tk.BOTH, expand=True)
 
         # Restore paned window position after widgets are created
         self.after(100, self._restore_paned_position)
@@ -1054,8 +899,8 @@ With RANSAC enabled:
             config_path = self._save_config_autoname(config)
             self.status_var.set(f"Running scraper: {config_path}")
 
-        mimic = bool(self.mimic_var.get())
-        print(f"[GUI DEBUG] Checkbox mimic value: {self.mimic_var.get()}")
+        mimic = bool(self.advanced_tab.mimic_var.get())
+        print(f"[GUI DEBUG] Checkbox mimic value: {self.advanced_tab.mimic_var.get()}")
         print(f"[GUI DEBUG] Bool mimic value: {mimic}")
         self.cancel_requested = False  # Reset cancel flag
         self.cancel_button.config(state='normal')  # Enable cancel button
@@ -1584,7 +1429,7 @@ With RANSAC enabled:
         self.gui_settings = settings
         try:
             self._settings_loaded = False
-            self.mimic_var.set(settings.get('mimic', True))  # Default to True for Unicode support
+            self.advanced_tab.mimic_var.set(settings.get('mimic', True))  # Default to True for Unicode support
 
             # Load eBay search settings if they exist
             if hasattr(self, 'browserless_max_results'):
@@ -1637,7 +1482,7 @@ With RANSAC enabled:
                 listbox_ratio = self._user_sash_ratio
 
             data = {
-                'mimic': bool(self.mimic_var.get()),
+                'mimic': bool(self.advanced_tab.mimic_var.get()),
                 'ebay_max_results': self.ebay_tab.browserless_max_results.get() if hasattr(self, 'browserless_max_results') else "10",
                 'ebay_max_comparisons': self.browserless_max_comparisons.get() if hasattr(self, 'browserless_max_comparisons') else "MAX",
                 'csv_in_stock_only': bool(self.ebay_tab.csv_in_stock_only.get()) if hasattr(self, 'csv_in_stock_only') else True,
@@ -1655,7 +1500,7 @@ With RANSAC enabled:
 
     def _on_max_csv_items_changed(self, *args):
         """Handle max CSV items setting change with validation"""
-        value = self.max_csv_items_var.get().strip()
+        value = self.advanced_tab.max_csv_items_var.get().strip()
 
         # Allow empty or numeric values only
         if value == '':
@@ -1673,17 +1518,17 @@ With RANSAC enabled:
         except ValueError:
             # Invalid input - reset to current saved value
             current_value = self.settings.get_setting('scraper.max_csv_items', 0)
-            self.max_csv_items_var.set(str(current_value))
+            self.advanced_tab.max_csv_items_var.set(str(current_value))
 
     def _on_marketplace_toggle(self):
         """Handle marketplace toggle changes"""
         # Save toggle state
         toggles = {
-            'mandarake': self.mandarake_enabled.get(),
-            'ebay': self.ebay_enabled.get(),
-            'surugaya': self.surugaya_enabled.get(),
-            'dejapan': self.dejapan_enabled.get(),
-            'alerts': self.alerts_enabled.get()
+            'mandarake': self.advanced_tab.mandarake_enabled.get(),
+            'ebay': self.advanced_tab.ebay_enabled.get(),
+            'surugaya': self.advanced_tab.surugaya_enabled.get(),
+            'dejapan': self.advanced_tab.dejapan_enabled.get(),
+            'alerts': self.advanced_tab.alerts_enabled.get()
         }
         self.settings.save_marketplace_toggles(toggles)
 
@@ -2550,9 +2395,9 @@ With RANSAC enabled:
                 'keyword': self.keyword_var.get().strip(),
                 'hide_sold_out': self.hide_sold_var.get(),
                 'language': self.language_var.get(),
-                'fast': self.fast_var.get(),
-                'resume': self.resume_var.get(),
-                'debug': self.debug_var.get(),
+                'fast': self.advanced_tab.fast_var.get(),
+                'resume': self.advanced_tab.resume_var.get(),
+                'debug': self.advanced_tab.debug_var.get(),
             }
             # Add shop if selected
             shop_value = self._resolve_shop()
@@ -2721,9 +2566,9 @@ With RANSAC enabled:
             if hasattr(self, 'csv_add_secondary_keyword'):
                 self.ebay_tab.csv_add_secondary_keyword.set(config.get('csv_add_secondary_keyword', False))
             self.language_var.set(config.get('language', 'en'))
-            self.fast_var.set(config.get('fast', False))
-            self.resume_var.set(config.get('resume', True))
-            self.debug_var.set(config.get('debug', False))
+            self.advanced_tab.fast_var.set(config.get('fast', False))
+            self.advanced_tab.resume_var.set(config.get('resume', True))
+            self.advanced_tab.debug_var.set(config.get('debug', False))
 
         # Load adult filter
             if hasattr(self, 'adult_filter_var'):
@@ -2754,7 +2599,7 @@ With RANSAC enabled:
             else:
                 self.results_per_page_var.set(str(config.get('results_per_page', '240')))
 
-            self.schedule_var.set(config.get('schedule', ''))
+            self.advanced_tab.schedule_var.set(config.get('schedule', ''))
         finally:
             # Always reset loading flag
             self._loading_config = False
@@ -2783,7 +2628,7 @@ With RANSAC enabled:
         """Run Scrapy eBay search (text only, no image comparison)"""
         query = self.ebay_tab.browserless_query_var.get().strip()
         max_results = int(self.ebay_tab.browserless_max_results.get())
-        search_method = self.ebay_search_method.get()  # "scrapy" or "api"
+        search_method = self.advanced_tab.ebay_search_method.get()  # "scrapy" or "api"
         
         if self.ebay_tab.ebay_search_manager:
             self.ebay_tab.ebay_search_manager.run_text_search(query, max_results, search_method)
@@ -2803,7 +2648,7 @@ With RANSAC enabled:
         """Worker method for eBay text-only search (runs in background thread)"""
         query = self.ebay_tab.browserless_query_var.get().strip()
         max_results = int(self.ebay_tab.browserless_max_results.get())
-        search_method = self.ebay_search_method.get()  # "scrapy" or "api"
+        search_method = self.advanced_tab.ebay_search_method.get()  # "scrapy" or "api"
 
         def update_callback(message):
             self.after(0, lambda: self.ebay_tab.browserless_status.set(message))
