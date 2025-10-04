@@ -3379,7 +3379,8 @@ With RANSAC enabled:
             if add_secondary and self.csv_filtered_items:
                 # Get first filtered item and extract secondary keyword
                 first_item = self.csv_filtered_items[0]
-                title = first_item.get('title', '')
+                # Use English translated title if available
+                title = first_item.get('title_en', first_item.get('title', ''))
                 if title:
                     secondary = self._extract_secondary_keyword(title, keyword)
                     if secondary:
@@ -3406,9 +3407,9 @@ With RANSAC enabled:
             keyword = first_item.get('keyword', '').strip()
             category = first_item.get('category', '')
 
-            # If no keyword field, try to extract from title
+            # If no keyword field, try to extract from title (prefer English translation)
             if not keyword:
-                title = first_item.get('title', '')
+                title = first_item.get('title_en', first_item.get('title', ''))
                 keyword = ' '.join(title.split()[:3]) if title else ''
 
             if not keyword:
@@ -3424,7 +3425,8 @@ With RANSAC enabled:
             add_secondary = hasattr(self, 'csv_add_secondary_keyword') and self.csv_add_secondary_keyword.get()
 
             if add_secondary:
-                title = first_item.get('title', '')
+                # Use English translated title if available
+                title = first_item.get('title_en', first_item.get('title', ''))
                 if title:
                     secondary = self._extract_secondary_keyword(title, keyword)
                     if secondary:
@@ -4363,8 +4365,8 @@ With RANSAC enabled:
             if 0 <= index < len(items_list):
                 row = items_list[index]
 
-                # Get the full title
-                title = row.get('title', '')
+                # Get the full title (prefer English translation)
+                title = row.get('title_en', row.get('title', ''))
                 if title:
                     # Update the eBay search query field
                     self.browserless_query_var.set(title)
@@ -4390,8 +4392,8 @@ With RANSAC enabled:
             if 0 <= index < len(items_list):
                 row = items_list[index]
 
-                # Get the title and primary keyword
-                title = row.get('title', '')
+                # Get the title (prefer English translation) and primary keyword
+                title = row.get('title_en', row.get('title', ''))
                 primary_keyword = row.get('keyword', '')
 
                 # Extract secondary keyword using the extraction algorithm
