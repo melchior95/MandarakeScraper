@@ -41,6 +41,7 @@ from gui.schedule_frame import ScheduleFrame
 from gui.configuration_manager import ConfigurationManager
 from gui.tree_manager import TreeManager
 from gui.ebay_search_manager import EbaySearchManager
+from gui.csv_comparison_manager import CSVComparisonManager
 
 
 class ScraperGUI(tk.Tk):
@@ -104,6 +105,7 @@ class ScraperGUI(tk.Tk):
         self.config_manager = ConfigurationManager(self.settings)
         self.tree_manager = None  # Will be initialized after tree widget is created
         self.ebay_search_manager = None  # Will be initialized after eBay tree widget is created
+        self.csv_comparison_manager = None  # Will be initialized after CSV tree widget is created
 
         # Create menu bar
         self._create_menu_bar()
@@ -993,6 +995,9 @@ With RANSAC enabled:
 
         # Add the CSV comparison frame to the paned window
         self.ebay_paned.add(csv_compare_frame, minsize=200)
+
+        # Initialize CSV comparison manager
+        self.csv_comparison_manager = CSVComparisonManager(self)
 
         # Initialize variables
         self.browserless_image_path = None
@@ -4088,16 +4093,10 @@ With RANSAC enabled:
 
     def load_csv_for_comparison(self):
         """Load CSV file for batch comparison"""
-        file_path = filedialog.askopenfilename(
-            title="Select CSV file for comparison",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            initialdir="results"
-        )
-
-        if file_path:
-            success = self._load_csv_worker(Path(file_path))
-            if not success:
-                messagebox.showerror("Error", f"Failed to load CSV: {file_path}")
+        if self.csv_comparison_manager:
+            self.csv_comparison_manager.load_csv_for_comparison()
+        else:
+            messagebox.showerror("Error", "CSV comparison manager not initialized")
 
     def filter_csv_items(self):
         """Filter and display CSV items based on in-stock filter - fast load, thumbnails loaded on demand"""
