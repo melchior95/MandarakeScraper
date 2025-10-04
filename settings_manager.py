@@ -29,7 +29,46 @@ class SettingsManager:
                 "maximized": False
             },
 
-            # eBay Analysis settings
+            # General preferences
+            "general": {
+                "language": "en",
+                "thumbnail_width": 400,
+                "csv_thumbnails_enabled": True,
+                "auto_save_configs": True,
+                "recent_files_limit": 10
+            },
+
+            # Scraper-specific defaults
+            "scrapers": {
+                "mandarake": {
+                    "max_pages": 2,
+                    "results_per_page": 48,
+                    "resume": True,
+                    "browser_mimic": True
+                },
+                "surugaya": {
+                    "max_pages": 2,
+                    "results_per_page": 50,
+                    "show_out_of_stock": False,
+                    "translate_titles": True
+                }
+            },
+
+            # eBay integration settings
+            "ebay": {
+                "search_method": "scrapy",
+                "max_results": 10,
+                "sold_listings": True,
+                "days_back": 90
+            },
+
+            # eBay API credentials
+            "ebay_api": {
+                "client_id": "",
+                "client_secret": ""
+            },
+
+            # eBay Analysis settings (legacy, keep for compatibility)
             "ebay_analysis": {
                 "min_sold_items": 3,
                 "search_days_back": 90,
@@ -37,15 +76,37 @@ class SettingsManager:
                 "usd_jpy_rate": 150.0
             },
 
+            # Image comparison settings
+            "image_comparison": {
+                "similarity_threshold": 70,
+                "profit_threshold": 20,
+                "enable_ransac": False,
+                "save_debug_images": False,
+                "weights": {
+                    "template": 60,
+                    "orb": 25,
+                    "ssim": 10,
+                    "histogram": 5
+                }
+            },
+
             # Alert tab filter settings
             "alerts": {
                 "filter_min_similarity": 70.0,
                 "filter_min_profit": 20.0,
                 "ebay_send_min_similarity": 70.0,
-                "ebay_send_min_profit": 20.0
+                "ebay_send_min_profit": 20.0,
+                "auto_send": False
             },
 
-            # Scraper settings
+            # Output directories
+            "output": {
+                "csv_dir": "results",
+                "images_dir": "images",
+                "debug_dir": "debug_comparison"
+            },
+
+            # Scraper settings (legacy, keep for compatibility)
             "scraper": {
                 "last_config_directory": "",
                 "auto_save_results": True,
@@ -77,7 +138,7 @@ class SettingsManager:
                 "version": "1.0.0",
                 "first_run": True,
                 "last_updated": None,
-                "settings_version": 1
+                "settings_version": 2  # Incremented for new structure
             },
 
             # Marketplace toggles and settings
@@ -310,6 +371,19 @@ class SettingsManager:
         favorites = self.get_setting("marketplaces.dejapan.favorite_sellers", [])
         favorites = [s for s in favorites if s.get("id") != seller_id]
         self.set_setting("marketplaces.dejapan.favorite_sellers", favorites)
+        self.save_settings()
+
+    def get_ebay_credentials(self) -> Dict[str, str]:
+        """Get eBay API credentials"""
+        return self.get_setting("ebay_api", {
+            "client_id": "",
+            "client_secret": ""
+        })
+
+    def save_ebay_credentials(self, client_id: str, client_secret: str):
+        """Save eBay API credentials"""
+        self.set_setting("ebay_api.client_id", client_id)
+        self.set_setting("ebay_api.client_secret", client_secret)
         self.save_settings()
 
     def add_recent_config_file(self, file_path: str, max_recent: int = 10):

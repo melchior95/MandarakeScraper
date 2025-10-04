@@ -33,16 +33,20 @@ class AdvancedTab(ttk.Frame):
         self.settings = settings_manager
         self.main_window = main_window
 
-        # Initialize variables
+        # Initialize variables - load from settings
         self.fast_var = tk.BooleanVar(value=False)
-        self.resume_var = tk.BooleanVar(value=True)
+        default_resume = settings_manager.get_setting('scrapers.mandarake.resume', True)
+        self.resume_var = tk.BooleanVar(value=default_resume)
         self.debug_var = tk.BooleanVar(value=False)
-        self.mimic_var = tk.BooleanVar(value=True)  # Enable by default for Unicode support
+        default_mimic = settings_manager.get_setting('scrapers.mandarake.browser_mimic', True)
+        self.mimic_var = tk.BooleanVar(value=default_mimic)
         self.max_csv_items_var = tk.StringVar(
             value=str(settings_manager.get_setting('scraper.max_csv_items', 0))
         )
-        self.ebay_search_method = tk.StringVar(value="scrapy")
-        self.csv_show_thumbnails = tk.BooleanVar(value=True)
+        default_search_method = settings_manager.get_setting('ebay.search_method', 'scrapy')
+        self.ebay_search_method = tk.StringVar(value=default_search_method)
+        default_show_thumbnails = settings_manager.get_setting('general.csv_thumbnails_enabled', True)
+        self.csv_show_thumbnails = tk.BooleanVar(value=default_show_thumbnails)
 
         # Marketplace toggles
         marketplace_toggles = settings_manager.get_marketplace_toggles()

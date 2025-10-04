@@ -2,13 +2,14 @@
 import tkinter as tk
 from tkinter import messagebox, filedialog
 from pathlib import Path
+from typing import Optional, List
 import json
 
 
 class MenuManager:
     """Manages application menu bar and menu-related operations."""
 
-    def __init__(self, root, settings_manager):
+    def __init__(self, root, settings_manager) -> None:
         """Initialize menu manager.
 
         Args:
@@ -17,9 +18,9 @@ class MenuManager:
         """
         self.root = root
         self.settings = settings_manager
-        self.recent_menu = None
+        self.recent_menu: Optional[tk.Menu] = None
 
-    def create_menu_bar(self):
+    def create_menu_bar(self) -> None:
         """Create the application menu bar."""
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
@@ -33,6 +34,8 @@ class MenuManager:
         file_menu.add_cascade(label="Recent Configs", menu=self.recent_menu)
         self.update_recent_menu()
 
+        file_menu.add_separator()
+        file_menu.add_command(label="Preferences...", command=self.show_preferences)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.on_closing)
 
@@ -51,7 +54,7 @@ class MenuManager:
         help_menu.add_command(label="Image Search Guide", command=self.show_image_search_help)
         help_menu.add_command(label="About", command=self.show_about)
 
-    def update_recent_menu(self):
+    def update_recent_menu(self) -> None:
         """Update the recent files menu."""
         self.recent_menu.delete(0, tk.END)
         recent_files = self.settings.get_recent_config_files()
@@ -66,7 +69,7 @@ class MenuManager:
         else:
             self.recent_menu.add_command(label="No recent files", state=tk.DISABLED)
 
-    def load_recent_config(self, file_path: str):
+    def load_recent_config(self, file_path: str) -> None:
         """Load a recent config file."""
         try:
             if Path(file_path).exists():
@@ -86,7 +89,7 @@ class MenuManager:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load config: {e}")
 
-    def show_settings_summary(self):
+    def show_settings_summary(self) -> None:
         """Show a dialog with current settings summary."""
         from tkinter import ttk
         summary = self.settings.get_settings_summary()
@@ -113,7 +116,7 @@ class MenuManager:
 
         ttk.Button(summary_window, text="Close", command=summary_window.destroy).pack(pady=10)
 
-    def reset_settings(self):
+    def reset_settings(self) -> None:
         """Reset all settings to defaults."""
         if messagebox.askyesno("Reset Settings", "Are you sure you want to reset all settings to defaults?\n\nThis action cannot be undone."):
             if self.settings.reset_to_defaults():
@@ -121,7 +124,7 @@ class MenuManager:
             else:
                 messagebox.showerror("Error", "Failed to reset settings.")
 
-    def export_settings(self):
+    def export_settings(self) -> None:
         """Export current settings to a file."""
         file_path = filedialog.asksaveasfilename(
             title="Export Settings",
@@ -135,7 +138,7 @@ class MenuManager:
             else:
                 messagebox.showerror("Error", "Failed to export settings.")
 
-    def import_settings(self):
+    def import_settings(self) -> None:
         """Import settings from a file."""
         file_path = filedialog.askopenfilename(
             title="Import Settings",
@@ -148,6 +151,12 @@ class MenuManager:
                     messagebox.showinfo("Success", "Settings imported successfully.\n\nRestart the application to see all changes.")
                 else:
                     messagebox.showerror("Error", "Failed to import settings.")
+
+    def show_preferences(self) -> None:
+        """Show the unified preferences dialog."""
+        from gui.settings_dialog import SettingsDialog
+        dialog = SettingsDialog(self.root, self.settings)
+        self.root.wait_window(dialog)
 
     def show_image_search_help(self):
         """Show image search help dialog."""

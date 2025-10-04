@@ -301,8 +301,8 @@ With RANSAC enabled:
                     sash_coords = self.main_window.ebay_paned.sash_coord(0)  # First sash
                     if sash_coords:
                         ebay_paned_pos = sash_coords[1]  # Y coordinate
-                except:
-                    pass
+                except Exception as e:
+                    logging.debug(f"Failed to get eBay paned sash position: {e}")
 
             # Save window settings with paned position
             settings_dict = {
@@ -331,7 +331,8 @@ With RANSAC enabled:
                 return int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
             else:
                 return 780, 760, 100, 100
-        except:
+        except (ValueError, AttributeError, TypeError) as e:
+            logging.warning(f"Failed to parse geometry string '{geometry_string}': {e}")
             return 780, 760, 100, 100
 
     def restore_paned_position(self):
@@ -398,6 +399,12 @@ With RANSAC enabled:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load config: {e}")
 
+    def show_preferences_dialog(self):
+        """Show the unified preferences dialog."""
+        from gui.settings_dialog import SettingsDialog
+        dialog = SettingsDialog(self.main_window, self.main_window.settings)
+        self.main_window.wait_window(dialog)
+
     def create_menu_bar(self):
         """Create the application menu bar."""
         menubar = tk.Menu(self.main_window)
@@ -412,6 +419,8 @@ With RANSAC enabled:
         file_menu.add_cascade(label="Recent Configs", menu=self.main_window.recent_menu)
         self.update_recent_menu()
 
+        file_menu.add_separator()
+        file_menu.add_command(label="Preferences...", command=self.show_preferences_dialog)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.main_window.on_closing)
 

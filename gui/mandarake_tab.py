@@ -11,6 +11,7 @@ This tab provides:
 
 import tkinter as tk
 from tkinter import ttk
+import logging
 from typing import Optional, Dict, List
 from pathlib import Path
 
@@ -58,14 +59,17 @@ class MandarakeTab(ttk.Frame):
         self.main.exclude_word_var = tk.StringVar()
         self.main.main_category_var = tk.StringVar()
 
-        # URL options
+        # URL options - load defaults from settings
         self.main.hide_sold_var = tk.BooleanVar(value=False)
-        self.main.results_per_page_var = tk.StringVar(value="48")
-        self.main.max_pages_var = tk.StringVar(value="2")
+        default_results_per_page = str(self.main.settings.get_setting('scrapers.mandarake.results_per_page', 48))
+        default_max_pages = str(self.main.settings.get_setting('scrapers.mandarake.max_pages', 2))
+        self.main.results_per_page_var = tk.StringVar(value=default_results_per_page)
+        self.main.max_pages_var = tk.StringVar(value=default_max_pages)
         self.main.recent_hours_var = tk.StringVar(value=RECENT_OPTIONS[0][0])
 
-        # Language and filters
-        self.main.language_var = tk.StringVar(value="en")
+        # Language and filters - load defaults from settings
+        default_language = self.main.settings.get_setting('general.language', 'en')
+        self.main.language_var = tk.StringVar(value=default_language)
         self.main.condition_var = tk.StringVar(value="all")
         self.main.adult_filter_var = tk.StringVar(value="All")
 
@@ -711,8 +715,8 @@ class MandarakeTab(ttk.Frame):
         try:
             # Always show menu - user can select text before right-clicking
             self.main.keyword_menu.post(event.x_root, event.y_root)
-        except:
-            pass
+        except tk.TclError as e:
+            logging.debug(f"Failed to show keyword menu: {e}")
 
     def _add_to_publisher_list(self):
         """Add selected text from keyword entry to publisher list."""

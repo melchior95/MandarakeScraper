@@ -10,6 +10,7 @@ This tab provides:
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+import logging
 import webbrowser
 from typing import Optional, List, Dict, Any
 
@@ -32,9 +33,10 @@ class EbayTab(ttk.Frame):
         self.alert_tab = alert_tab
         self.main_window = main_window
 
-        # Initialize variables
+        # Initialize variables - load from settings
         self.browserless_query_var = tk.StringVar(value="")
-        self.browserless_max_results = tk.StringVar(value="10")
+        default_max_results = str(settings_manager.get_setting('ebay.max_results', 10))
+        self.browserless_max_results = tk.StringVar(value=default_max_results)
         self.browserless_status = tk.StringVar(value="Ready for eBay text search")
 
         # Alert threshold variables
@@ -47,11 +49,12 @@ class EbayTab(ttk.Frame):
             value=alert_settings.get('ebay_send_min_profit', 20.0)
         )
 
-        # CSV comparison variables
+        # CSV comparison variables - load from settings
         self.csv_newly_listed_only = tk.BooleanVar(value=False)
         self.csv_in_stock_only = tk.BooleanVar(value=False)
         self.csv_add_secondary_keyword = tk.BooleanVar(value=False)
-        self.ransac_var = tk.BooleanVar(value=False)
+        default_ransac = settings_manager.get_setting('image_comparison.enable_ransac', False)
+        self.ransac_var = tk.BooleanVar(value=default_ransac)
 
         # Data storage
         self.browserless_image_path = None
@@ -167,8 +170,8 @@ class EbayTab(ttk.Frame):
         browserless_results_frame.columnconfigure(0, weight=1)
 
         # Results treeview with thumbnail support
-        browserless_columns = ('title', 'price', 'shipping', 'mandarake_price', 'profit_margin',
-                              'sold_date', 'similarity', 'url', 'mandarake_url')
+        browserless_columns = ('title', 'price', 'shipping', 'store_price', 'profit_margin',
+                              'sold_date', 'similarity', 'url', 'store_url')
 
         # Create custom style for eBay results treeview with thumbnails
         style = ttk.Style()
@@ -189,24 +192,24 @@ class EbayTab(ttk.Frame):
             'title': 'Title',
             'price': 'eBay Price',
             'shipping': 'Shipping',
-            'mandarake_price': 'Mandarake ¥',
+            'store_price': 'Store ¥',
             'profit_margin': 'Profit %',
             'sold_date': 'Sold Date',
             'similarity': 'Similarity %',
             'url': 'eBay URL',
-            'mandarake_url': 'Mandarake URL'
+            'store_url': 'Store URL'
         }
 
         browserless_widths = {
             'title': 280,
             'price': 80,
             'shipping': 70,
-            'mandarake_price': 90,
+            'store_price': 90,
             'profit_margin': 80,
             'sold_date': 100,
             'similarity': 90,
             'url': 180,
-            'mandarake_url': 180
+            'store_url': 180
         }
 
         for col, heading in browserless_headings.items():
@@ -437,7 +440,7 @@ class EbayTab(ttk.Frame):
 
         # Initialize CSV comparison manager
         from gui.csv_comparison_manager import CSVComparisonManager
-        self.csv_comparison_manager = CSVComparisonManager(self.main_window)
+        self.csv_comparison_manager = CSVComparisonManager(self)
 
     # ==================== eBay Search Methods ====================
 
@@ -480,7 +483,7 @@ class EbayTab(ttk.Frame):
     def _on_csv_column_resize(self, event):
         """Handle CSV column resize."""
         if self.csv_comparison_manager:
-            return self.csv_comparison_manager._on_csv_column_resize(event)
+            return self.csv_comparison_manager.on_csv_column_resize(event)
 
     def _on_csv_double_click(self, event):
         """Handle CSV item double-click."""
@@ -491,8 +494,8 @@ class EbayTab(ttk.Frame):
         """Show CSV tree context menu."""
         try:
             self.csv_tree_menu.post(event.x_root, event.y_root)
-        except:
-            pass
+        except tk.TclError as e:
+            logging.debug(f"Failed to show CSV tree menu: {e}")
 
     def _add_full_title_to_search(self):
         """Add full CSV title to search query."""
@@ -549,5 +552,5 @@ class EbayTab(ttk.Frame):
                 ebay_send_min_similarity=self.alert_min_similarity.get(),
                 ebay_send_min_profit=self.alert_min_profit.get()
             )
-        except:
-            pass  # Ignore errors during saving
+        except Exception as e:
+            logging.warning(f"Failed to save eBay alert settings: {e}")
