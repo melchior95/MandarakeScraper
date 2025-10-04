@@ -696,6 +696,7 @@ With RANSAC enabled:
         # Add right-click context menu for config tree
         self.config_tree_menu = tk.Menu(self.config_tree, tearoff=0)
         self.config_tree_menu.add_command(label="Load CSV", command=self._load_csv_from_config)
+        self.config_tree_menu.add_command(label="Edit Category", command=self._edit_category_from_menu)
         self.config_tree.bind("<Button-3>", self._show_config_tree_menu)
 
         # Double-click to edit category
@@ -3180,7 +3181,126 @@ With RANSAC enabled:
         item = self.config_tree.identify_row(event.y)
         if item:
             self.config_tree.selection_set(item)
+            # Store event coordinates for Edit Category dialog positioning
+            self._last_menu_event = event
             self.config_tree_menu.post(event.x_root, event.y_root)
+
+    def _edit_category_from_menu(self):
+        """Edit category from right-click menu"""
+        selection = self.config_tree.selection()
+        if not selection:
+            return
+
+        item = selection[0]
+        config_path = self.config_paths.get(item)
+        if not config_path:
+            return
+
+        # Load config
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load config: {e}")
+            return
+
+        # Get category info
+        store = config.get('store', 'mandarake')
+        category_code = config.get('category', '')
+        category_name = config.get('category_name', '')
+
+        # Only show dialog for unknown categories
+        if not category_name and category_code:
+            # Create a fake event with the stored menu coordinates
+            event = self._last_menu_event if hasattr(self, '_last_menu_event') else None
+            if not event:
+                # Fallback to center of screen if no event stored
+                class FakeEvent:
+                    x_root = self.winfo_rootx() + 200
+                    y_root = self.winfo_rooty() + 200
+                event = FakeEvent()
+
+            # Show the same dialog as double-click
+            self._show_edit_category_dialog(config_path, config, category_code, store, event)
+        else:
+            messagebox.showinfo("Info", "This category is already named. Double-click to edit.")
+
+    def _show_edit_category_dialog(self, config_path, config, category_code, store, event):
+        """Show dialog to edit/add category name"""
+        # Unknown code - allow user to add a name
+        dialog = tk.Toplevel(self)
+        dialog.title("Add Category Name")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Position dialog near mouse cursor
+        x = event.x_root + 10
+        y = event.y_root + 10
+        dialog.geometry(f"400x150+{x}+{y}")
+
+        ttk.Label(dialog, text=f"Unknown category code: {category_code}").pack(pady=10)
+        ttk.Label(dialog, text="Enter a name for this category:").pack(pady=5)
+
+        name_var = tk.StringVar()
+        name_entry = ttk.Entry(dialog, textvariable=name_var, width=40)
+        name_entry.pack(pady=5)
+        name_entry.focus()
+
+        def save_name():
+            name = name_var.get().strip()
+            if name:
+                # Save to config
+                config['category_name'] = name
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, ensure_ascii=False, indent=2)
+
+                # Add to category codes file
+                try:
+                    if store == 'suruga-ya':
+                        codes_file = Path('store_codes') / 'surugaya_codes.py'
+                    else:
+                        codes_file = Path('store_codes') / 'mandarake_codes.py'
+
+                    if codes_file.exists():
+                        # Read the file
+                        with open(codes_file, 'r', encoding='utf-8') as f:
+                            content = f.read()
+
+                        # Find the MANDARAKE_ALL_CATEGORIES or SURUGAYA_DETAILED_CATEGORIES dict
+                        if store == 'suruga-ya':
+                            dict_name = 'SURUGAYA_DETAILED_CATEGORIES'
+                        else:
+                            dict_name = 'MANDARAKE_ALL_CATEGORIES'
+
+                        # Add new entry before the closing brace
+                        # Format: '    'code': {'en': 'Name', 'jp': 'Name'},\n'
+                        new_entry = f"    '{category_code}': {{'en': '{name}', 'jp': '{name}'}},\n"
+
+                        # Find the dict and add entry
+                        import re
+                        pattern = f'{dict_name}\\s*=\\s*\\{{([^}}]+)\\}}'
+                        match = re.search(pattern, content, re.DOTALL)
+
+                        if match:
+                            dict_content = match.group(1)
+                            # Add new entry at the end
+                            updated_dict = dict_content.rstrip() + '\n' + new_entry
+                            updated_content = content[:match.start(1)] + updated_dict + content[match.end(1):]
+
+                            # Write back to file
+                            with open(codes_file, 'w', encoding='utf-8') as f:
+                                f.write(updated_content)
+
+                            print(f"[CATEGORY] Added {category_code}: {name} to {codes_file.name}")
+                except Exception as e:
+                    print(f"[CATEGORY] Could not update category file: {e}")
+
+                # Update tree
+                self._update_tree_item(config_path, config)
+                dialog.destroy()
+                messagebox.showinfo("Success", f"Category '{name}' saved for code {category_code}")
+
+        ttk.Button(dialog, text="Save", command=save_name).pack(pady=10)
 
     def _on_config_tree_double_click(self, event):
         """Handle double-click on config tree to edit category"""
@@ -3191,7 +3311,7 @@ With RANSAC enabled:
         if not item:
             return
 
-        # Check if category column was clicked (column #3, index starts at #1)
+        # Check if category column was clicked (column #4, index starts at #1)
         # Columns: store, file, keyword, category, shop...
         if column != '#4':  # Category is the 4th column
             return
@@ -3214,116 +3334,12 @@ With RANSAC enabled:
         category_code = config.get('category', '')
         category_name = config.get('category_name', '')
 
-        # Import category data
-        if store == 'suruga-ya':
-            from store_codes.surugaya_codes import SURUGAYA_CATEGORIES, SURUGAYA_DETAILED_CATEGORIES
-            all_categories = SURUGAYA_CATEGORIES
-        else:
-            from mandarake_codes import MANDARAKE_CATEGORIES
-            all_categories = MANDARAKE_CATEGORIES
-
-        # Check if unknown category (no name)
+        # Only show dialog for unknown categories
         if not category_name and category_code:
-            # Unknown code - allow user to add a name
-            dialog = tk.Toplevel(self)
-            dialog.title("Add Category Name")
-            dialog.geometry("400x150")
-            dialog.transient(self)
-            dialog.grab_set()
-
-            ttk.Label(dialog, text=f"Unknown category code: {category_code}").pack(pady=10)
-            ttk.Label(dialog, text="Enter a name for this category:").pack(pady=5)
-
-            name_var = tk.StringVar()
-            name_entry = ttk.Entry(dialog, textvariable=name_var, width=40)
-            name_entry.pack(pady=5)
-            name_entry.focus()
-
-            def save_name():
-                name = name_var.get().strip()
-                if name:
-                    # Save to config
-                    config['category_name'] = name
-                    with open(config_path, 'w', encoding='utf-8') as f:
-                        json.dump(config, f, ensure_ascii=False, indent=2)
-
-                    # Update tree
-                    self._update_tree_item(config_path, config)
-                    dialog.destroy()
-                    messagebox.showinfo("Success", f"Category name saved: {name}")
-
-            ttk.Button(dialog, text="Save", command=save_name).pack(pady=10)
-
+            self._show_edit_category_dialog(config_path, config, category_code, store, event)
         else:
-            # Known category - show selection dialog
-            dialog = tk.Toplevel(self)
-            dialog.title("Edit Category")
-            dialog.geometry("500x400")
-            dialog.transient(self)
-            dialog.grab_set()
-
-            ttk.Label(dialog, text="Select a category or enter a code:").pack(pady=10)
-
-            # Entry for manual code input
-            code_frame = ttk.Frame(dialog)
-            code_frame.pack(fill=tk.X, padx=10, pady=5)
-            ttk.Label(code_frame, text="Code:").pack(side=tk.LEFT)
-            code_var = tk.StringVar(value=category_code)
-            code_entry = ttk.Entry(code_frame, textvariable=code_var, width=20)
-            code_entry.pack(side=tk.LEFT, padx=5)
-
-            # Listbox for category selection
-            ttk.Label(dialog, text="Or select from list:").pack(pady=5)
-
-            list_frame = ttk.Frame(dialog)
-            list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-
-            scrollbar = ttk.Scrollbar(list_frame)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-            category_list = tk.Listbox(list_frame, yscrollcommand=scrollbar.set)
-            category_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            scrollbar.config(command=category_list.yview)
-
-            # Populate category list
-            category_items = []
-            for code, name in sorted(all_categories.items(), key=lambda x: x[1]):
-                display = f"{code} - {name}"
-                category_items.append((code, display))
-                category_list.insert(tk.END, display)
-
-            def on_select(event):
-                selection = category_list.curselection()
-                if selection:
-                    selected_code = category_items[selection[0]][0]
-                    code_var.set(selected_code)
-
-            category_list.bind('<<ListboxSelect>>', on_select)
-
-            # Select current category in list
-            for i, (code, _) in enumerate(category_items):
-                if code == category_code:
-                    category_list.selection_set(i)
-                    category_list.see(i)
-                    break
-
-            def save_category():
-                new_code = code_var.get().strip()
-                if new_code:
-                    # Update config
-                    config['category'] = new_code
-                    # Get category name from lookup
-                    config['category_name'] = all_categories.get(new_code, '')
-
-                    with open(config_path, 'w', encoding='utf-8') as f:
-                        json.dump(config, f, ensure_ascii=False, indent=2)
-
-                    # Update tree
-                    self._update_tree_item(config_path, config)
-                    dialog.destroy()
-                    messagebox.showinfo("Success", f"Category updated: {new_code}")
-
-            ttk.Button(dialog, text="Save", command=save_category).pack(pady=10)
+            # For known categories, could show a different dialog if needed
+            pass
 
     def _load_csv_from_config(self):
         """Load CSV file associated with selected config"""
