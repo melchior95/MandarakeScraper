@@ -433,6 +433,7 @@ With RANSAC enabled:
         # Restore paned window positions after widgets are created
         self.after(100, self._restore_paned_position)
         self.after(100, self._restore_vertical_paned_position)
+        self.after(100, self._restore_listbox_paned_position)
 
         # Global space key handler - must be at end of __init__
         # Bind to all widgets to intercept before widget-specific handlers
@@ -1143,13 +1144,6 @@ With RANSAC enabled:
                 self.ebay_tab.csv_add_secondary_keyword.set(settings.get('csv_add_secondary_keyword', False))
         finally:
             self._settings_loaded = True
-
-    def _on_window_mapped(self, event=None):
-        """Handle window map event - restore sash position once after window is shown."""
-        # Unbind after first call
-        self.unbind('<Map>')
-        # Wait for window to stabilize, then restore
-        self.after(100, self._restore_listbox_paned_position)
 
     def _on_listbox_sash_moved(self, event=None):
         """Track when user manually moves the sash."""
