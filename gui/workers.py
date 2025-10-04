@@ -1328,7 +1328,7 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
                             similarity = compare_images(ref_image, ebay_img)
 
                             # === SECONDARY KEYWORD BONUS ===
-                            # If secondary keyword from Mandarake title appears in eBay title, add +40% similarity
+                            # If secondary keyword from Mandarake title appears in eBay title, add +25% similarity
                             mandarake_title = item.get('title_en', item.get('title', ''))
                             primary_keyword = item.get('keyword', '')
                             publisher_list = set()  # Will be loaded from settings if available
@@ -1343,7 +1343,7 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
                                     # Check if secondary keyword appears in eBay title (case-insensitive)
                                     if secondary_keyword.lower() in ebay_title.lower():
                                         original_similarity = similarity
-                                        similarity = min(100.0, similarity + 40.0)  # Add +40%, cap at 100%
+                                        similarity = min(100.0, similarity + 25.0)  # Add +25%, cap at 100%
                                         print(f"[CSV BATCH] Secondary keyword match! '{secondary_keyword}' found in eBay title")
                                         print(f"[CSV BATCH]   Similarity boosted: {original_similarity:.1f}% → {similarity:.1f}%")
 
@@ -1549,7 +1549,7 @@ def compare_csv_items_individually_worker(items: List[Dict], max_results: int, u
                             similarity = compare_images(ref_image, ebay_img)
 
                             # === SECONDARY KEYWORD BONUS ===
-                            # If secondary keyword from Mandarake title appears in eBay title, add +40% similarity
+                            # If secondary keyword from Mandarake title appears in eBay title, add +25% similarity
                             mandarake_title = item.get('title_en', item.get('title', ''))
                             primary_keyword = item.get('keyword', '')
 
@@ -1563,7 +1563,7 @@ def compare_csv_items_individually_worker(items: List[Dict], max_results: int, u
                                     # Check if secondary keyword appears in eBay title (case-insensitive)
                                     if secondary_keyword.lower() in ebay_title.lower():
                                         original_similarity = similarity
-                                        similarity = min(100.0, similarity + 40.0)  # Add +40%, cap at 100%
+                                        similarity = min(100.0, similarity + 25.0)  # Add +25%, cap at 100%
                                         print(f"[CSV INDIVIDUAL] Secondary keyword match! '{secondary_keyword}' found in eBay title")
                                         print(f"[CSV INDIVIDUAL]   Similarity boosted: {original_similarity:.1f}% → {similarity:.1f}%")
 
