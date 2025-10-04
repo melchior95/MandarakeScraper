@@ -101,6 +101,9 @@ class MandarakeTab(ttk.Frame):
         # === BOTTOM PANE: Config/Schedule Management ===
         self._build_config_schedule_section(bottom_container, pad)
 
+        # Initialize with Mandarake store (default)
+        self._on_store_changed()
+
     def _build_search_fields(self, parent, pad):
         """Build search input fields (store selector, URL, keyword, main category)."""
         # Store selector
@@ -415,39 +418,165 @@ class MandarakeTab(ttk.Frame):
     # ==================== Store/Category Management ====================
 
     def _on_store_changed(self, event=None):
-        """Handle store selection change."""
-        # TODO: Extract from gui_config.py
-        pass
+        """Handle store selection change - reload categories and shops."""
+        store = self.main.current_store.get()
+
+        if store == "Mandarake":
+            # Reload Mandarake categories and shops
+            self._populate_detail_categories()
+            self._populate_shop_list()
+            # Update main category dropdown
+            self.main.main_category_combo['values'] = [f"{name} ({code})" for code, name in MAIN_CATEGORY_OPTIONS]
+            # Auto-select "Everything" category
+            self.main.main_category_var.set("Everything (00)")
+            # Set results per page to 240 (Mandarake default)
+            self.main.results_per_page_var.set('240')
+            # Trigger category selection to populate detailed categories
+            self._on_main_category_selected()
+
+            # Hide Suruga-ya specific fields
+            self.main.exclude_word_label.grid_remove()
+            self.main.exclude_word_entry.grid_remove()
+            self.main.condition_label.grid_remove()
+            self.main.condition_combo.grid_remove()
+
+        elif store == "Suruga-ya":
+            # Load Suruga-ya categories and shops
+            from store_codes.surugaya_codes import SURUGAYA_MAIN_CATEGORIES
+            # Update main category dropdown with Suruga-ya categories
+            category_values = [f"{name} ({code})" for code, name in sorted(SURUGAYA_MAIN_CATEGORIES.items())]
+            self.main.main_category_combo['values'] = category_values
+            # Auto-select first category (Games)
+            if category_values:
+                self.main.main_category_var.set(category_values[0])
+            # Load Suruga-ya shops
+            self._populate_surugaya_shops()
+            # Set results per page to 50 (Suruga-ya fixed)
+            self.main.results_per_page_var.set('50')
+            # Trigger category selection to populate detailed categories
+            self._on_main_category_selected()
+
+            # Show Suruga-ya specific fields
+            self.main.exclude_word_label.grid()
+            self.main.exclude_word_entry.grid()
+            self.main.condition_label.grid()
+            self.main.condition_combo.grid()
 
     def _populate_detail_categories(self, main_code=None):
         """Populate detail categories listbox based on selected store and main category."""
-        # TODO: Extract from gui_config.py
-        pass
+        from mandarake_codes import MANDARAKE_ALL_CATEGORIES
+
+        self.main.detail_listbox.delete(0, tk.END)
+        self.main.detail_code_map = []
+
+        def should_include(code: str) -> bool:
+            if not main_code:
+                return True
+            # If main_code is "00" (Everything), show all categories
+            if main_code == "00":
+                return True
+            return code.startswith(main_code)
+
+        for code, info in sorted(MANDARAKE_ALL_CATEGORIES.items()):
+            if should_include(code):
+                label = f"{code} - {info['en']}"
+                self.main.detail_listbox.insert(tk.END, label)
+                self.main.detail_code_map.append(code)
 
     def _populate_shop_list(self):
         """Populate shop listbox with all available stores."""
-        # TODO: Extract from gui_config.py
-        pass
+        from gui.constants import STORE_OPTIONS
+
+        self.main.shop_listbox.delete(0, tk.END)
+        self.main.shop_code_map = []
+
+        # Add "All Stores" option first
+        self.main.shop_listbox.insert(tk.END, "All Stores")
+        self.main.shop_code_map.append("all")
+
+        # Add all individual stores
+        for code, name in STORE_OPTIONS:
+            label = f"{name} ({code})"
+            self.main.shop_listbox.insert(tk.END, label)
+            self.main.shop_code_map.append(code)
+
+        # Default selection: All Stores
+        self.main.shop_listbox.selection_set(0)
 
     def _populate_surugaya_categories(self, main_code=None):
         """Populate Suruga-ya categories."""
-        # TODO: Extract from gui_config.py
-        pass
+        from store_codes.surugaya_codes import SURUGAYA_DETAILED_CATEGORIES
+
+        self.main.detail_listbox.delete(0, tk.END)
+        self.main.detail_code_map = []
+
+        if not main_code:
+            return
+
+        # Get categories for this main category
+        categories = SURUGAYA_DETAILED_CATEGORIES.get(main_code, {})
+        for code, name in sorted(categories.items()):
+            label = f"{code} - {name}"
+            self.main.detail_listbox.insert(tk.END, label)
+            self.main.detail_code_map.append(code)
 
     def _populate_surugaya_shops(self):
         """Populate Suruga-ya shops."""
-        # TODO: Extract from gui_config.py
-        pass
+        from store_codes.surugaya_codes import SURUGAYA_STORES
+
+        self.main.shop_listbox.delete(0, tk.END)
+        self.main.shop_code_map = []
+
+        # Add "All Stores" option first
+        self.main.shop_listbox.insert(tk.END, "All Stores")
+        self.main.shop_code_map.append("all")
+
+        # Add all individual stores
+        for code, name in sorted(SURUGAYA_STORES.items()):
+            label = f"{name} ({code})"
+            self.main.shop_listbox.insert(tk.END, label)
+            self.main.shop_code_map.append(code)
+
+        # Default selection: All Stores
+        self.main.shop_listbox.selection_set(0)
 
     def _on_main_category_selected(self, event=None):
         """Handle main category selection."""
-        # TODO: Extract from gui_config.py
-        pass
+        from gui import utils
+
+        # Don't auto-select during config loading - let _select_categories handle it
+        if getattr(self.main, '_loading_config', False):
+            return
+
+        code = utils.extract_code(self.main.main_category_var.get())
+
+        # Check which store is selected
+        store = self.main.current_store.get()
+
+        if store == "Suruga-ya":
+            # Use Suruga-ya hierarchical categories
+            self._populate_surugaya_categories(code)
+        else:
+            # Use Mandarake categories
+            self._populate_detail_categories(code)
+
+        # Auto-select the first detail category (the main category itself)
+        if self.main.detail_listbox.size() > 0:
+            self.main.detail_listbox.selection_clear(0, tk.END)
+            self.main.detail_listbox.selection_set(0)
+
+        self._update_preview()
 
     def _on_shop_selected(self, event=None):
-        """Handle shop selection change."""
-        # TODO: Extract from gui_config.py
-        pass
+        """Handle shop selection from listbox."""
+        selection = self.main.shop_listbox.curselection()
+        if not selection:
+            return
+
+        index = selection[0]
+        shop_code = self.main.shop_code_map[index]
+
+        self._update_preview()
 
     # ==================== URL and Preview ====================
 
@@ -458,8 +587,9 @@ class MandarakeTab(ttk.Frame):
 
     def _update_preview(self, *args):
         """Update search URL preview based on current configuration."""
-        # TODO: Extract from gui_config.py
-        pass
+        # Delegate to main window for now
+        if hasattr(self.main, '_update_preview'):
+            self.main._update_preview(*args)
 
     def _commit_keyword_changes(self, event=None):
         """Trim and commit keyword changes when focus leaves the field."""
