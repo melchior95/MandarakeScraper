@@ -658,67 +658,10 @@ With RANSAC enabled:
             pass  # Don't let cleanup errors prevent app exit
 
     def _convert_image_results_to_analysis(self, search_result: dict) -> list:
-        """Convert image search results to the format expected by the analysis display"""
-        results = []
-
-        # Get configuration values
-        try:
-            usd_to_jpy = float(self.usd_jpy_rate.get())
-            min_profit = float(self.min_profit_margin.get())
-            min_sold = int(self.min_sold_items.get())
-        except (ValueError, AttributeError):
-            usd_to_jpy = 150
-            min_profit = 20
-            min_sold = 3
-
-        # Check if we have enough sold items
-        if search_result['sold_count'] < min_sold:
-            return results
-
-        # Calculate profit margins for the image search result
-        median_price_usd = search_result['median_price']
-        avg_price_usd = search_result['avg_price']
-
-        # Estimate various Mandarake price points for comparison
-        # (since we don't have a specific Mandarake price for the image)
-        estimated_mandarake_prices = [
-            median_price_usd * usd_to_jpy * 0.3,  # 30% of USD median
-            median_price_usd * usd_to_jpy * 0.5,  # 50% of USD median
-            median_price_usd * usd_to_jpy * 0.7,  # 70% of USD median
-        ]
-
-        for i, mandarake_price_jpy in enumerate(estimated_mandarake_prices):
-            mandarake_usd = mandarake_price_jpy / usd_to_jpy
-
-            # Estimate shipping and fees
-            estimated_fees = median_price_usd * 0.15 + 5
-            net_proceeds = median_price_usd - estimated_fees
-
-            profit_margin = ((net_proceeds - mandarake_usd) / mandarake_usd) * 100 if mandarake_usd > 0 else 0
-
-            if profit_margin > min_profit:
-                # Create search term info
-                search_term = search_result.get('search_term', 'Image search result')
-                if search_result.get('lens_results', {}).get('product_names'):
-                    search_term = search_result['lens_results']['product_names'][0]
-
-                title = f"{search_term} (Est. {int((i+1)*30)}% of eBay price)"
-
-                results.append({
-                    'title': title,
-                    'mandarake_price': int(mandarake_price_jpy),
-                    'ebay_sold_count': search_result['sold_count'],
-                    'ebay_median_price': median_price_usd,
-                    'ebay_avg_price': avg_price_usd,
-                    'ebay_price_range': f"${search_result['min_price']:.2f} - ${search_result['max_price']:.2f}",
-                    'profit_margin': profit_margin,
-                    'estimated_profit': net_proceeds - mandarake_usd
-                })
-
-        # Sort by profit margin (highest first)
-        results.sort(key=lambda x: x['profit_margin'], reverse=True)
-
-        return results[:5]  # Return top 5 scenarios
+        """Convert image results - delegated to EbaySearchManager"""
+        if hasattr(self, 'ebay_tab') and self.ebay_tab.ebay_search_manager:
+            return self.ebay_tab.ebay_search_manager.convert_image_results_to_analysis(search_result)
+        return []
 
     # ------------------------------------------------------------------
     # Config load/save/run
@@ -1445,53 +1388,9 @@ With RANSAC enabled:
             self.ebay_tab.csv_comparison_manager._save_updated_csv()
 
     def _save_comparison_results_to_csv(self, comparison_results):
-        """Save eBay comparison results back to the CSV file
-
-        Args:
-            comparison_results: List of dicts with comparison data including 'mandarake_item', 'similarity', 'best_match', etc.
-        """
-        if not self.ebay_tab.csv_compare_path or not self.ebay_tab.csv_compare_data:
-            print("[COMPARISON SAVE] No CSV loaded, skipping save")
-            return
-
-        try:
-            from datetime import datetime
-
-            # Create a mapping of URLs to comparison results
-            url_to_results = {}
-            for result in comparison_results:
-                mandarake_item = result.get('mandarake_item', {})
-                url = mandarake_item.get('url', mandarake_item.get('product_url', ''))
-                if url:
-                    best_match = result.get('best_match', {})
-                    url_to_results[url] = {
-                        'ebay_compared': datetime.now().isoformat(),
-                        'ebay_match_found': 'Yes' if best_match else 'No',
-                        'ebay_best_match_title': best_match.get('title', '') if best_match else '',
-                        'ebay_similarity': f"{result.get('similarity', 0):.1f}" if best_match else '',
-                        'ebay_price': f"${best_match.get('price', 0):.2f}" if best_match else '',
-                        'ebay_profit_margin': f"{result.get('profit_margin', 0):.1f}%" if best_match else ''
-                    }
-
-            # Update csv_compare_data with comparison results
-            updated_count = 0
-            for row in self.ebay_tab.csv_compare_data:
-                url = row.get('url', row.get('product_url', ''))
-                if url in url_to_results:
-                    row.update(url_to_results[url])
-                    updated_count += 1
-
-            # Save updated CSV
-            if updated_count > 0:
-                self._save_updated_csv()
-                print(f"[COMPARISON SAVE] Saved comparison results for {updated_count} items to CSV")
-            else:
-                print("[COMPARISON SAVE] No items matched for saving")
-
-        except Exception as e:
-            print(f"[COMPARISON SAVE] Error saving comparison results: {e}")
-            import traceback
-            traceback.print_exc()
+        """Save comparison results - delegated to CSVComparisonManager"""
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager.save_comparison_results_to_csv(comparison_results)
 
     def _update_tree_item(self, path: Path, config: dict):
         """Update config tree entry using the tree manager."""
@@ -2016,50 +1915,10 @@ With RANSAC enabled:
             self.ebay_tab.csv_comparison_manager._add_secondary_keyword_from_csv()
 
     def _extract_secondary_keyword(self, title, primary_keyword):
-        """Extract secondary keyword from title by removing primary keyword and common terms"""
-        import re
-
-        # Make a working copy
-        secondary = title
-
-        # Remove primary keyword (case insensitive), handling name in different orders
-        # e.g., "Yura Kano" and "Kano Yura"
-        secondary = re.sub(re.escape(primary_keyword), '', secondary, flags=re.IGNORECASE).strip()
-
-        # Also remove reversed name order (split and reverse)
-        name_parts = primary_keyword.split()
-        if len(name_parts) == 2:
-            reversed_name = f"{name_parts[1]} {name_parts[0]}"
-            secondary = re.sub(re.escape(reversed_name), '', secondary, flags=re.IGNORECASE).strip()
-            # Also remove individual parts if they appear alone
-            for part in name_parts:
-                if len(part) > 2:  # Don't remove very short words
-                    secondary = re.sub(r'\b' + re.escape(part) + r'\b', '', secondary, flags=re.IGNORECASE).strip()
-
-        # Use dynamic publisher list instead of hardcoded
-        for pub in self.publisher_list:
-            secondary = re.sub(r'\b' + re.escape(pub) + r'\b', '', secondary, flags=re.IGNORECASE).strip()
-
-        # Remove generic suffixes
-        generic_terms = ['Photograph Collection', 'Photo Essay', 'Photo Collection',
-                        'Photobook', 'autographed', 'Photograph', 'Collection']
-        for term in generic_terms:
-            secondary = re.sub(r'\b' + re.escape(term) + r'\b', '', secondary, flags=re.IGNORECASE).strip()
-
-        # Remove years (e.g., "2022", "2023")
-        secondary = re.sub(r'\b(19|20)\d{2}\b', '', secondary).strip()
-
-        # Remove "Desktop" before "Calendar" to get just "Calendar"
-        secondary = re.sub(r'\bDesktop\s+Calendar\b', 'Calendar', secondary, flags=re.IGNORECASE).strip()
-
-        # Clean up extra spaces
-        secondary = re.sub(r'\s+', ' ', secondary).strip()
-
-        # If nothing left, return empty
-        if not secondary or len(secondary) < 2:
-            return ""
-
-        return secondary
+        """Extract secondary keyword - delegated to CSVComparisonManager (duplicate removed)"""
+        if self.ebay_tab.csv_comparison_manager:
+            return self.ebay_tab.csv_comparison_manager._extract_secondary_keyword(title, primary_keyword)
+        return ""
 
     def on_csv_item_selected(self, event):
         """Auto-fill search query when CSV item is selected"""
@@ -2090,49 +1949,9 @@ With RANSAC enabled:
             self.ebay_tab.csv_comparison_manager.compare_all_csv_items(skip_confirmation=False)
 
     def clear_comparison_results(self):
-        """Clear all eBay comparison results from the loaded CSV"""
-        if not self.ebay_tab.csv_compare_data or not self.ebay_tab.csv_compare_path:
-            messagebox.showwarning("No CSV", "Please load a CSV file first")
-            return
-
-        # Count items with comparison results
-        compared_count = sum(1 for item in self.ebay_tab.csv_compare_data if item.get('ebay_compared'))
-
-        if compared_count == 0:
-            # Log to status instead of popup
-            self.ebay_tab.browserless_status.set("No comparison results to clear")
-            print("[CLEAR RESULTS] No results to clear")
-            return
-
-        # Confirm clearing
-        response = messagebox.askyesno(
-            "Clear Comparison Results",
-            f"Clear comparison results for {compared_count} items?\n\n"
-            f"This will reset ebay_compared, ebay_match_found, ebay_similarity, etc.\n"
-            f"You can recompare items after clearing."
-        )
-
-        if response:
-            try:
-                # Clear comparison fields for all items
-                for item in self.ebay_tab.csv_compare_data:
-                    item['ebay_compared'] = ''
-                    item['ebay_match_found'] = ''
-                    item['ebay_best_match_title'] = ''
-                    item['ebay_similarity'] = ''
-                    item['ebay_price'] = ''
-                    item['ebay_profit_margin'] = ''
-
-                # Save updated CSV
-                self._save_updated_csv()
-
-                # Log to status instead of popup
-                self.ebay_tab.browserless_status.set(f"Cleared comparison results for {compared_count} items")
-                print(f"[CLEAR RESULTS] Cleared comparison results for {compared_count} items")
-
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to clear results: {e}")
-                print(f"[CLEAR RESULTS ERROR] {e}")
+        """Clear comparison results - delegated to CSVComparisonManager"""
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager.clear_comparison_results()
 
     def _compare_csv_items_worker(self, items, search_query):
         """Worker to compare CSV items with eBay - OPTIMIZED with caching (runs in background thread)"""

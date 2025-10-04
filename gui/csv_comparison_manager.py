@@ -1094,6 +1094,103 @@ class CSVComparisonManager:
             self.gui.ebay_tab.ebay_search_manager):
             self.gui.ebay_tab.ebay_search_manager.display_browserless_results(display_results)
 
+    def save_comparison_results_to_csv(self, comparison_results: List[Dict]) -> None:
+        """Save eBay comparison results back to the CSV file.
+
+        Args:
+            comparison_results: List of dicts with comparison data including
+                              'mandarake_item', 'similarity', 'best_match', etc.
+        """
+        if not self.csv_compare_path or not self.csv_compare_data:
+            print("[COMPARISON SAVE] No CSV loaded, skipping save")
+            return
+
+        try:
+            from datetime import datetime
+
+            # Create a mapping of URLs to comparison results
+            url_to_results = {}
+            for result in comparison_results:
+                mandarake_item = result.get('mandarake_item', {})
+                url = mandarake_item.get('url', mandarake_item.get('product_url', ''))
+                if url:
+                    best_match = result.get('best_match', {})
+                    url_to_results[url] = {
+                        'ebay_compared': datetime.now().isoformat(),
+                        'ebay_match_found': 'Yes' if best_match else 'No',
+                        'ebay_best_match_title': best_match.get('title', '') if best_match else '',
+                        'ebay_similarity': f"{result.get('similarity', 0):.1f}" if best_match else '',
+                        'ebay_price': f"${best_match.get('price', 0):.2f}" if best_match else '',
+                        'ebay_profit_margin': f"{result.get('profit_margin', 0):.1f}%" if best_match else ''
+                    }
+
+            # Update csv_compare_data with comparison results
+            updated_count = 0
+            for row in self.csv_compare_data:
+                url = row.get('url', row.get('product_url', ''))
+                if url in url_to_results:
+                    row.update(url_to_results[url])
+                    updated_count += 1
+
+            # Save updated CSV
+            if updated_count > 0:
+                self._save_updated_csv()
+                print(f"[COMPARISON SAVE] Saved comparison results for {updated_count} items to CSV")
+            else:
+                print("[COMPARISON SAVE] No items matched for saving")
+
+        except Exception as e:
+            print(f"[COMPARISON SAVE] Error saving comparison results: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def clear_comparison_results(self) -> None:
+        """Clear all eBay comparison results from the loaded CSV."""
+        if not self.csv_compare_data or not self.csv_compare_path:
+            messagebox.showwarning("No CSV", "Please load a CSV file first")
+            return
+
+        # Count items with comparison results
+        compared_count = sum(1 for item in self.csv_compare_data if item.get('ebay_compared'))
+
+        if compared_count == 0:
+            # Log to status instead of popup
+            if hasattr(self.gui.ebay_tab, 'browserless_status'):
+                self.gui.ebay_tab.browserless_status.set("No comparison results to clear")
+            print("[CLEAR RESULTS] No results to clear")
+            return
+
+        # Confirm clearing
+        response = messagebox.askyesno(
+            "Clear Comparison Results",
+            f"Clear comparison results for {compared_count} items?\n\n"
+            f"This will reset ebay_compared, ebay_match_found, ebay_similarity, etc.\n"
+            f"You can recompare items after clearing."
+        )
+
+        if response:
+            try:
+                # Clear comparison fields for all items
+                for item in self.csv_compare_data:
+                    item['ebay_compared'] = ''
+                    item['ebay_match_found'] = ''
+                    item['ebay_best_match_title'] = ''
+                    item['ebay_similarity'] = ''
+                    item['ebay_price'] = ''
+                    item['ebay_profit_margin'] = ''
+
+                # Save updated CSV
+                self._save_updated_csv()
+
+                # Log to status instead of popup
+                if hasattr(self.gui.ebay_tab, 'browserless_status'):
+                    self.gui.ebay_tab.browserless_status.set(f"Cleared comparison results for {compared_count} items")
+                print(f"[CLEAR RESULTS] Cleared comparison results for {compared_count} items")
+
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to clear results: {e}")
+                print(f"[CLEAR RESULTS ERROR] {e}")
+
     def _start_thread(self, target: Callable, *args) -> None:
         """Start a background thread."""
         thread = threading.Thread(target=target, args=args, daemon=True)

@@ -566,3 +566,73 @@ class EbaySearchManager:
         except Exception as e:
             print(f"[EBAY DEBUG] eBay search error: {e}")
             return None
+
+    def convert_image_results_to_analysis(self, search_result: dict) -> list:
+        """Convert image search results to the format expected by the analysis display.
+
+        Args:
+            search_result: Dict with sold_count, median_price, avg_price, etc.
+
+        Returns:
+            list: Up to 5 scenarios with different Mandarake price estimates
+        """
+        results = []
+
+        # Get configuration values from main GUI
+        try:
+            usd_to_jpy = float(self.main.usd_jpy_rate.get()) if hasattr(self.main, 'usd_jpy_rate') else 150.0
+            min_profit = float(self.main.min_profit_margin.get()) if hasattr(self.main, 'min_profit_margin') else 20.0
+            min_sold = int(self.main.min_sold_items.get()) if hasattr(self.main, 'min_sold_items') else 3
+        except (ValueError, AttributeError):
+            usd_to_jpy = 150.0
+            min_profit = 20.0
+            min_sold = 3
+
+        # Check if we have enough sold items
+        if search_result['sold_count'] < min_sold:
+            return results
+
+        # Calculate profit margins for the image search result
+        median_price_usd = search_result['median_price']
+        avg_price_usd = search_result['avg_price']
+
+        # Estimate various Mandarake price points for comparison
+        # (since we don't have a specific Mandarake price for the image)
+        estimated_mandarake_prices = [
+            median_price_usd * usd_to_jpy * 0.3,  # 30% of USD median
+            median_price_usd * usd_to_jpy * 0.5,  # 50% of USD median
+            median_price_usd * usd_to_jpy * 0.7,  # 70% of USD median
+        ]
+
+        for i, mandarake_price_jpy in enumerate(estimated_mandarake_prices):
+            mandarake_usd = mandarake_price_jpy / usd_to_jpy
+
+            # Estimate shipping and fees
+            estimated_fees = median_price_usd * 0.15 + 5
+            net_proceeds = median_price_usd - estimated_fees
+
+            profit_margin = ((net_proceeds - mandarake_usd) / mandarake_usd) * 100 if mandarake_usd > 0 else 0
+
+            if profit_margin > min_profit:
+                # Create search term info
+                search_term = search_result.get('search_term', 'Image search result')
+                if search_result.get('lens_results', {}).get('product_names'):
+                    search_term = search_result['lens_results']['product_names'][0]
+
+                title = f"{search_term} (Est. {int((i+1)*30)}% of eBay price)"
+
+                results.append({
+                    'title': title,
+                    'mandarake_price': int(mandarake_price_jpy),
+                    'ebay_sold_count': search_result['sold_count'],
+                    'ebay_median_price': median_price_usd,
+                    'ebay_avg_price': avg_price_usd,
+                    'ebay_price_range': f"${search_result['min_price']:.2f} - ${search_result['max_price']:.2f}",
+                    'profit_margin': profit_margin,
+                    'estimated_profit': net_proceeds - mandarake_usd
+                })
+
+        # Sort by profit margin (highest first)
+        results.sort(key=lambda x: x['profit_margin'], reverse=True)
+
+        return results[:5]  # Return top 5 scenarios
