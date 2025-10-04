@@ -1823,74 +1823,26 @@ With RANSAC enabled:
             messagebox.showerror('Error', f'Failed to load config: {exc}')
 
     def _new_config(self):
-        """Create a new config from current form values"""
-        import time
+        """Create a new config - delegated to ConfigurationManager"""
+        path = self.config_manager.create_new_config(self)
+        if not path:
+            return
 
-        # Ensure "All Stores" is selected if nothing is selected
-        if not self.shop_listbox.curselection():
-            self.shop_listbox.selection_clear(0, tk.END)
-            self.shop_listbox.selection_set(0)
-
-        # Always collect current form values
-        config = self._collect_config()
-
-        # If collection failed, use current GUI values as defaults
+        # Load config to get values for tree
+        config = self.config_manager.load_config_from_path(path)
         if not config:
-            config = {
-                'keyword': self.keyword_var.get().strip(),
-                'hide_sold_out': self.hide_sold_var.get(),
-                'language': self.language_var.get(),
-                'fast': self.advanced_tab.fast_var.get(),
-                'resume': self.advanced_tab.resume_var.get(),
-                'debug': self.advanced_tab.debug_var.get(),
-            }
-            # Add shop if selected
-            shop_value = self._resolve_shop()
-            if shop_value:
-                config['shop'] = shop_value
+            return
 
-        # Generate filename based on current values
-        timestamp = int(time.time())
-        configs_dir = Path('configs')
-        configs_dir.mkdir(parents=True, exist_ok=True)
+        # Add to tree
+        if hasattr(self, 'tree_manager'):
+            self.tree_manager.update_tree_item(path, config)
 
-        # Use auto-generated filename based on settings, or timestamp if no keyword
-        has_keyword = bool(config.get('keyword', '').strip())
-        if has_keyword:
-            suggested_filename = utils.suggest_config_filename(config)
-            path = configs_dir / suggested_filename
-            # If filename already exists, add timestamp
-            if path.exists():
-                keyword_part = config.get('keyword', 'new').replace(' ', '_') or 'new'
-                filename = f"{keyword_part}_{timestamp}.json"
-                path = configs_dir / filename
-        else:
-            # No keyword - use timestamp-based filename
-            filename = f'new_config_{timestamp}.json'
-            path = configs_dir / filename
-
-        # Save the config
-        self._save_config_to_path(config, path, update_tree=False)
-
-        # Add to tree at the end with correct values
-        keyword = config.get('keyword', '')
-        category = config.get('category_name', config.get('category', ''))
-        shop = config.get('shop_name', config.get('shop', ''))
-        hide = 'Yes' if config.get('hide_sold_out') else 'No'
-        results_per_page = config.get('results_per_page', 48)
-        max_pages = config.get('max_pages', 2)
-        recent_hours = config.get('recent_hours')
-        timeframe = self._label_for_recent_hours(recent_hours) if recent_hours else ''
-        language = config.get('language', 'en')
-        store = config.get('store', 'Mandarake').title()
-
-        values = (store, path.name, keyword, category, shop, hide, results_per_page, max_pages, timeframe, language)
-        item = self.config_tree.insert('', tk.END, values=values)
-        self.config_paths[item] = path
-
-        # Select the new item
-        self.config_tree.selection_set(item)
-        self.config_tree.see(item)
+        # Select the new item in config tree
+        for item in self.config_tree.get_children():
+            if self.config_paths.get(item) == path:
+                self.config_tree.selection_set(item)
+                self.config_tree.see(item)
+                break
 
         # Set this as the current config for auto-save
         self.last_saved_path = path
@@ -1935,121 +1887,8 @@ With RANSAC enabled:
             return self.mandarake_tab._load_from_url()
 
     def _populate_from_config(self, config: dict):
-        # Set loading flag to prevent trace callbacks from regenerating URL
-        self._loading_config = True
-
-        try:
-            # Set store first and trigger UI changes
-            store = config.get('store', 'mandarake')
-            if store == 'suruga-ya':
-                self.current_store.set("Suruga-ya")
-                self._on_store_changed()
-            else:
-                self.current_store.set("Mandarake")
-                self._on_store_changed()
-
-            # Store provided URL if present
-            if 'search_url' in config:
-                self._provided_url = config['search_url']
-                self.url_var.set(config['search_url'])
-            else:
-                self._provided_url = None
-
-            self.keyword_var.set(config.get('keyword', ''))
-
-            category = config.get('category')
-            if isinstance(category, list):
-                categories = category
-            elif category:
-                categories = [category]
-            else:
-                categories = []
-            self._select_categories(categories)
-
-            self.max_pages_var.set(str(config.get('max_pages', 2)))
-            self.recent_hours_var.set(self._label_for_recent_hours(config.get('recent_hours')))
-
-        # Set shop selection in listbox
-            shop_value = config.get('shop', '')
-            matched = False
-
-        # Try to find matching shop in listbox
-            for idx, code in enumerate(self.shop_code_map):
-            # Match by code (primary)
-                if str(shop_value) == str(code) or shop_value == 'all':
-                    self.shop_listbox.selection_clear(0, tk.END)
-                    self.shop_listbox.selection_set(idx)
-                    self.shop_listbox.see(idx)
-                    matched = True
-                    break
-
-        # If not matched, try matching by name from shop_name field
-            if not matched and config.get('shop_name'):
-                shop_name = config.get('shop_name')
-                for idx, code in enumerate(self.shop_code_map):
-                    if code == "all" or code == "custom":
-                        continue
-                # Find the name for this code
-                    for store_code, store_name in STORE_OPTIONS:
-                        if store_code == code and (shop_name == store_name or shop_name in store_name):
-                            self.shop_listbox.selection_clear(0, tk.END)
-                            self.shop_listbox.selection_set(idx)
-                            self.shop_listbox.see(idx)
-                            matched = True
-                            break
-                    if matched:
-                        break
-
-        # If still not matched, default to "All Stores"
-            if not matched:
-                self.shop_listbox.selection_clear(0, tk.END)
-                self.shop_listbox.selection_set(0)
-
-            self.hide_sold_var.set(config.get('hide_sold_out', False))
-            if hasattr(self, 'csv_in_stock_only'):
-                self.ebay_tab.csv_in_stock_only.set(config.get('csv_show_in_stock_only', False))
-            if hasattr(self, 'csv_add_secondary_keyword'):
-                self.ebay_tab.csv_add_secondary_keyword.set(config.get('csv_add_secondary_keyword', False))
-            self.language_var.set(config.get('language', 'en'))
-            self.advanced_tab.fast_var.set(config.get('fast', False))
-            self.advanced_tab.resume_var.set(config.get('resume', True))
-            self.advanced_tab.debug_var.set(config.get('debug', False))
-
-        # Load adult filter
-            if hasattr(self, 'adult_filter_var'):
-                adult_only = config.get('adult_only', False)
-                self.adult_filter_var.set("Adult Only" if adult_only else "All")
-
-        # Load Suruga-ya specific fields
-            if hasattr(self, 'exclude_word_var'):
-                self.exclude_word_var.set(config.get('exclude_word', ''))
-            if hasattr(self, 'condition_var'):
-                condition = config.get('condition', 'all')
-                if condition == '1':
-                    self.condition_var.set("New Only")
-                elif condition == '2':
-                    self.condition_var.set("Used Only")
-                else:
-                    self.condition_var.set("All")
-
-        # Note: eBay API credentials removed from GUI
-
-            self.csv_path_var.set(config.get('csv', ''))
-            self.download_dir_var.set(config.get('download_images', ''))
-            self.thumbnails_var.set(str(config.get('thumbnails', '')))
-
-            # Set results_per_page: 50 for Suruga-ya (fixed), 240 default for Mandarake
-            if config.get('store') == 'suruga-ya':
-                self.results_per_page_var.set('50')
-            else:
-                self.results_per_page_var.set(str(config.get('results_per_page', '240')))
-
-            self.advanced_tab.schedule_var.set(config.get('schedule', ''))
-        finally:
-            # Always reset loading flag
-            self._loading_config = False
-            # Update preview after loading flag is cleared so provided URLs take effect
-            self._update_preview()
+        """Populate GUI from config - delegated to ConfigurationManager"""
+        self.config_manager.populate_gui_from_config(config, self)
 
     # Browserless eBay Search methods
     def select_browserless_image(self):
