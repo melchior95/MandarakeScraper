@@ -77,8 +77,9 @@
 - **After Phase 2b (Mandarake Methods)**: 4115 lines (-1295 lines total, -23.9%)
 - **After Phase 3 (Utility Delegation)**: 3945 lines (-1465 lines total, -27.1%)
 - **After Phase 3.5 (Suruga-ya Fix)**: 3827 lines (-1583 lines total, -29.3%)
+- **After Phase 4 (EbayTab Integration)**: 3560 lines (-1850 lines total, -34.2%)
 - **Target**: < 2000 lines
-- **Progress**: Phases 1, 2, 3 & 3.5 Complete ✅
+- **Progress**: Phases 1, 2, 3, 3.5 & 4 Complete ✅
 
 ### Breakdown by Section
 
@@ -86,10 +87,10 @@
 |---------|--------------|--------|
 | Window/Menu Management | ~200 | ✅ Keep in main (acceptable) |
 | Mandarake Tab | ~500 | ✅ Extracted to `gui/mandarake_tab.py` (840 lines) |
-| eBay Search UI | ~300 | ✅ Logic extracted, UI acceptable |
+| eBay Search UI | ~270 | ✅ Extracted to `gui/ebay_tab.py` (553 lines) |
 | CSV Comparison | ~400 | ✅ Fully delegated to `CSVComparisonManager` |
 | Alert Tab | ~10 | ✅ Delegated to `AlertTab` |
-| Advanced Tab | ~300 | ✅ Settings-heavy, acceptable |
+| Advanced Tab | ~165 | ⏳ Next extraction target |
 | Event Handlers | ~500 | ⚠️ Mixed UI/logic |
 | Utility Methods | ~1500 | ⚠️ Some could move to `gui/utils.py` |
 
@@ -283,12 +284,43 @@ For immediate impact with minimal effort:
 
 ---
 
+## ✅ Phase 4 Complete (2025-10-04) - EbayTab Integration
+
+**Results:**
+- Integrated complete EbayTab module into gui_config.py
+- Replaced 267 lines of UI code with 3-line initialization
+- Removed 267 lines from gui_config.py (3827 → 3560)
+- Total reduction: 1850 lines (34.2% from original 5410 lines)
+
+**What was integrated:**
+- Replaced lines 414-682 (eBay search + CSV comparison UI) with EbayTab initialization
+- Updated all widget references throughout gui_config.py:
+  - `self.browserless_tree` → `self.ebay_tab.browserless_tree`
+  - `self.csv_items_tree` → `self.ebay_tab.csv_items_tree`
+  - `self.ebay_search_manager` → `self.ebay_tab.ebay_search_manager`
+  - `self.csv_comparison_manager` → `self.ebay_tab.csv_comparison_manager`
+  - All eBay/CSV related variables and data storage
+- Removed duplicate initializations from `__init__` (handled by EbayTab)
+
+**Impact:**
+- eBay Search & CSV Comparison tab fully modularized
+- gui/ebay_tab.py: 553 lines (complete encapsulation)
+- Cleaner separation of concerns
+- All eBay/CSV functionality accessible through ebay_tab module
+
+**Next Steps:**
+- Phase 5: Extract Advanced Tab (~165 lines)
+- Phase 6: Extract Config Tree Manager (~370 lines)
+- Remaining: Need 1560 more lines to reach <2000 target (43.8% remaining)
+
+---
+
 ## 📋 Phase 4+ Strategic Plan
 
 ### Current Position
-- **3827 lines** (was 5410, removed 1583)
+- **3560 lines** (was 5410, removed 1850)
 - **Target**: <2000 lines
-- **Remaining**: Need to remove **1827 more lines (47.7%)**
+- **Remaining**: Need to remove **1560 more lines (43.8%)**
 
 ### Identified Extraction Opportunities
 
