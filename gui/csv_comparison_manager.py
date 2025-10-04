@@ -1069,7 +1069,7 @@ class CSVComparisonManager:
 
                 # Display results in eBay results tree
                 if hasattr(self.gui, 'ebay_search_manager') and self.gui.ebay_search_manager:
-                    self.gui.ebay_search_manager.display_scrapy_results(results)
+                    self.gui.ebay_search_manager.display_browserless_results(results)
                     if hasattr(self.gui, 'browserless_status'):
                         self.gui.browserless_status.set(f"Found {len(results)} results via eBay API")
                     print(f"[IMAGE SEARCH API] Displayed {len(results)} results")
