@@ -8,20 +8,20 @@ import logging
 from typing import Dict, List, Optional
 
 from gui.alert_states import AlertState, AlertStateTransition
-from gui.alert_storage import AlertStorage
+from gui.alert_storage_db import AlertStorageDB
 
 
 class AlertManager:
     """Manages alert items from eBay comparison results."""
 
-    def __init__(self, storage_path: str = "alerts.json"):
+    def __init__(self, storage_path: str = "alerts.db"):
         """
-        Initialize alert manager.
+        Initialize alert manager with SQLite storage.
 
         Args:
-            storage_path: Path to alerts storage file
+            storage_path: Path to SQLite database file (defaults to alerts.db)
         """
-        self.storage = AlertStorage(storage_path)
+        self.storage = AlertStorageDB(storage_path)
 
     def create_alert_from_comparison(self, comparison_result: Dict) -> Dict:
         """
@@ -47,43 +47,30 @@ class AlertManager:
         Returns:
             Created alert dictionary with alert_id
         """
-        # Extract store title from any field name (prefer generic, fallback to legacy)
-        store_title = (comparison_result.get('store_title') or
-                      comparison_result.get('mandarake_title') or
-                      comparison_result.get('csv_title', 'N/A'))
-        store_title_en = (comparison_result.get('store_title_en') or
-                         comparison_result.get('mandarake_title_en', store_title))
-
-        # Extract store link (prefer generic, fallback to legacy)
-        store_link = (comparison_result.get('store_link') or
-                     comparison_result.get('mandarake_link', ''))
-
-        # Extract store price (prefer generic, fallback to legacy)
-        store_price = (comparison_result.get('store_price') or
-                      comparison_result.get('mandarake_price', '¥0'))
-
-        # Extract store images/thumbnail (prefer generic, fallback to legacy)
-        store_thumbnail = (comparison_result.get('store_thumbnail') or
-                          comparison_result.get('mandarake_thumbnail', ''))
-        store_images = (comparison_result.get('store_images') or
-                       comparison_result.get('mandarake_images', []))
+        # Extract store fields (with csv_title as legacy fallback)
+        store_title = comparison_result.get('store_title') or comparison_result.get('csv_title', 'N/A')
+        store_title_en = comparison_result.get('store_title_en', store_title)
+        store_link = comparison_result.get('store_link', '')
+        store_price = comparison_result.get('store_price', '¥0')
+        store_thumbnail = comparison_result.get('store_thumbnail', '')
+        store_images = comparison_result.get('store_images', [])
 
         alert_data = {
             'state': AlertState.PENDING,
             'ebay_title': comparison_result.get('ebay_title', 'N/A'),
-            'mandarake_title': store_title,  # Keep legacy field name for backwards compatibility
-            'mandarake_title_en': store_title_en,
-            'mandarake_link': store_link,
+            'store_title': store_title,
+            'store_title_en': store_title_en,
+            'store_link': store_link,
             'ebay_link': comparison_result.get('ebay_link', ''),
             'similarity': comparison_result.get('similarity', 0),
             'profit_margin': comparison_result.get('profit_margin', 0),
-            'mandarake_price': store_price,
+            'store_price': store_price,
             'ebay_price': comparison_result.get('ebay_price', '$0'),
             'shipping': comparison_result.get('shipping', '$0'),
             'sold_date': comparison_result.get('sold_date', ''),
             'thumbnail': comparison_result.get('thumbnail', ''),
-            'mandarake_thumbnail': store_thumbnail,
-            'mandarake_images': store_images
+            'store_thumbnail': store_thumbnail,
+            'store_images': store_images
         }
 
         return self.storage.add_alert(alert_data)
