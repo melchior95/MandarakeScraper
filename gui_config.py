@@ -455,10 +455,14 @@ With RANSAC enabled:
 
         # Exclude keywords field (for Suruga-ya advanced search)
         self.exclude_word_var = tk.StringVar()
-        ttk.Label(top_pane, text="Exclude words:").grid(row=2, column=3, sticky=tk.W, padx=(20, 5), pady=5)
-        exclude_entry = ttk.Entry(top_pane, textvariable=self.exclude_word_var, width=30)
-        exclude_entry.grid(row=2, column=4, columnspan=2, sticky=tk.W, **pad)
+        self.exclude_word_label = ttk.Label(top_pane, text="Exclude words:")
+        self.exclude_word_label.grid(row=2, column=3, sticky=tk.W, padx=(20, 5), pady=5)
+        self.exclude_word_entry = ttk.Entry(top_pane, textvariable=self.exclude_word_var, width=30)
+        self.exclude_word_entry.grid(row=2, column=4, columnspan=2, sticky=tk.W, **pad)
         self.exclude_word_var.trace_add("write", self._auto_save_config)
+        # Hide by default (shown when Suruga-ya is selected)
+        self.exclude_word_label.grid_remove()
+        self.exclude_word_entry.grid_remove()
 
         self.main_category_var = tk.StringVar()
         ttk.Label(top_pane, text="Main category:").grid(row=3, column=0, sticky=tk.W, **pad)
@@ -548,7 +552,7 @@ With RANSAC enabled:
         results_per_page_combo.grid(row=0, column=2, sticky=tk.W, **pad)
         self.results_per_page_var.trace_add("write", self._update_preview)
 
-        self.max_pages_var = tk.StringVar()
+        self.max_pages_var = tk.StringVar(value="2")
         ttk.Label(middle_pane, text="Max pages:").grid(row=0, column=3, sticky=tk.W, padx=(15, 5), pady=5)
         ttk.Entry(middle_pane, textvariable=self.max_pages_var, width=8).grid(row=0, column=4, sticky=tk.W, **pad)
         self.max_pages_var.trace_add("write", self._auto_save_config)
@@ -583,16 +587,20 @@ With RANSAC enabled:
 
         # --- Condition filter (for Suruga-ya) ---
         self.condition_var = tk.StringVar(value="all")
-        ttk.Label(middle_pane, text="Condition:").grid(row=1, column=2, sticky=tk.W, padx=(15, 5), pady=5)
-        condition_combo = ttk.Combobox(
+        self.condition_label = ttk.Label(middle_pane, text="Condition:")
+        self.condition_label.grid(row=1, column=2, sticky=tk.W, padx=(15, 5), pady=5)
+        self.condition_combo = ttk.Combobox(
             middle_pane,
             textvariable=self.condition_var,
             values=["All", "New Only", "Used Only"],
             state="readonly",
             width=12
         )
-        condition_combo.grid(row=1, column=3, sticky=tk.W, **pad)
+        self.condition_combo.grid(row=1, column=3, sticky=tk.W, **pad)
         self.condition_var.trace_add("write", self._auto_save_config)
+        # Hide by default (shown when Suruga-ya is selected)
+        self.condition_label.grid_remove()
+        self.condition_combo.grid_remove()
 
         # --- Adult content filter ---
         self.adult_filter_var = tk.StringVar(value="All")
@@ -675,6 +683,8 @@ With RANSAC enabled:
         
         # Initialize tree manager after tree widget is created
         self.tree_manager = TreeManager(self.config_tree, self.config_manager)
+        # Share tree manager path mapping for legacy helpers
+        self.config_paths = self.tree_manager.config_paths
         
         # Single click to load config
         self.config_tree.bind('<<TreeviewSelect>>', self._on_config_selected)
@@ -781,7 +791,7 @@ With RANSAC enabled:
         browserless_results_frame.columnconfigure(0, weight=1)
 
         # Results treeview with thumbnail support
-        browserless_columns = ('title', 'price', 'shipping', 'mandarake_price', 'profit_margin', 'sold_date', 'similarity', 'url')
+        browserless_columns = ('title', 'price', 'shipping', 'mandarake_price', 'profit_margin', 'sold_date', 'similarity', 'url', 'mandarake_url')
 
         # Create custom style for eBay results treeview with thumbnails
         style = ttk.Style()
@@ -790,7 +800,7 @@ With RANSAC enabled:
         self.browserless_tree = ttk.Treeview(browserless_results_frame, columns=browserless_columns, show='tree headings', height=8, style='Browserless.Treeview')
 
         self.browserless_tree.heading('#0', text='Thumb')
-        self.browserless_tree.column('#0', width=70, stretch=False)  # Match output tree width
+        self.browserless_tree.column('#0', width=130, stretch=False)  # Wide enough for side-by-side thumbnails
 
         browserless_headings = {
             'title': 'Title',
@@ -800,7 +810,8 @@ With RANSAC enabled:
             'profit_margin': 'Profit %',
             'sold_date': 'Sold Date',
             'similarity': 'Similarity %',
-            'url': 'eBay URL'
+            'url': 'eBay URL',
+            'mandarake_url': 'Mandarake URL'
         }
 
         browserless_widths = {
@@ -811,7 +822,8 @@ With RANSAC enabled:
             'profit_margin': 80,
             'sold_date': 100,
             'similarity': 90,
-            'url': 180
+            'url': 180,
+            'mandarake_url': 180
         }
 
         for col, heading in browserless_headings.items():
@@ -845,6 +857,8 @@ With RANSAC enabled:
         
         # Bind double-click to open URL
         self.browserless_tree.bind('<Double-1>', self.open_browserless_url)
+        # Bind right-click for context menu
+        self.browserless_tree.bind('<Button-3>', self._show_browserless_context_menu)
         # Prevent space from affecting tree selection when it has focus
         # Space key handled globally via bind_class
         # Allow deselect by clicking empty area
@@ -1400,7 +1414,8 @@ With RANSAC enabled:
             logging.error(f"Error during resource cleanup: {e}")
 
         # Close the application
-        self.destroy()
+        self.quit()  # Exit the mainloop first
+        self.destroy()  # Then destroy all widgets
 
     def _cleanup_playwright_processes(self):
         """Cleanup any remaining tracked Playwright instances"""
@@ -1824,13 +1839,18 @@ With RANSAC enabled:
             category1 = config.get('category1', '7')  # Main category - default to Books
             category2 = config.get('category2')  # Detailed category
             shop_code = config.get('shop', 'all')
-            max_pages = config.get('max_pages', 5)
+            max_pages = config.get('max_pages', 2)
             show_out_of_stock = config.get('show_out_of_stock', False)
             exclude_word = config.get('exclude_word', '')
             condition = config.get('condition', 'all')
             adult_only = config.get('adult_only', False)
 
             # Calculate max results from max_pages (assuming ~50 items per page)
+            # Ensure max_pages is an integer
+            try:
+                max_pages = int(max_pages) if max_pages else 2
+            except (ValueError, TypeError):
+                max_pages = 2
             max_results = max_pages * 50
 
             # Initialize scraper
@@ -2209,7 +2229,7 @@ With RANSAC enabled:
 
             # Update settings
             self.settings.set_setting('scraper.max_csv_items', max_items)
-            self.settings.save()
+            self.settings.save_settings()
 
         except ValueError:
             # Invalid input - reset to current saved value
@@ -2248,11 +2268,37 @@ With RANSAC enabled:
             self.schedule_frame.show_buttons_in_parent(self.config_buttons_frame.master, row=1)
 
     def _on_close(self):
+        # Cancel any pending auto-save timers
+        if hasattr(self, '_auto_save_timer') and self._auto_save_timer:
+            try:
+                self.after_cancel(self._auto_save_timer)
+                self._auto_save_timer = None
+            except:
+                pass
+
         # Stop schedule executor
         if hasattr(self, 'schedule_executor'):
             self.schedule_executor.stop()
 
         self._save_gui_settings()
+
+        # Force kill any lingering Python subprocesses (Scrapy, etc.)
+        try:
+            import psutil
+            import os
+            current_process = psutil.Process(os.getpid())
+            children = current_process.children(recursive=True)
+            for child in children:
+                try:
+                    child.kill()
+                except:
+                    pass
+        except ImportError:
+            # psutil not available, skip subprocess cleanup
+            pass
+        except Exception as e:
+            print(f"[CLEANUP] Error killing subprocesses: {e}")
+
         # Call our comprehensive closing method
         self.on_closing()
 
@@ -2322,6 +2368,13 @@ With RANSAC enabled:
             self.results_per_page_var.set('240')
             # Trigger category selection to populate detailed categories
             self._on_main_category_selected()
+
+            # Hide Suruga-ya specific fields
+            self.exclude_word_label.grid_remove()
+            self.exclude_word_entry.grid_remove()
+            self.condition_label.grid_remove()
+            self.condition_combo.grid_remove()
+
         elif store == "Suruga-ya":
             # Load Suruga-ya categories and shops
             from store_codes.surugaya_codes import SURUGAYA_MAIN_CATEGORIES
@@ -2337,6 +2390,12 @@ With RANSAC enabled:
             self.results_per_page_var.set('50')
             # Trigger category selection to populate detailed categories
             self._on_main_category_selected()
+
+            # Show Suruga-ya specific fields
+            self.exclude_word_label.grid()
+            self.exclude_word_entry.grid()
+            self.condition_label.grid()
+            self.condition_combo.grid()
 
     def _populate_surugaya_categories(self, main_code=None):
         """Populate detail categories listbox with Suruga-ya categories based on main category."""
@@ -2376,6 +2435,10 @@ With RANSAC enabled:
         self.shop_listbox.selection_set(0)
 
     def _on_main_category_selected(self, event=None):
+        # Don't auto-select during config loading - let _select_categories handle it
+        if getattr(self, '_loading_config', False):
+            return
+
         code = utils.extract_code(self.main_category_var.get())
 
         # Check which store is selected
@@ -2927,57 +2990,9 @@ With RANSAC enabled:
             traceback.print_exc()
 
     def _update_tree_item(self, path: Path, config: dict):
-        """Update a specific tree item's values without reloading the entire tree, or add if new"""
-        # Find the tree item that matches this path
-        existing_item = None
-        for item in self.config_tree.get_children():
-            if self.config_paths.get(item) == path:
-                existing_item = item
-                break
-
-        # Prepare values
-        keyword = config.get('keyword', '')
-
-        # Use category name if available, otherwise show code
-        category = config.get('category_name', config.get('category', ''))
-
-        # Use shop name if available, otherwise show code
-        shop = config.get('shop_name', config.get('shop', ''))
-
-        # Hide sold out (affects search URL)
-        hide_sold = 'Yes' if config.get('hide_sold_out') else 'No'
-
-        # Results per page (default 48)
-        results_per_page = config.get('results_per_page', 48)
-
-        # Max pages (empty if not set)
-        max_pages = config.get('max_pages', '')
-
-        # Latest additions timeframe
-        recent_hours = config.get('recent_hours')
-        latest_additions = self._label_for_recent_hours(recent_hours) if recent_hours else ''
-
-        # Language (default to english)
-        language = config.get('language', 'en')
-
-        # Store (Mandarake or Suruga-ya)
-        store = config.get('store', 'Mandarake').title()
-
-        values = (store, path.name, keyword, category, shop, hide_sold, results_per_page, max_pages, latest_additions, language)
-
-        if existing_item:
-            # Update existing item
-            self.config_tree.item(existing_item, values=values)
-            # Force tree to update display
-            self.config_tree.update_idletasks()
-        else:
-            # Add new item at the end
-            new_item = self.config_tree.insert('', 'end', values=values)
-            self.config_paths[new_item] = path
-            # Select the newly added item
-            self.config_tree.selection_set(new_item)
-            self.config_tree.see(new_item)
-            print(f"[CONFIG TREE] Added new config: {path.name}")
+        """Update config tree entry using the tree manager."""
+        if self.tree_manager:
+            self.tree_manager.update_tree_item(path, config)
 
     def _load_config_tree(self):
         """Load configuration tree using tree manager."""
@@ -3394,6 +3409,10 @@ With RANSAC enabled:
 
     def _do_auto_save(self):
         """Actually perform the auto-save - saves without renaming filename"""
+        # Don't auto-save if window is being destroyed
+        if not self.winfo_exists():
+            return
+
         try:
             config = self._collect_config()
             if config:
@@ -3404,7 +3423,7 @@ With RANSAC enabled:
                 self._save_config_to_path(config, self.last_saved_path, update_tree=True)
 
                 # Restore the selection after tree update
-                if current_selection:
+                if current_selection and self.winfo_exists():
                     # Find the item with the same path
                     for item in self.config_tree.get_children():
                         if self.config_paths.get(item) == self.last_saved_path:
@@ -3414,7 +3433,9 @@ With RANSAC enabled:
 
                 # Silently saved (no console spam)
         except Exception as e:
-            print(f"[AUTO-SAVE] Error: {e}")
+            # Only print error if window still exists (not during shutdown)
+            if self.winfo_exists():
+                print(f"[AUTO-SAVE] Error: {e}")
 
     def _commit_keyword_changes(self, event=None):
         """Trim trailing spaces from keyword and rename file if needed (called on blur)"""
@@ -3475,6 +3496,9 @@ With RANSAC enabled:
         """Load config when selected (single click)"""
         selection = self.config_tree.selection()
         if not selection:
+            return
+        # Only auto-load when exactly one item is selected (allows multiselect for bulk operations)
+        if len(selection) > 1:
             return
         item = selection[0]
         path = self.config_paths.get(item)
@@ -3552,7 +3576,7 @@ With RANSAC enabled:
         shop = config.get('shop_name', config.get('shop', ''))
         hide = 'Yes' if config.get('hide_sold_out') else 'No'
         results_per_page = config.get('results_per_page', 48)
-        max_pages = config.get('max_pages', '')
+        max_pages = config.get('max_pages', 2)
         recent_hours = config.get('recent_hours')
         timeframe = self._label_for_recent_hours(recent_hours) if recent_hours else ''
         language = config.get('language', 'en')
@@ -3576,92 +3600,32 @@ With RANSAC enabled:
         self.keyword_entry.focus()
 
     def _delete_selected_config(self):
-        """Delete the selected config file(s)"""
-        selection = self.config_tree.selection()
-        if not selection:
-            messagebox.showinfo("No Selection", "Please select a config file to delete")
+        """Delete the selected config file(s)."""
+        if not self.tree_manager:
             return
 
-        # Get all selected paths
-        paths = [self.config_paths.get(item) for item in selection if self.config_paths.get(item)]
-        if not paths:
-            return
-
-        # Confirm deletion
-        if len(paths) == 1:
-            message = f"Are you sure you want to delete:\n{paths[0].name}?"
-        else:
-            file_list = '\n'.join(p.name for p in paths)
-            message = f"Are you sure you want to delete {len(paths)} configs?\n\n{file_list}"
-
-        response = messagebox.askyesno("Confirm Delete", message)
-
-        if response:
-            deleted_count = 0
-            errors = []
-            for path in paths:
-                try:
-                    path.unlink()  # Delete the file
-                    deleted_count += 1
-                except Exception as e:
-                    errors.append(f"{path.name}: {e}")
-
-            self._load_config_tree()  # Reload the tree
-
-            if errors:
-                messagebox.showerror("Errors", f"Failed to delete:\n" + '\n'.join(errors))
-
-            self.status_var.set(f"Deleted {deleted_count} config(s)")
+        deleted = self.tree_manager.delete_selected_configs()
+        if deleted:
+            self.status_var.set(f"Deleted {deleted} config(s)")
+            if self.last_saved_path and not self.last_saved_path.exists():
+                self.last_saved_path = None
 
     def _move_config(self, direction):
-        """Move selected config up (-1) or down (1) in the list"""
-        selection = self.config_tree.selection()
-        if not selection:
-            messagebox.showinfo("No Selection", "Please select a config file to move")
+        """Move selected config up (-1) or down (1) via tree manager."""
+        if not self.tree_manager:
             return
 
-        item = selection[0]
-        path = self.config_paths.get(item)
-        if not path:
+        target = self.tree_manager.get_selected_config_path()
+        if not target:
             return
 
-        # Get current order from treeview
-        tree_children = self.config_tree.get_children()
-        current_order = [self.config_paths.get(child).name for child in tree_children]
+        if direction < 0:
+            moved = self.tree_manager.move_config_up()
+        else:
+            moved = self.tree_manager.move_config_down()
 
-        try:
-            current_index = current_order.index(path.name)
-        except ValueError:
-            return
-
-        new_index = current_index + direction
-
-        # Check bounds
-        if new_index < 0 or new_index >= len(current_order):
-            return
-
-        # Swap positions in order list
-        current_order[current_index], current_order[new_index] = current_order[new_index], current_order[current_index]
-
-        # Save new order to metadata file
-        order_file = Path('.config_order.json')
-        try:
-            with order_file.open('w', encoding='utf-8') as f:
-                json.dump(current_order, f, indent=2)
-
-            self._load_config_tree()  # Reload the tree
-
-            # Re-select the moved item
-            for tree_item in self.config_tree.get_children():
-                if self.config_paths.get(tree_item) == path:
-                    self.config_tree.selection_set(tree_item)
-                    self.config_tree.see(tree_item)
-                    break
-
-            self.status_var.set(f"Moved: {path.name}")
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to move file: {e}")
+        if moved:
+            self.status_var.set(f"Moved: {target.name}")
 
     def _load_from_url(self):
         """Parse URL from either Mandarake or Suruga-ya and populate config fields"""
@@ -3722,6 +3686,15 @@ With RANSAC enabled:
         self._loading_config = True
 
         try:
+            # Set store first and trigger UI changes
+            store = config.get('store', 'mandarake')
+            if store == 'suruga-ya':
+                self.current_store.set("Suruga-ya")
+                self._on_store_changed()
+            else:
+                self.current_store.set("Mandarake")
+                self._on_store_changed()
+
             # Store provided URL if present
             if 'search_url' in config:
                 self._provided_url = config['search_url']
@@ -3740,7 +3713,7 @@ With RANSAC enabled:
                 categories = []
             self._select_categories(categories)
 
-            self.max_pages_var.set(str(config.get('max_pages', '')))
+            self.max_pages_var.set(str(config.get('max_pages', 2)))
             self.recent_hours_var.set(self._label_for_recent_hours(config.get('recent_hours')))
 
         # Set shop selection in listbox
@@ -3793,6 +3766,19 @@ With RANSAC enabled:
             if hasattr(self, 'adult_filter_var'):
                 adult_only = config.get('adult_only', False)
                 self.adult_filter_var.set("Adult Only" if adult_only else "All")
+
+        # Load Suruga-ya specific fields
+            if hasattr(self, 'exclude_word_var'):
+                self.exclude_word_var.set(config.get('exclude_word', ''))
+            if hasattr(self, 'condition_var'):
+                condition = config.get('condition', 'all')
+                if condition == '1':
+                    self.condition_var.set("New Only")
+                elif condition == '2':
+                    self.condition_var.set("Used Only")
+                else:
+                    self.condition_var.set("All")
+
         # Note: eBay API credentials removed from GUI
 
             self.csv_path_var.set(config.get('csv', ''))
@@ -3806,10 +3792,11 @@ With RANSAC enabled:
                 self.results_per_page_var.set(str(config.get('results_per_page', '240')))
 
             self.schedule_var.set(config.get('schedule', ''))
-            self._update_preview()
         finally:
             # Always reset loading flag
             self._loading_config = False
+            # Update preview after loading flag is cleared so provided URLs take effect
+            self._update_preview()
 
     # Browserless eBay Search methods
     def select_browserless_image(self):
@@ -3863,7 +3850,8 @@ With RANSAC enabled:
             self.after(0, self.browserless_progress.stop)
 
         def show_message_callback(title, message):
-            self.after(0, lambda: messagebox.showinfo(title, message))
+            # Log to status instead of popup
+            self.after(0, lambda: self.browserless_status.set(message))
             self.after(0, self.browserless_progress.stop)
 
         workers.run_scrapy_text_search_worker(
@@ -3889,7 +3877,8 @@ With RANSAC enabled:
             self.after(0, self.browserless_progress.stop)
 
         def show_message_callback(title, message):
-            self.after(0, lambda: messagebox.showinfo(title, message))
+            # Log to status instead of popup
+            self.after(0, lambda: self.browserless_status.set(message))
             self.after(0, self.browserless_progress.stop)
 
         def create_debug_folder_callback(query):
@@ -3998,6 +3987,12 @@ With RANSAC enabled:
 
     def filter_csv_items(self):
         """Filter and display CSV items based on in-stock filter - fast load, thumbnails loaded on demand"""
+        # DEBUG: Print stack trace to find who's calling this
+        import traceback
+        print("[DEBUG filter_csv_items] Called from:")
+        for line in traceback.format_stack()[-4:-1]:  # Show last 3 stack frames
+            print(line.strip())
+
         # Clear existing items and images
         for item in self.csv_items_tree.get_children():
             self.csv_items_tree.delete(item)
@@ -4150,10 +4145,16 @@ With RANSAC enabled:
 
     def _on_csv_filter_changed(self):
         """Handle CSV filter changes - filter items (settings saved on close)"""
+        # Don't filter while loading a config
+        if getattr(self, '_loading_config', False):
+            return
         self.filter_csv_items()
 
     def _on_recent_hours_changed(self, *args):
         """Handle latest additions timeframe change - refresh CSV view if loaded"""
+        # Don't refresh while loading a config
+        if getattr(self, '_loading_config', False):
+            return
         # Only refresh if CSV is loaded
         if hasattr(self, 'csv_compare_data') and self.csv_compare_data:
             self.filter_csv_items()
@@ -4463,7 +4464,9 @@ With RANSAC enabled:
         """Compare selected CSV item with eBay"""
         selection = self.csv_items_tree.selection()
         if not selection:
-            messagebox.showinfo("No Selection", "Please select an item to compare")
+            # Log to status instead of popup
+            self.browserless_status.set("Please select an item to compare")
+            print("[COMPARE SELECTED] No item selected")
             return
 
         # Get selected item data
@@ -4522,7 +4525,9 @@ With RANSAC enabled:
 
         if not items_to_compare:
             if not skip_confirmation:
-                messagebox.showinfo("No Items", "No items to compare (check filter settings)")
+                # Log to status instead of popup
+                self.browserless_status.set("No items to compare (check filter settings)")
+                print("[COMPARE ALL] No items to compare")
             return
 
         # Extract search query from the eBay query field (already populated by CSV load)
@@ -4577,7 +4582,9 @@ With RANSAC enabled:
                 new_items.append(item)
 
         if not new_items:
-            messagebox.showinfo("All Compared", f"All {len(self.csv_compare_data)} items have already been compared with eBay.\n\nUse 'Clear Results' to reset and recompare, or 'Compare All' to recompare everything.")
+            # Log to status instead of popup
+            self.browserless_status.set(f"All {len(self.csv_compare_data)} items have already been compared with eBay")
+            print(f"[COMPARE NEW] All items already compared")
             return
 
         # Extract search query
@@ -4612,7 +4619,9 @@ With RANSAC enabled:
         compared_count = sum(1 for item in self.csv_compare_data if item.get('ebay_compared'))
 
         if compared_count == 0:
-            messagebox.showinfo("No Results", "No comparison results to clear")
+            # Log to status instead of popup
+            self.browserless_status.set("No comparison results to clear")
+            print("[CLEAR RESULTS] No results to clear")
             return
 
         # Confirm clearing
@@ -4637,7 +4646,8 @@ With RANSAC enabled:
                 # Save updated CSV
                 self._save_updated_csv()
 
-                messagebox.showinfo("Success", f"Cleared comparison results for {compared_count} items")
+                # Log to status instead of popup
+                self.browserless_status.set(f"Cleared comparison results for {compared_count} items")
                 print(f"[CLEAR RESULTS] Cleared comparison results for {compared_count} items")
 
             except Exception as e:
@@ -4656,7 +4666,7 @@ With RANSAC enabled:
         def update_callback(message):
             self.after(0, lambda: self.browserless_status.set(message))
 
-        def display_callback(comparison_results):
+        def display_callback(comparison_results, ebay_results=None):
             self.all_comparison_results = comparison_results
             # Save comparison results to CSV
             self.after(0, lambda: self._save_comparison_results_to_csv(comparison_results))
@@ -4669,11 +4679,29 @@ With RANSAC enabled:
                 self.after(0, lambda: self._send_to_alerts_with_thresholds(comparison_results, min_sim, min_profit))
             self.after(0, self.csv_compare_progress.stop)
 
+        def ebay_display_callback(ebay_results):
+            """Display eBay search results immediately when search completes"""
+            display_results = []
+            for item in ebay_results:
+                display_results.append({
+                    'title': item.get('product_title', 'N/A'),
+                    'price': item.get('current_price', 'N/A'),
+                    'shipping': item.get('shipping_cost', 'N/A'),
+                    'sold_date': item.get('sold_date', 'N/A'),
+                    'similarity': '-',
+                    'url': item.get('product_url', ''),
+                    'mandarake_url': '',  # No Mandarake data yet
+                    'image_url': item.get('main_image', ''),
+                    'mandarake_image_url': ''  # No Mandarake thumbnail yet
+                })
+            self.after(0, lambda: self._display_browserless_results(display_results))
+
         def show_message_callback(title, message, msg_type='info'):
+            # Show only errors as popups, log everything else to status
             if msg_type == 'error':
                 self.after(0, lambda: messagebox.showerror(title, message))
             else:
-                self.after(0, lambda: messagebox.showinfo(title, message))
+                self.after(0, lambda: self.browserless_status.set(message))
             self.after(0, self.csv_compare_progress.stop)
 
         workers.compare_csv_items_worker(
@@ -4684,7 +4712,8 @@ With RANSAC enabled:
             self.usd_jpy_rate,
             update_callback,
             display_callback,
-            show_message_callback
+            show_message_callback,
+            ebay_display_callback
         )
 
     def _compare_csv_items_individually_worker(self, items, base_search_query):
@@ -4714,7 +4743,8 @@ With RANSAC enabled:
             self.after(0, self.csv_compare_progress.stop)
 
         def show_message_callback(title, message):
-            self.after(0, lambda: messagebox.showerror(title, message))
+            # Log to status instead of popup
+            self.after(0, lambda: self.browserless_status.set(f"{title}: {message}"))
             self.after(0, self.csv_compare_progress.stop)
 
         def create_debug_folder_callback(query):
@@ -4883,7 +4913,9 @@ With RANSAC enabled:
                 'sold_date': r.get('sold_date', ''),  # Keep actual sold date
                 'similarity': r['similarity_display'],
                 'url': r['ebay_link'],
-                'image_url': r['thumbnail']
+                'mandarake_url': r.get('mandarake_link', ''),
+                'image_url': r['thumbnail'],
+                'mandarake_image_url': r.get('mandarake_thumbnail', '')
             })
 
         self._display_browserless_results(display_results)
@@ -4898,15 +4930,76 @@ With RANSAC enabled:
         try:
             index = int(item_id) - 1
             if 0 <= index < len(self.browserless_results_data):
-                url = self.browserless_results_data[index]['url']
+                result = self.browserless_results_data[index]
+                url = result.get('url', '')
+                print(f"[URL DEBUG] Item {index}: title={result.get('title', '')[:50]}, url={url[:100] if url else 'EMPTY'}")
                 if url and not any(x in url for x in ["No URL available", "Placeholder URL", "Invalid URL", "URL Error"]):
                     print(f"[BROWSERLESS SEARCH] Opening URL: {url}")
                     webbrowser.open(url)
                 else:
                     messagebox.showwarning("Invalid URL", f"Cannot open URL: {url}")
+            else:
+                print(f"[URL DEBUG] Index {index} out of range (data length: {len(self.browserless_results_data)})")
         except (ValueError, IndexError) as e:
             print(f"[BROWSERLESS SEARCH] Error opening URL: {e}")
             pass
+
+    def _show_browserless_context_menu(self, event):
+        """Show context menu for eBay results treeview"""
+        # Select the item under cursor
+        item = self.browserless_tree.identify_row(event.y)
+        if item:
+            self.browserless_tree.selection_set(item)
+
+            # Create context menu
+            menu = tk.Menu(self, tearoff=0)
+            menu.add_command(label="Send to Review/Alerts", command=self._send_browserless_to_review)
+            menu.add_separator()
+            menu.add_command(label="Open eBay URL", command=lambda: self.open_browserless_url(event))
+            if self.browserless_results_data and int(item) - 1 < len(self.browserless_results_data):
+                result = self.browserless_results_data[int(item) - 1]
+                if result.get('mandarake_url'):
+                    menu.add_command(label="Open Mandarake URL", command=lambda: webbrowser.open(result['mandarake_url']))
+
+            # Show menu at cursor position
+            menu.post(event.x_root, event.y_root)
+
+    def _send_browserless_to_review(self):
+        """Send selected eBay result to Review/Alerts tab"""
+        selection = self.browserless_tree.selection()
+        if not selection:
+            self.browserless_status.set("No item selected")
+            return
+
+        item_id = selection[0]
+        try:
+            index = int(item_id) - 1
+            if 0 <= index < len(self.browserless_results_data):
+                result = self.browserless_results_data[index]
+
+                # Check if this is a comparison result (has similarity/profit data)
+                if 'similarity' in result or 'profit_margin' in result:
+                    # Find the corresponding item in all_comparison_results
+                    matching_result = None
+                    for comp_result in getattr(self, 'all_comparison_results', []):
+                        if comp_result.get('ebay_link') == result.get('url'):
+                            matching_result = comp_result
+                            break
+
+                    if matching_result:
+                        # Send to alerts using existing method
+                        self.alert_tab.add_filtered_alerts([matching_result])
+                        self.browserless_status.set(f"Sent '{result['title'][:50]}...' to Review/Alerts")
+                        print(f"[SEND TO REVIEW] Added item to alerts: {result['title']}")
+                    else:
+                        self.browserless_status.set("Could not find comparison data for this item")
+                else:
+                    # This is a raw eBay search result without comparison data
+                    self.browserless_status.set("Item has no comparison data - use 'Compare Selected' first")
+                    print("[SEND TO REVIEW] Item has no comparison data")
+        except (ValueError, IndexError) as e:
+            print(f"[SEND TO REVIEW] Error: {e}")
+            self.browserless_status.set(f"Error sending to review: {e}")
 
     def _display_browserless_results(self, results):
         """Display browserless search results in the tree view with thumbnails"""
@@ -4928,25 +5021,59 @@ With RANSAC enabled:
                 result.get('profit_margin', ''),
                 result.get('sold_date', ''),
                 result.get('similarity', ''),
-                result['url']  # Show full URL, no truncation
+                result['url'],  # eBay URL
+                result.get('mandarake_url', '')  # Mandarake URL
             )
 
-            # Try to load thumbnail
-            image_url = result.get('image_url', '')
+            # Try to load thumbnails (eBay and Mandarake side-by-side if both exist)
+            ebay_image_url = result.get('image_url', '')
+            mandarake_image_url = result.get('mandarake_image_url', '')
             photo = None
 
-            if image_url:
-                try:
-                    import requests
-                    from io import BytesIO
-                    response = requests.get(image_url, timeout=5)
-                    response.raise_for_status()
-                    pil_img = Image.open(BytesIO(response.content))
-                    pil_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
-                    photo = ImageTk.PhotoImage(pil_img)
-                except Exception as e:
-                    print(f"[SCRAPY SEARCH] Failed to load thumbnail {i}: {e}")
-                    photo = None
+            try:
+                import requests
+                from io import BytesIO
+
+                ebay_img = None
+                mandarake_img = None
+
+                # Load eBay image
+                if ebay_image_url:
+                    try:
+                        response = requests.get(ebay_image_url, timeout=5)
+                        response.raise_for_status()
+                        ebay_img = Image.open(BytesIO(response.content))
+                        ebay_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
+                    except Exception as e:
+                        print(f"[THUMB] Failed to load eBay thumbnail {i}: {e}")
+
+                # Load Mandarake image
+                if mandarake_image_url:
+                    try:
+                        response = requests.get(mandarake_image_url, timeout=5)
+                        response.raise_for_status()
+                        mandarake_img = Image.open(BytesIO(response.content))
+                        mandarake_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
+                    except Exception as e:
+                        print(f"[THUMB] Failed to load Mandarake thumbnail {i}: {e}")
+
+                # Create composite image if we have both, or use single image
+                if ebay_img and mandarake_img:
+                    # Side-by-side composite
+                    total_width = ebay_img.width + mandarake_img.width + 2  # +2 for separator
+                    max_height = max(ebay_img.height, mandarake_img.height)
+                    composite = Image.new('RGB', (total_width, max_height), 'white')
+                    composite.paste(ebay_img, (0, 0))
+                    composite.paste(mandarake_img, (ebay_img.width + 2, 0))
+                    photo = ImageTk.PhotoImage(composite)
+                elif ebay_img:
+                    photo = ImageTk.PhotoImage(ebay_img)
+                elif mandarake_img:
+                    photo = ImageTk.PhotoImage(mandarake_img)
+
+            except Exception as e:
+                print(f"[SCRAPY SEARCH] Failed to load thumbnails {i}: {e}")
+                photo = None
 
             # Insert with or without image
             if photo:
