@@ -1,0 +1,509 @@
+"""
+Mandarake/Stores Tab
+
+This tab provides:
+1. Multi-store search interface (Mandarake, Suruga-ya)
+2. Keyword and category selection
+3. Shop filtering
+4. Configuration management
+5. Search URL preview
+"""
+
+import tkinter as tk
+from tkinter import ttk
+from typing import Optional, Dict, List
+from pathlib import Path
+
+from gui.constants import (
+    MAIN_CATEGORY_OPTIONS,
+    RECENT_OPTIONS
+)
+
+
+class MandarakeTab(ttk.Frame):
+    """Mandarake/Stores tab for multi-store product search configuration."""
+
+    def __init__(self, parent, main_window):
+        """
+        Initialize Mandarake/Stores tab.
+
+        Args:
+            parent: Parent widget (notebook)
+            main_window: Reference to main window for shared resources
+        """
+        super().__init__(parent)
+        self.main = main_window
+
+        # Store UI references
+        self.vertical_paned = None
+        self.listbox_paned = None
+        self.detail_listbox = None
+        self.shop_listbox = None
+        self.keyword_entry = None
+        self.keyword_menu = None
+        self.main_category_combo = None
+        self.exclude_word_label = None
+        self.exclude_word_entry = None
+        self.condition_label = None
+        self.condition_combo = None
+        self.recent_combo = None
+
+        # Create variables on main window so they're accessible from main window methods
+        # Store selector and URL
+        self.main.current_store = tk.StringVar(value="Mandarake")
+        self.main.mandarake_url_var = tk.StringVar()
+
+        # Search configuration
+        self.main.keyword_var = tk.StringVar()
+        self.main.exclude_word_var = tk.StringVar()
+        self.main.main_category_var = tk.StringVar()
+
+        # URL options
+        self.main.hide_sold_var = tk.BooleanVar(value=False)
+        self.main.results_per_page_var = tk.StringVar(value="48")
+        self.main.max_pages_var = tk.StringVar(value="2")
+        self.main.recent_hours_var = tk.StringVar(value=RECENT_OPTIONS[0][0])
+
+        # Language and filters
+        self.main.language_var = tk.StringVar(value="en")
+        self.main.condition_var = tk.StringVar(value="all")
+        self.main.adult_filter_var = tk.StringVar(value="All")
+
+        # Track user sash position
+        self._user_sash_ratio = None
+
+        # Build UI
+        self._build_ui()
+
+    def _build_ui(self):
+        """Build the Mandarake/Stores tab UI."""
+        pad = {'padx': 5, 'pady': 5}
+
+        # Create vertical PanedWindow to split top section from bottom sections
+        self.vertical_paned = tk.PanedWindow(self, orient=tk.VERTICAL, sashrelief=tk.RAISED, sashwidth=5)
+        self.vertical_paned.pack(fill=tk.BOTH, expand=True)
+
+        # Top pane: Form fields and listboxes (resizable)
+        top_pane = ttk.Frame(self.vertical_paned)
+        self.vertical_paned.add(top_pane, minsize=200)
+
+        # Bottom container: Options + Configs (not resizable internally)
+        bottom_container = ttk.Frame(self.vertical_paned)
+        self.vertical_paned.add(bottom_container, minsize=200)
+
+        # === TOP PANE: Search Configuration ===
+        self._build_search_fields(top_pane, pad)
+        self._build_category_shop_listboxes(top_pane, pad)
+
+        # === MIDDLE PANE: Options ===
+        self._build_options_section(bottom_container, pad)
+
+        # === BOTTOM PANE: Config/Schedule Management ===
+        self._build_config_schedule_section(bottom_container, pad)
+
+    def _build_search_fields(self, parent, pad):
+        """Build search input fields (store selector, URL, keyword, main category)."""
+        # Store selector
+        ttk.Label(parent, text="Store:").grid(row=0, column=0, sticky=tk.W, **pad)
+        store_combo = ttk.Combobox(
+            parent,
+            textvariable=self.main.current_store,
+            values=["Mandarake", "Suruga-ya"],
+            state="readonly",
+            width=20
+        )
+        store_combo.grid(row=0, column=1, sticky=tk.W, **pad)
+        store_combo.bind("<<ComboboxSelected>>", self._on_store_changed)
+
+        # Store URL input
+        ttk.Label(parent, text="Store URL:").grid(row=1, column=0, sticky=tk.W, **pad)
+        url_entry = ttk.Entry(parent, textvariable=self.main.mandarake_url_var, width=60)
+        url_entry.grid(row=1, column=1, columnspan=3, sticky=(tk.W, tk.E), **pad)
+        ttk.Button(parent, text="Load URL", command=self._load_from_url).grid(row=1, column=4, sticky=tk.W, **pad)
+
+        # Keyword entry
+        ttk.Label(parent, text="Keyword:").grid(row=2, column=0, sticky=tk.W, **pad)
+        self.main.keyword_entry = ttk.Entry(parent, textvariable=self.main.keyword_var, width=42)
+        self.main.keyword_entry.grid(row=2, column=1, columnspan=3, sticky=tk.W, **pad)
+        self.main.keyword_var.trace_add("write", self._update_preview)
+        self.main.keyword_entry.bind("<FocusOut>", self._commit_keyword_changes)
+        self.main.keyword_entry.bind("<Return>", self._save_config_on_enter)
+
+        # Right-click context menu for keyword entry
+        self.main.keyword_menu = tk.Menu(self.main.keyword_entry, tearoff=0)
+        self.main.keyword_menu.add_command(label="Add Selected Text to Publisher List", command=self.main._add_to_publisher_list)
+        self.main.keyword_entry.bind("<Button-3>", self._show_keyword_menu)
+
+        # Exclude keywords field (for Suruga-ya)
+        self.main.exclude_word_label = ttk.Label(parent, text="Exclude words:")
+        self.main.exclude_word_label.grid(row=2, column=3, sticky=tk.W, padx=(20, 5), pady=5)
+        self.main.exclude_word_entry = ttk.Entry(parent, textvariable=self.main.exclude_word_var, width=30)
+        self.main.exclude_word_entry.grid(row=2, column=4, columnspan=2, sticky=tk.W, **pad)
+        self.main.exclude_word_var.trace_add("write", self.main._auto_save_config)
+        # Hide by default (shown when Suruga-ya is selected)
+        self.main.exclude_word_label.grid_remove()
+        self.main.exclude_word_entry.grid_remove()
+
+        # Main category selector
+        ttk.Label(parent, text="Main category:").grid(row=3, column=0, sticky=tk.W, **pad)
+        self.main.main_category_combo = ttk.Combobox(
+            parent,
+            textvariable=self.main.main_category_var,
+            state="readonly",
+            width=42,
+            values=[f"{name} ({code})" for code, name in MAIN_CATEGORY_OPTIONS],
+        )
+        self.main.main_category_combo.grid(row=3, column=1, columnspan=3, sticky=tk.W, **pad)
+        self.main.main_category_combo.bind("<<ComboboxSelected>>", self._on_main_category_selected)
+
+        # Configure grid weights
+        parent.columnconfigure(6, weight=1)
+
+    def _build_category_shop_listboxes(self, parent, pad):
+        """Build category and shop listboxes with labels."""
+        # Create labels row for both listboxes
+        labels_frame = ttk.Frame(parent)
+        labels_frame.grid(row=4, column=0, columnspan=7, sticky=(tk.W, tk.E), **pad)
+        ttk.Label(labels_frame, text="Detailed categories:").pack(side=tk.LEFT)
+        ttk.Label(labels_frame, text="Shop:", anchor='e').pack(side=tk.RIGHT, padx=(0, 50))
+
+        # Create PanedWindow for resizable listboxes
+        self.listbox_paned = tk.PanedWindow(parent, orient=tk.HORIZONTAL, sashrelief=tk.RAISED, sashwidth=5)
+        self.listbox_paned.grid(row=5, column=0, columnspan=7, sticky=(tk.W, tk.E, tk.N, tk.S), **pad)
+
+        # Left pane: Detailed categories
+        detail_frame = ttk.Frame(self.listbox_paned)
+        self.main.detail_listbox = tk.Listbox(
+            detail_frame,
+            selectmode=tk.SINGLE,
+            height=10,
+            exportselection=False,
+        )
+        self.main.detail_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        detail_scroll = ttk.Scrollbar(detail_frame, orient=tk.VERTICAL, command=self.main.detail_listbox.yview)
+        detail_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.main.detail_listbox.configure(yscrollcommand=detail_scroll.set)
+        self.main.detail_listbox.bind("<<ListboxSelect>>", lambda _: self._update_preview())
+        self._populate_detail_categories()
+        self.listbox_paned.add(detail_frame, minsize=200)
+
+        # Right pane: Shop listbox
+        shop_frame = ttk.Frame(self.listbox_paned)
+        self.main.shop_listbox = tk.Listbox(
+            shop_frame,
+            selectmode=tk.SINGLE,
+            height=10,
+            exportselection=False,
+        )
+        self.main.shop_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        shop_scroll = ttk.Scrollbar(shop_frame, orient=tk.VERTICAL, command=self.main.shop_listbox.yview)
+        shop_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.main.shop_listbox.configure(yscrollcommand=shop_scroll.set)
+        self.main.shop_listbox.bind("<<ListboxSelect>>", self._on_shop_selected)
+        self._populate_shop_list()
+        self.listbox_paned.add(shop_frame, minsize=150)
+
+        # Bind to track user changes
+        self.listbox_paned.bind('<ButtonRelease-1>', self._on_listbox_sash_moved)
+
+        # Configure top pane grid weights
+        parent.rowconfigure(5, weight=1)  # Listbox row expands
+
+    def _build_options_section(self, parent, pad):
+        """Build options section (URL options, language, filters)."""
+        # Middle pane: Options (fixed, no sash below it)
+        middle_pane = ttk.Frame(parent)
+        middle_pane.pack(fill=tk.X, padx=5, pady=5)
+
+        # --- URL Options (affect Mandarake search) - All in one row ---
+        ttk.Checkbutton(middle_pane, text="Hide sold", variable=self.main.hide_sold_var,
+                        command=self._update_preview).grid(row=0, column=0, sticky=tk.W, **pad)
+
+        ttk.Label(middle_pane, text="Results/page:").grid(row=0, column=1, sticky=tk.W, padx=(15, 5), pady=5)
+        results_per_page_combo = ttk.Combobox(
+            middle_pane,
+            textvariable=self.main.results_per_page_var,
+            state="readonly",
+            width=6,
+            values=["48", "120", "240"]
+        )
+        results_per_page_combo.grid(row=0, column=2, sticky=tk.W, **pad)
+        self.main.results_per_page_var.trace_add("write", self._update_preview)
+
+        ttk.Label(middle_pane, text="Max pages:").grid(row=0, column=3, sticky=tk.W, padx=(15, 5), pady=5)
+        ttk.Entry(middle_pane, textvariable=self.main.max_pages_var, width=8).grid(row=0, column=4, sticky=tk.W, **pad)
+        self.main.max_pages_var.trace_add("write", self.main._auto_save_config)
+
+        ttk.Label(middle_pane, text="Latest:").grid(row=0, column=5, sticky=tk.W, padx=(15, 5), pady=5)
+        self.main.recent_combo = ttk.Combobox(
+            middle_pane,
+            textvariable=self.main.recent_hours_var,
+            state="readonly",
+            width=15,
+            values=[label for label, _ in RECENT_OPTIONS],
+        )
+        self.main.recent_combo.grid(row=0, column=6, sticky=tk.W, **pad)
+        self.main.recent_hours_var.trace_add("write", self._update_preview)
+        self.main.recent_hours_var.trace_add("write", self._on_recent_hours_changed)
+
+        # Initialize CSV variables if not already done (for backward compatibility with CSV comparison tab)
+        if not hasattr(self.main, 'csv_newly_listed_only'):
+            self.main.csv_newly_listed_only = tk.BooleanVar(value=False)
+        if not hasattr(self.main, 'csv_in_stock_only'):
+            self.main.csv_in_stock_only = tk.BooleanVar(value=True)
+        if not hasattr(self.main, 'csv_add_secondary_keyword'):
+            self.main.csv_add_secondary_keyword = tk.BooleanVar(value=False)
+
+        # --- Language (rarely used) - Same row ---
+        ttk.Label(middle_pane, text="Language:").grid(row=1, column=0, sticky=tk.W, **pad)
+        lang_combo = ttk.Combobox(middle_pane, textvariable=self.main.language_var, values=["en", "ja"], width=6, state="readonly")
+        lang_combo.grid(row=1, column=1, sticky=tk.W, **pad)
+        self.main.language_var.trace_add("write", self._update_preview)
+
+        # --- Condition filter (for Suruga-ya) ---
+        self.main.condition_label = ttk.Label(middle_pane, text="Condition:")
+        self.main.condition_label.grid(row=1, column=2, sticky=tk.W, padx=(15, 5), pady=5)
+        self.main.condition_combo = ttk.Combobox(
+            middle_pane,
+            textvariable=self.main.condition_var,
+            values=["All", "New Only", "Used Only"],
+            state="readonly",
+            width=12
+        )
+        self.main.condition_combo.grid(row=1, column=3, sticky=tk.W, **pad)
+        self.main.condition_var.trace_add("write", self.main._auto_save_config)
+        # Hide by default (shown when Suruga-ya is selected)
+        self.main.condition_label.grid_remove()
+        self.main.condition_combo.grid_remove()
+
+        # --- Adult content filter ---
+        ttk.Label(middle_pane, text="Content:").grid(row=1, column=4, sticky=tk.W, padx=(15, 5), pady=5)
+        adult_combo = ttk.Combobox(
+            middle_pane,
+            textvariable=self.main.adult_filter_var,
+            values=["All", "Adult Only"],
+            state="readonly",
+            width=12
+        )
+        adult_combo.grid(row=1, column=5, sticky=tk.W, **pad)
+        self.main.adult_filter_var.trace_add("write", self.main._auto_save_config)
+
+    def _build_config_schedule_section(self, parent, pad):
+        """Build config/schedule management section."""
+        from gui.tree_manager import TreeManager
+        from gui.schedule_frame import ScheduleFrame
+
+        # Bottom pane: Configs/Schedules and buttons (fills remaining space)
+        bottom_pane = ttk.Frame(parent)
+        bottom_pane.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
+
+        # Configs/Schedules tabbed interface
+        config_schedule_notebook = ttk.Notebook(bottom_pane)
+        config_schedule_notebook.grid(row=0, column=0, columnspan=7, sticky=tk.NSEW, **pad)
+
+        # Configs tab
+        tree_frame = ttk.Frame(config_schedule_notebook)
+        config_schedule_notebook.add(tree_frame, text="Configs")
+
+        # Store filter row
+        filter_frame = ttk.Frame(tree_frame)
+        filter_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+
+        ttk.Label(filter_frame, text="Store Filter:").pack(side=tk.LEFT, padx=(0, 5))
+        self.main.config_store_filter = tk.StringVar(value='All')
+        store_filter_combo = ttk.Combobox(filter_frame, textvariable=self.main.config_store_filter,
+                                          values=['All', 'Mandarake', 'Suruga-Ya'], state='readonly', width=12)
+        store_filter_combo.pack(side=tk.LEFT)
+        store_filter_combo.bind('<<ComboboxSelected>>', lambda e: self.main._filter_config_tree())
+
+        columns = ('store', 'file', 'keyword', 'category', 'shop', 'hide_sold', 'results_per_page', 'max_pages', 'latest_additions', 'language')
+        self.main.config_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=6)
+        headings = {
+            'store': 'Store',
+            'file': 'File',
+            'keyword': 'Keyword',
+            'category': 'Category',
+            'shop': 'Shop',
+            'hide_sold': 'Hide Sold',
+            'results_per_page': 'Results/Page',
+            'max_pages': 'Max Pages',
+            'latest_additions': 'Latest',
+            'language': 'Lang',
+        }
+        widths = {
+            'store': 90,
+            'file': 200,
+            'keyword': 120,
+            'category': 120,
+            'shop': 120,
+            'hide_sold': 80,
+            'results_per_page': 80,
+            'max_pages': 70,
+            'latest_additions': 70,
+            'language': 50,
+        }
+        for col, heading in headings.items():
+            self.main.config_tree.heading(col, text=heading)
+            width = widths.get(col, 100)
+            self.main.config_tree.column(col, width=width, stretch=False)
+
+        # Add vertical scrollbar
+        tree_scroll_y = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.main.config_tree.yview)
+        tree_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Add horizontal scrollbar
+        tree_scroll_x = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=self.main.config_tree.xview)
+        tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.main.config_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.main.config_tree.configure(yscrollcommand=tree_scroll_y.set, xscrollcommand=tree_scroll_x.set)
+
+        # Initialize tree manager after tree widget is created
+        self.main.tree_manager = TreeManager(self.main.config_tree, self.main.config_manager)
+        # Share tree manager path mapping for legacy helpers
+        self.main.config_paths = self.main.tree_manager.config_paths
+
+        # Single click to load config
+        self.main.config_tree.bind('<<TreeviewSelect>>', self.main._on_config_selected)
+        # Prevent space from affecting tree selection when it has focus
+        # Allow deselect by clicking empty area
+        self.main.config_tree.bind("<Button-1>", lambda e: self.main._deselect_if_empty(e, self.main.config_tree))
+
+        # Add right-click context menu for config tree
+        self.main.config_tree_menu = tk.Menu(self.main.config_tree, tearoff=0)
+        self.main.config_tree_menu.add_command(label="Load CSV", command=self.main._load_csv_from_config)
+        self.main.config_tree_menu.add_command(label="Edit Category", command=self.main._edit_category_from_menu)
+        self.main.config_tree.bind("<Button-3>", self.main._show_config_tree_menu)
+
+        # Double-click to edit category
+        self.main.config_tree.bind("<Double-Button-1>", self.main._on_config_tree_double_click)
+
+        # Enable column drag-to-reorder
+        self.main._setup_column_drag(self.main.config_tree)
+
+        # Schedules tab
+        self.main.schedule_frame = ScheduleFrame(config_schedule_notebook, self.main.schedule_executor)
+        config_schedule_notebook.add(self.main.schedule_frame, text="Schedules")
+
+        # Bind tab change to show/hide appropriate buttons
+        config_schedule_notebook.bind("<<NotebookTabChanged>>", self.main._on_config_schedule_tab_changed)
+        self.main.config_schedule_notebook = config_schedule_notebook
+
+        # Config management buttons (row 1)
+        self.main.config_buttons_frame = ttk.Frame(bottom_pane)
+        self.main.config_buttons_frame.grid(row=1, column=0, columnspan=5, sticky=tk.W, **pad)
+        ttk.Button(self.main.config_buttons_frame, text="New Config", command=self.main._new_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(self.main.config_buttons_frame, text="Delete Selected", command=self.main._delete_selected_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(self.main.config_buttons_frame, text="Move Up", command=lambda: self.main._move_config(-1)).pack(side=tk.LEFT, padx=5)
+        ttk.Button(self.main.config_buttons_frame, text="Move Down", command=lambda: self.main._move_config(1)).pack(side=tk.LEFT, padx=5)
+
+        # Action buttons for Mandarake scraper (row 2)
+        self.main.action_buttons_frame = ttk.Frame(bottom_pane)
+        self.main.action_buttons_frame.grid(row=2, column=0, columnspan=5, sticky=tk.W, **pad)
+        ttk.Button(self.main.action_buttons_frame, text="Search Store", command=self.main.run_now).pack(side=tk.LEFT, padx=5)
+        self.main.cancel_button = ttk.Button(self.main.action_buttons_frame, text="Cancel Search", command=self.main.cancel_search, state='disabled')
+        self.main.cancel_button.pack(side=tk.LEFT, padx=5)
+
+        # Configure bottom pane grid
+        bottom_pane.rowconfigure(0, weight=1)  # Tree row expands
+        for i in range(7):
+            bottom_pane.columnconfigure(i, weight=1)
+
+        # Load config tree
+        self.main._load_config_tree()
+
+    # ==================== Store/Category Management ====================
+
+    def _on_store_changed(self, event=None):
+        """Handle store selection change."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _populate_detail_categories(self, main_code=None):
+        """Populate detail categories listbox based on selected store and main category."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _populate_shop_list(self):
+        """Populate shop listbox with all available stores."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _populate_surugaya_categories(self, main_code=None):
+        """Populate Suruga-ya categories."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _populate_surugaya_shops(self):
+        """Populate Suruga-ya shops."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _on_main_category_selected(self, event=None):
+        """Handle main category selection."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _on_shop_selected(self, event=None):
+        """Handle shop selection change."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    # ==================== URL and Preview ====================
+
+    def _load_from_url(self):
+        """Load configuration from Mandarake/Suruga-ya URL."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _update_preview(self, *args):
+        """Update search URL preview based on current configuration."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _commit_keyword_changes(self, event=None):
+        """Trim and commit keyword changes when focus leaves the field."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _save_config_on_enter(self, event=None):
+        """Auto-save config with new filename when Enter is pressed in keyword field."""
+        return self.main._save_config_on_enter(event)
+
+    def _show_keyword_menu(self, event):
+        """Show context menu for keyword entry."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _on_recent_hours_changed(self, *args):
+        """Handle recent hours filter change."""
+        # Delegate to main window for now
+        if hasattr(self.main, '_on_recent_hours_changed'):
+            self.main._on_recent_hours_changed(*args)
+
+    # ==================== Helper Methods ====================
+
+    def _on_listbox_sash_moved(self, event=None):
+        """Track user's manual sash position changes."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _resolve_shop(self):
+        """Resolve selected shop to code or 'all'."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _extract_code(self, label: str | None):
+        """Extract code from label string."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _match_main_code(self, code: str | None):
+        """Match category code to main category."""
+        # TODO: Extract from gui_config.py
+        pass
+
+    def _select_categories(self, categories):
+        """Select categories in the listbox."""
+        # TODO: Extract from gui_config.py
+        pass
