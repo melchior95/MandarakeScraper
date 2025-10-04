@@ -430,8 +430,9 @@ With RANSAC enabled:
         self.advanced_tab = AdvancedTab(advanced_frame, self.settings, self)
         self.advanced_tab.pack(fill=tk.BOTH, expand=True)
 
-        # Restore paned window position after widgets are created
+        # Restore paned window positions after widgets are created
         self.after(100, self._restore_paned_position)
+        self.after(100, self._restore_vertical_paned_position)
 
         # Global space key handler - must be at end of __init__
         # Bind to all widgets to intercept before widget-specific handlers
@@ -1155,16 +1156,31 @@ With RANSAC enabled:
         if hasattr(self, 'mandarake_tab'):
             return self.mandarake_tab._on_listbox_sash_moved(event)
 
+    def _restore_vertical_paned_position(self):
+        """Restore the vertical paned window sash position from saved settings."""
+        if not hasattr(self, 'mandarake_tab') or not hasattr(self.mandarake_tab, 'vertical_paned'):
+            return
+        try:
+            ratio = self.gui_settings.get('vertical_paned_ratio', 0.5)  # Default 50/50 split
+            total_height = self.mandarake_tab.vertical_paned.winfo_height()
+            sash_pos = int(total_height * ratio)
+            self.mandarake_tab.vertical_paned.sash_place(0, 0, sash_pos)
+            self._user_vertical_sash_ratio = ratio  # Initialize user ratio to the restored value
+            print(f"[VERTICAL PANED] Restored position with ratio: {ratio:.2f}")
+        except Exception as e:
+            print(f"[VERTICAL PANED] Error restoring position: {e}")
+
     def _restore_listbox_paned_position(self):
         """Restore the listbox paned window sash position from saved settings."""
-        if not hasattr(self, 'listbox_paned'):
+        if not hasattr(self, 'mandarake_tab') or not hasattr(self.mandarake_tab, 'listbox_paned'):
             return
         try:
             ratio = self.gui_settings.get('listbox_paned_ratio', 0.65)  # Default 65% for categories, 35% for shops
-            total_width = self.listbox_paned.winfo_width()
+            total_width = self.mandarake_tab.listbox_paned.winfo_width()
             sash_pos = int(total_width * ratio)
-            self.listbox_paned.sash_place(0, sash_pos, 0)
+            self.mandarake_tab.listbox_paned.sash_place(0, sash_pos, 0)
             self._user_sash_ratio = ratio  # Initialize user ratio to the restored value
+            print(f"[LISTBOX PANED] Restored position with ratio: {ratio:.2f}")
         except Exception as e:
             print(f"[LISTBOX PANED] Error restoring position: {e}")
 
@@ -1174,10 +1190,14 @@ With RANSAC enabled:
         try:
             SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-            # Save listbox paned position - use tracked user ratio if available
+            # Save paned positions - use tracked user ratios if available
             listbox_ratio = self.gui_settings.get('listbox_paned_ratio', 0.65)
             if hasattr(self, '_user_sash_ratio') and self._user_sash_ratio is not None:
                 listbox_ratio = self._user_sash_ratio
+
+            vertical_ratio = self.gui_settings.get('vertical_paned_ratio', 0.5)
+            if hasattr(self, '_user_vertical_sash_ratio') and self._user_vertical_sash_ratio is not None:
+                vertical_ratio = self._user_vertical_sash_ratio
 
             data = {
                 'mimic': bool(self.advanced_tab.mimic_var.get()),
@@ -1185,7 +1205,8 @@ With RANSAC enabled:
                 'ebay_max_comparisons': self.browserless_max_comparisons.get() if hasattr(self, 'browserless_max_comparisons') else "MAX",
                 'csv_in_stock_only': bool(self.ebay_tab.csv_in_stock_only.get()) if hasattr(self, 'csv_in_stock_only') else True,
                 'csv_add_secondary_keyword': bool(self.ebay_tab.csv_add_secondary_keyword.get()) if hasattr(self, 'csv_add_secondary_keyword') else False,
-                'listbox_paned_ratio': listbox_ratio
+                'listbox_paned_ratio': listbox_ratio,
+                'vertical_paned_ratio': vertical_ratio
             }
             with SETTINGS_PATH.open('w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)

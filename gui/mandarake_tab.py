@@ -91,6 +91,9 @@ class MandarakeTab(ttk.Frame):
         bottom_container = ttk.Frame(self.vertical_paned)
         self.vertical_paned.add(bottom_container, minsize=200)
 
+        # Bind to track user changes to vertical paned position
+        self.vertical_paned.bind('<ButtonRelease-1>', self._on_vertical_sash_moved)
+
         # === TOP PANE: Search Configuration ===
         self._build_search_fields(top_pane, pad)
         self._build_category_shop_listboxes(top_pane, pad)
@@ -746,14 +749,26 @@ class MandarakeTab(ttk.Frame):
 
     # ==================== Helper Methods ====================
 
-    def _on_listbox_sash_moved(self, event=None):
-        """Track when user manually moves the sash."""
-        if not hasattr(self.main, 'listbox_paned'):
+    def _on_vertical_sash_moved(self, event=None):
+        """Track when user manually moves the vertical sash."""
+        if not hasattr(self, 'vertical_paned'):
             return
         try:
-            total_width = self.main.listbox_paned.winfo_width()
+            total_height = self.vertical_paned.winfo_height()
+            if total_height > 400:
+                sash_pos = self.vertical_paned.sash_coord(0)[1]  # Y coordinate
+                self.main._user_vertical_sash_ratio = sash_pos / total_height
+        except Exception:
+            pass
+
+    def _on_listbox_sash_moved(self, event=None):
+        """Track when user manually moves the horizontal listbox sash."""
+        if not hasattr(self, 'listbox_paned'):
+            return
+        try:
+            total_width = self.listbox_paned.winfo_width()
             if total_width > 500:
-                sash_pos = self.main.listbox_paned.sash_coord(0)[0]
+                sash_pos = self.listbox_paned.sash_coord(0)[0]
                 self.main._user_sash_ratio = sash_pos / total_width
         except Exception:
             pass
