@@ -82,15 +82,19 @@ class BaseScraper(ABC):
 
         try:
             self.logger.info(f"Fetching: {url}")
+            print(f"  → Fetching URL...", flush=True)
             response = self.session.get(url, params=params, timeout=30)
             response.raise_for_status()
+            print(f"  → Got response ({len(response.content)} bytes)", flush=True)
 
             # Parse with BeautifulSoup
             soup = BeautifulSoup(response.content, 'html.parser')
+            print(f"  → Parsed HTML", flush=True)
             return soup
 
         except requests.RequestException as e:
             self.logger.error(f"Request failed: {e}")
+            print(f"  → ERROR: {e}", flush=True)
             return None
 
     def normalize_result(self, raw_data: Dict) -> Dict:

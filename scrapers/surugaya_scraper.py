@@ -50,6 +50,7 @@ class SurugayaScraper(BaseScraper):
             List of normalized result dictionaries
         """
         self.logger.info(f"Searching Suruga-ya: keyword='{keyword}', category1={category1}, category2={category2}, max={max_results}")
+        print(f"[SURUGAYA] Searching: keyword='{keyword}', category1={category1}, category2={category2}, max={max_results}", flush=True)
 
         results = []
         page = 1
@@ -76,18 +77,22 @@ class SurugayaScraper(BaseScraper):
                 )
 
             # Fetch page
+            print(f"[SURUGAYA] Fetching page {page}...", flush=True)
             soup = self.fetch_page(url)
             if not soup:
                 self.logger.error(f"Failed to fetch page {page}")
+                print(f"[SURUGAYA] ERROR: Failed to fetch page {page}", flush=True)
                 break
 
             # Extract items
             items = soup.select('.item_box, .item')  # Try multiple selectors
             if not items:
                 self.logger.info(f"No items found on page {page}")
+                print(f"[SURUGAYA] No items found on page {page}", flush=True)
                 break
 
             self.logger.info(f"Found {len(items)} items on page {page}")
+            print(f"[SURUGAYA] Found {len(items)} items on page {page}, parsing...", flush=True)
 
             # Parse each item
             for item_elem in items:
@@ -104,6 +109,10 @@ class SurugayaScraper(BaseScraper):
                     normalized = self.normalize_result(item_data)
                     results.append(normalized)
 
+                    # Show progress every 10 items
+                    if len(results) % 10 == 0:
+                        print(f"[SURUGAYA] Parsed {len(results)} items so far...", flush=True)
+
             # Check for next page (pagination)
             # Suruga-ya uses URL parameter for pagination
             if len(items) == 0 or len(results) >= max_results:
@@ -112,6 +121,7 @@ class SurugayaScraper(BaseScraper):
             page += 1
 
         self.logger.info(f"Scraping complete: {len(results)} items found")
+        print(f"[SURUGAYA] ✓ Scraping complete: {len(results)} items found", flush=True)
         return results
 
     def parse_item(self, item_elem) -> Optional[Dict]:
@@ -177,7 +187,7 @@ class SurugayaScraper(BaseScraper):
             # Image - Suruga-ya uses database/photo.php for thumbnails
             img_elem = item_elem.select_one('img')
             if img_elem:
-                img_url = img_elem.get('src', '')
+                img_url = img_elem.get('src', '').strip()
                 if img_url:
                     item_data['image_url'] = self._build_absolute_url(img_url)
                     item_data['thumbnail_url'] = item_data['image_url']
