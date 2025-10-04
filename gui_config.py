@@ -1916,44 +1916,28 @@ With RANSAC enabled:
                 csv_path = Path('results') / csv_filename
                 csv_path.parent.mkdir(exist_ok=True)
 
-                # Download images and translate titles (default behavior for better UX)
-                images_dir = Path('images') / config_path.stem
-                images_dir.mkdir(parents=True, exist_ok=True)
+                # First, translate all titles quickly (these are fast)
                 import requests
                 from deep_translator import GoogleTranslator
-
                 translator = GoogleTranslator(source='ja', target='en')
 
+                print(f"[SURUGAYA] Translating {len(results)} titles...", flush=True)
                 for i, item in enumerate(results):
-                    # Download images
-                    image_url = item.get('image_url', '')
-                    if image_url:
-                        try:
-                            response = requests.get(image_url, timeout=10)
-                            if response.status_code == 200:
-                                img_filename = f"thumb_product_{i:04d}.jpg"
-                                img_path = images_dir / img_filename
-                                with open(img_path, 'wb') as img_file:
-                                    img_file.write(response.content)
-                                item['local_image'] = str(img_path)
-                                self.run_queue.put(("status", f"Downloaded image {i+1}/{len(results)}"))
-                        except Exception as e:
-                            print(f"[SURUGA-YA] Failed to download image {i+1}: {e}")
-
-                    # Translate title from Japanese to English
                     title = item.get('title', '')
                     if title:
                         try:
-                            # Translate in chunks if title is too long (Google Translate has 5000 char limit)
                             if len(title) > 4000:
                                 title_en = translator.translate(title[:4000])
                             else:
                                 title_en = translator.translate(title)
                             item['title_en'] = title_en
-                            self.run_queue.put(("status", f"Translated {i+1}/{len(results)}: {title_en[:50]}..."))
+                            if (i + 1) % 10 == 0:
+                                print(f"[SURUGAYA] Translated {i+1}/{len(results)}", flush=True)
                         except Exception as e:
-                            print(f"[SURUGA-YA] Failed to translate title {i+1}: {e}")
-                            item['title_en'] = title  # Fallback to original title
+                            print(f"[SURUGAYA] Failed to translate title {i+1}: {e}", flush=True)
+                            item['title_en'] = title
+                    else:
+                        item['title_en'] = ''
 
                 # Merge with existing CSV if it exists
                 from datetime import datetime
@@ -2017,23 +2001,26 @@ With RANSAC enabled:
 
                     merged_items[url] = result
 
-                # Write merged results
-                with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-                    fieldnames = ['first_seen', 'last_seen', 'title', 'title_en', 'price', 'condition', 'stock_status', 'url', 'image_url', 'local_image',
-                                  'ebay_compared', 'ebay_match_found', 'ebay_best_match_title', 'ebay_similarity', 'ebay_price', 'ebay_profit_margin']
-                    writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
-                    writer.writeheader()
-                    # Sort by first_seen (newest first)
-                    sorted_items = sorted(merged_items.values(), key=lambda x: x.get('first_seen', ''), reverse=True)
+                # Sort by first_seen (newest first)
+                sorted_items = sorted(merged_items.values(), key=lambda x: x.get('first_seen', ''), reverse=True)
 
-                    # Trim old items if max_csv_items is set
-                    max_csv_items = self.settings.get_setting('scraper.max_csv_items', 0)
-                    if max_csv_items > 0 and len(sorted_items) > max_csv_items:
-                        removed_count = len(sorted_items) - max_csv_items
-                        sorted_items = sorted_items[:max_csv_items]
-                        print(f"[SURUGA-YA] Trimmed {removed_count} old items (keeping newest {max_csv_items})")
+                # Trim old items if max_csv_items is set
+                max_csv_items = self.settings.get_setting('scraper.max_csv_items', 0)
+                if max_csv_items > 0 and len(sorted_items) > max_csv_items:
+                    removed_count = len(sorted_items) - max_csv_items
+                    sorted_items = sorted_items[:max_csv_items]
+                    print(f"[SURUGA-YA] Trimmed {removed_count} old items (keeping newest {max_csv_items})")
 
-                    writer.writerows(sorted_items)
+                # Write merged results WITHOUT images first (so treeview can load immediately)
+                def write_csv():
+                    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+                        fieldnames = ['first_seen', 'last_seen', 'title', 'title_en', 'price', 'condition', 'stock_status', 'url', 'image_url', 'local_image',
+                                      'ebay_compared', 'ebay_match_found', 'ebay_best_match_title', 'ebay_similarity', 'ebay_price', 'ebay_profit_margin']
+                        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+                        writer.writeheader()
+                        writer.writerows(sorted_items)
+
+                write_csv()
 
                 self.run_queue.put(("status", f"Found {len(merged_items)} items ({new_count} new, {updated_count} updated) - saved to {csv_path.name}"))
 
@@ -2042,6 +2029,71 @@ With RANSAC enabled:
                 with open(config_path, 'w', encoding='utf-8') as f:
                     json.dump(config, f, ensure_ascii=False, indent=2)
 
+                # DISPLAY RESULTS IMMEDIATELY (before downloading images)
+                self.run_queue.put(("results", str(config_path)))
+
+                # Now download images in parallel (like CSV comparison does)
+                images_dir = Path('images') / config_path.stem
+                images_dir.mkdir(parents=True, exist_ok=True)
+
+                print(f"[SURUGAYA] Downloading {len(results)} images in parallel...", flush=True)
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                # Create session with connection pooling
+                session = requests.Session()
+                adapter = requests.adapters.HTTPAdapter(
+                    pool_connections=20,
+                    pool_maxsize=20,
+                    max_retries=2
+                )
+                session.mount('http://', adapter)
+                session.mount('https://', adapter)
+
+                def download_image(args):
+                    i, item = args
+                    image_url = item.get('image_url', '')
+                    if not image_url:
+                        return (i, None)
+
+                    try:
+                        response = session.get(image_url, timeout=10)
+                        if response.status_code == 200:
+                            img_filename = f"thumb_product_{i:04d}.jpg"
+                            img_path = images_dir / img_filename
+                            with open(img_path, 'wb') as img_file:
+                                img_file.write(response.content)
+                            return (i, str(img_path))
+                    except Exception as e:
+                        print(f"[SURUGAYA] Failed to download image {i+1}: {e}", flush=True)
+                    return (i, None)
+
+                # Download in parallel with 20 workers
+                downloaded_count = 0
+                with ThreadPoolExecutor(max_workers=20) as executor:
+                    futures = {executor.submit(download_image, (i, item)): i for i, item in enumerate(results)}
+
+                    for future in as_completed(futures):
+                        i, img_path = future.result()
+                        if img_path:
+                            # Update the item in sorted_items
+                            for item in sorted_items:
+                                if item.get('url') == results[i].get('url'):
+                                    item['local_image'] = img_path
+                                    break
+                            downloaded_count += 1
+
+                            if downloaded_count % 20 == 0:
+                                print(f"[SURUGAYA] Downloaded {downloaded_count}/{len(results)} images", flush=True)
+                                # Update CSV periodically
+                                write_csv()
+
+                session.close()
+
+                # Final CSV write with all images
+                write_csv()
+                print(f"[SURUGAYA] ✓ Downloaded {downloaded_count}/{len(results)} images", flush=True)
+
+                # Reload the results in the treeview (to show images)
                 self.run_queue.put(("results", str(config_path)))
             else:
                 self.run_queue.put(("status", "No results found"))
