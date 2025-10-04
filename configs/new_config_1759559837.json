@@ -1,0 +1,22 @@
+{
+  "store": "suruga-ya",
+  "keyword": "",
+  "hide_sold_out": false,
+  "csv_show_in_stock_only": false,
+  "csv_add_secondary_keyword": false,
+  "language": "en",
+  "fast": false,
+  "resume": true,
+  "debug": false,
+  "search_url": "https://www.suruga-ya.jp/search?searchbox=1&category2=9905",
+  "condition": "all",
+  "adult_only": false,
+  "category2": "9905",
+  "category": "9905",
+  "max_pages": 2,
+  "results_per_page": 50,
+  "shop": "all",
+  "shop_name": "Unknown Store (all)",
+  "csv": "results\\all_9905_unknown_store_all.csv",
+  "download_images": "images\\new_config_1759559837/"
+}

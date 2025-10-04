@@ -157,7 +157,14 @@ class EbaySearchSpider(scrapy.Spider):
             return
 
         self.logger.info(f"eBay returned {len(item_containers)} item containers on page {response.meta.get('page', 1)}")
-        
+
+        # Save HTML for debugging if few results found
+        if len(item_containers) <= 3:
+            debug_filename = f'debug_ebay_{self.search_query.replace(" ", "_")[:30]}.html'
+            with open(debug_filename, 'wb') as f:
+                f.write(response.body)
+            self.logger.info(f"Few results found - HTML saved to {debug_filename} for debugging")
+
         for container in item_containers:
             if self.results_count >= self.max_results:
                 return

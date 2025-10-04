@@ -1,0 +1,184 @@
+[33mcommit 94f2867cd2722cbc23e72ab200941bca1b848c7b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m)[m
+Author: melchior95 <kazuya_99@outlook.com>
+Date:   Thu Oct 2 13:28:33 2025 -0700
+
+    Fix GUI layout spacing and remove custom shop entry
+    
+    - Remove column weight spreading that caused controls to spread evenly
+    - Add proper column weight to allow category lists to expand to window edge
+    - Reduce padding between control groups from 8px to 3px, add 15px left padding to group labels
+    - Move Language combobox from column 6 to column 1 to reduce spacing
+    - Remove all custom shop entry code (widget creation, state management, config loading)
+    - Remove "Custom..." option from shop listbox
+    - Fix new config creation to use current GUI values instead of hardcoded defaults
+    - Ensure "All Stores" is selected by default only when no shop is selected
+    
+    🤖 Generated with [Claude Code](https://claude.com/claude-code)
+    
+    Co-Authored-By: Claude <noreply@anthropic.com>
+
+[33mcommit 12eecc53ed4193c3f5a3fdb8d9ba3be5ff799839[m
+Author: melchior95 <kazuya_99@outlook.com>
+Date:   Thu Oct 2 01:30:41 2025 -0700
+
+    Fix eBay scraper: bot detection bypass and HTML structure updates
+    
+    - Configure ScrapeOps proxy settings correctly for JS rendering and bypass
+    - Update selectors to support new .s-card class structure (was .s-item)
+    - Add fallbacks for both new and old eBay HTML formats
+    - Suppress console window on Windows for subprocess calls
+    - Document key findings in EBAY_SCRAPER_FIXES.md
+    
+    🤖 Generated with [Claude Code](https://claude.com/claude-code)
+    
+    Co-Authored-By: Claude <noreply@anthropic.com>
+
+[33mcommit 6c27bc25e3bbfca62b2d6cb7548e479d5f01e42f[m
+Author: melchior95 <kazuya_99@outlook.com>
+Date:   Wed Oct 1 23:16:59 2025 -0700
+
+    Add schedule system with CSV filtering options and inline editing
+    
+    - Implement complete scheduling system with daily/weekly schedules
+    - Add CSV filtering options (newly listed, in-stock, 2nd keyword) to schedule items
+    - Add inline editing for CSV options in schedule treeview
+    - Move CSV options from config files to schedule storage
+    - Remove CSV options UI from Mandarake tab
+    - Restructure vertical PanedWindow layout
+    - Add skip_confirmation parameter for scheduled tasks
+    - Fix search query to use keyword + category keyword
+    - Modularize CSV loading into reusable worker function
+    - Fix schedule dialog validation to check list contents instead of selection
+    - Remove Refresh button from schedule controls
+    - Fix double-click behavior to only open edit on days/configs columns
+    
+    🤖 Generated with [Claude Code](https://claude.com/claude-code)
+    
+    Co-Authored-By: Claude <noreply@anthropic.com>
+
+[33mcommit 9b613c08e9b11bfd88fd6ed3c192300ab3372cbb[m
+Author: melchior95 <kazuya_99@outlook.com>
+Date:   Wed Oct 1 17:33:11 2025 -0700
+
+    Add Alert/Review tab and convert shop dropdown to resizable listbox
+    
+    Major Features:
+    - Alert/Review tab for managing reselling workflow (Pending → Yay → Purchased → Shipped → Received → Posted → Sold)
+    - Modular alert system in gui/ directory (alert_states, alert_storage, alert_manager, alert_tab)
+    - JSON persistence for alerts with state tracking
+    - Bulk actions for workflow management
+    
+    GUI Improvements:
+    - Convert shop dropdown to listbox (side-by-side with detailed categories)
+    - Add resizable PanedWindow with draggable sash between listboxes
+    - Save/restore sash position as ratio (persists across sessions)
+    - Move Mandarake search buttons into Mandarake tab (no longer global)
+    - Move RANSAC toggle to CSV comparison area (next to Compare buttons)
+    - Add 2nd keyword toggle to Mandarake tab
+    - Rename "Search" tab to "Mandarake"
+    - Auto-save config on Enter key press in keyword field
+    - Config tree auto-reloads after save
+    
+    Alert System:
+    - 4 modular files: alert_states.py, alert_storage.py, alert_manager.py, alert_tab.py
+    - State machine with validation and transitions
+    - Threshold filtering (default 70% similarity, 20% profit)
+    - Color-coded states in treeview
+    - Context menus and bulk operations
+    - Integrates with eBay comparison results
+    
+    Documentation:
+    - Updated CLAUDE.md with comprehensive architecture guide
+    - Added ALERT_TAB_COMPLETE.md with full alert system docs
+    - Test suite in test_alert_tab.py (all passing)
+    
+    🤖 Generated with [Claude Code](https://claude.com/claude-code)
+    
+    Co-Authored-By: Claude <noreply@anthropic.com>
+
+[33mcommit 6f8fd41234dc3fdf89458dabaf30368384c46fdd[m
+Author: melchior95 <kazuya_99@outlook.com>
+Date:   Tue Sep 30 23:36:56 2025 -0700
+
+    Complete Phase 1 GUI modularization and fix folder creation issues
+    
+    Major Changes:
+    - Extracted GUI code into modular structure (gui/ folder)
+    - Reduced gui_config.py from 5089 to 4073 lines (20% reduction)
+    - Fixed excessive folder creation on config save/rename
+    - Separated GUI settings from search configs
+    
+    Modularization (Phase 1 Complete):
+    - Created gui/constants.py (53 lines) - Store/category constants
+    - Created gui/utils.py (336 lines) - 11 utility functions
+    - Created gui/workers.py (1269 lines) - 16 background worker functions
+    - Replaced 10 worker wrapper methods with streamlined callbacks
+    - Deleted 235 lines of duplicate/unused code
+    
+    Bug Fixes:
+    - Folders now only created when scraper actually runs
+    - results/ created when saving CSV (not on config save)
+    - images/ created when downloading images (not on config save)
+    - Moved GUI settings to .mandarake/ folder (separate from search configs)
+    
+    Benefits:
+    - Better organization and maintainability
+    - Easier testing of isolated modules
+    - Cleaner separation of concerns
+    - No more empty folders from config renames
+    - GUI settings gitignored (user-specific)
+    
+    🤖 Generated with [Claude Code](https://claude.com/claude-code)
+    
+    Co-Authored-By: Claude <noreply@anthropic.com>
+
+[33mcommit 4f207f1116c523ebe72cb8b70e0adf850f318c37[m
+Author: melchior95 <kazuya_99@outlook.com>
+Date:   Tue Sep 30 20:52:32 2025 -0700
+
+    Add exchange rate integration, enhanced treeview columns, and multiple UX improvements
+    
+    - Add automatic USD/JPY exchange rate fetching on app startup
+    - Update profit calculation to use real exchange rates: (eBay+Shipping)/(Mandarake/Rate)-1
+    - Add Mandarake price and profit margin columns to eBay results treeview
+    - Implement drag-to-reorder for all treeviews with proper heading/width preservation
+    - Add 'Add 2nd keyword' toggle for automatic secondary keyword inclusion
+    - Implement multi-select delete for CSV items
+    - Fix cached eBay results compatibility (support both field name formats)
+    - Preserve price, shipping, sold date in comparison results
+    - Add eBay search URL logging for debugging result variations
+    - Update default results per page to 48
+    - Add results/page, max pages, timeframe, language to config treeview
+    
+    🤖 Generated with [Claude Code](https://claude.com/claude-code)
+    
+    Co-Authored-By: Claude <noreply@anthropic.com>
+
+[33mcommit 52ea3d3f5abf4e8e350be865a1ad1ba35a238d65[m
+Author: melchior95 <kazuya_99@outlook.com>
+Date:   Mon Sep 29 23:20:07 2025 -0700
+
+    Remove old eBay Analysis tab and unused methods
+    
+    Removed Components:
+    - eBay Analysis tab from GUI (replaced by better eBay Text Search tab)
+    - 11 unused methods (382 lines total):
+      * load_csv_for_ebay()
+      * run_ebay_analysis()
+      * _run_ebay_analysis_worker()
+      * save_ebay_results()
+      * clear_ebay_results()
+      * load_image_for_analysis()
+      * run_image_analysis()
+      * run_ai_smart_search()
+      * run_ebay_image_comparison()
+      * open_research_optimizer()
+      * _save_ebay_settings()
+    
+    The eBay Text Search tab provides superior functionality using Scrapy
+    for reliable sold listings data with image comparison.
+    
+    🤖 Generated with Claude Code
+    Co-Authored-By: Claude <noreply@anthropic.com>
+
+[33mcommit aa

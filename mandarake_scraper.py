@@ -594,7 +594,7 @@ class MandarakeScraper:
 
             image_url = None
             if image_elem:
-                image_url = image_elem.get('src') or image_elem.get('data-src')
+                image_url = (image_elem.get('src') or image_elem.get('data-src') or '').strip()
                 if image_url and not image_url.startswith('http'):
                     image_url = urljoin('https://order.mandarake.co.jp', image_url)
 
@@ -1254,8 +1254,6 @@ class MandarakeScraper:
             if max_csv_items == 0:
                 # Try to read from user_settings.json
                 try:
-                    import json
-                    from pathlib import Path
                     settings_path = Path('user_settings.json')
                     if settings_path.exists():
                         with open(settings_path, 'r', encoding='utf-8') as f:

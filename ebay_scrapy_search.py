@@ -53,9 +53,9 @@ def run_ebay_scrapy_search(query: str, max_results: int = 10, sold_listings: boo
             'stdin': subprocess.DEVNULL  # Don't inherit stdin
         }
 
-        # Windows-specific: prevent console window and terminal inheritance
+        # Windows-specific: prevent console window
         if platform.system() == 'Windows':
-            kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+            kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
 
         result = subprocess.run(cmd, **kwargs)
 

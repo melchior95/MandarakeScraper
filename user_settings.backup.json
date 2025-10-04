@@ -1,11 +1,11 @@
 {
   "window": {
-    "width": 1232,
-    "height": 982,
-    "x": 448,
-    "y": 313,
+    "width": 1601,
+    "height": 1106,
+    "x": 23,
+    "y": 204,
     "maximized": false,
-    "ebay_paned_pos": 340
+    "ebay_paned_pos": 354
   },
   "ebay_analysis": {
     "min_sold_items": 1,
@@ -25,7 +25,8 @@
     "default_output_format": "google_sheets",
     "resume_enabled": true,
     "fast_mode": false,
-    "download_thumbnails": true
+    "download_thumbnails": true,
+    "max_csv_items": 50
   },
   "ui": {
     "theme": "default",
@@ -49,7 +50,7 @@
   "meta": {
     "version": "1.0.0",
     "first_run": false,
-    "last_updated": "2025-10-03T15:41:41.671188",
+    "last_updated": "2025-10-03T23:36:51.979742",
     "settings_version": 1
   },
   "marketplaces": {

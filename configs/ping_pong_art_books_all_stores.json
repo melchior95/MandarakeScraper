@@ -1,4 +1,5 @@
 {
+  "store": "mandarake",
   "keyword": "Ping Pong",
   "hide_sold_out": false,
   "csv_show_in_stock_only": false,
@@ -7,6 +8,10 @@
   "fast": false,
   "resume": true,
   "debug": false,
+  "search_url": "https://order.mandarake.co.jp/order/listPage/list?keyword=Ping%20Pong&categoryCode=0131&shop=0&lang=en",
+  "condition": "all",
+  "adult_only": false,
+  "category1": "01",
   "category": "0131",
   "category_name": "Art books",
   "max_pages": 1,

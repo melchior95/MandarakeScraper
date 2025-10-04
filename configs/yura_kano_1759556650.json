@@ -1,0 +1,22 @@
+{
+  "store": "suruga-ya",
+  "keyword": "",
+  "hide_sold_out": false,
+  "csv_show_in_stock_only": false,
+  "csv_add_secondary_keyword": false,
+  "language": "en",
+  "fast": false,
+  "resume": true,
+  "debug": false,
+  "search_url": "https://www.suruga-ya.jp/search?searchbox=1&category2=70008",
+  "condition": "all",
+  "adult_only": false,
+  "category2": "70008",
+  "category": "70008",
+  "max_pages": 2,
+  "results_per_page": 50,
+  "shop": "all",
+  "shop_name": "Unknown Store (all)",
+  "csv": "results\\all_70008_unknown_store_all.csv",
+  "download_images": "images\\yura_kano_1759556650/"
+}
