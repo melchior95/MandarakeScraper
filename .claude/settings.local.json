@@ -40,7 +40,10 @@
       "Bash(awk:*)",
       "Read(//c/**)",
       "Bash(sort:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(for:*)",
+      "Bash(do echo \"=== $file ===\")",
+      "Bash(head:*)"
     ],
     "deny": [],
     "ask": []
