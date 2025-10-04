@@ -3262,36 +3262,62 @@ With RANSAC enabled:
                         codes_file = Path('store_codes') / 'mandarake_codes.py'
 
                     if codes_file.exists():
-                        # Read the file
+                        # Read the file as lines
                         with open(codes_file, 'r', encoding='utf-8') as f:
-                            content = f.read()
+                            lines = f.readlines()
 
-                        # Find the MANDARAKE_ALL_CATEGORIES or SURUGAYA_DETAILED_CATEGORIES dict
-                        if store == 'suruga-ya':
-                            dict_name = 'SURUGAYA_DETAILED_CATEGORIES'
-                        else:
-                            dict_name = 'MANDARAKE_ALL_CATEGORIES'
+                        # Determine the main category prefix (first 2 digits for most codes)
+                        # Examples: '0101' -> '01', '050801' -> '05', '701101' -> '70'
+                        main_prefix = category_code[:2] if len(category_code) >= 2 else category_code
 
-                        # Add new entry before the closing brace
-                        # Format: '    'code': {'en': 'Name', 'jp': 'Name'},\n'
-                        new_entry = f"    '{category_code}': {{'en': '{name}', 'jp': '{name}'}},\n"
+                        # Find where to insert this entry
+                        # Strategy: Find the last entry with the same main prefix, insert after it
+                        insert_index = None
+                        last_matching_index = None
 
-                        # Find the dict and add entry
                         import re
-                        pattern = f'{dict_name}\\s*=\\s*\\{{([^}}]+)\\}}'
-                        match = re.search(pattern, content, re.DOTALL)
+                        for i, line in enumerate(lines):
+                            # Look for category entries: '    'CODE': {'en': 'Name', 'jp': 'Name'},
+                            match = re.match(r"\s*'(\d+)':\s*\{", line)
+                            if match:
+                                code = match.group(1)
+                                # Check if this code belongs to the same main category
+                                if code.startswith(main_prefix):
+                                    last_matching_index = i
 
-                        if match:
-                            dict_content = match.group(1)
-                            # Add new entry at the end
-                            updated_dict = dict_content.rstrip() + '\n' + new_entry
-                            updated_content = content[:match.start(1)] + updated_dict + content[match.end(1):]
+                        # Insert after the last matching entry
+                        if last_matching_index is not None:
+                            insert_index = last_matching_index + 1
+                        else:
+                            # No matching entries found, try to find the main category comment
+                            # and insert after it
+                            for i, line in enumerate(lines):
+                                if f"'{main_prefix}':" in line and 'everything' in line.lower():
+                                    insert_index = i + 1
+                                    break
+
+                        if insert_index is not None:
+                            # Create new entry with proper indentation
+                            new_entry = f"    '{category_code}': {{'en': '{name}', 'jp': '{name}'}},\n"
+
+                            # Insert the new entry
+                            lines.insert(insert_index, new_entry)
 
                             # Write back to file
                             with open(codes_file, 'w', encoding='utf-8') as f:
-                                f.write(updated_content)
+                                f.writelines(lines)
 
-                            print(f"[CATEGORY] Added {category_code}: {name} to {codes_file.name}")
+                            print(f"[CATEGORY] Added {category_code}: {name} to {codes_file.name} under main category {main_prefix}")
+                        else:
+                            # Fallback: add at the end of the dict (before closing brace)
+                            for i in range(len(lines) - 1, -1, -1):
+                                if lines[i].strip() == '}':
+                                    new_entry = f"    '{category_code}': {{'en': '{name}', 'jp': '{name}'}},\n"
+                                    lines.insert(i, new_entry)
+                                    with open(codes_file, 'w', encoding='utf-8') as f:
+                                        f.writelines(lines)
+                                    print(f"[CATEGORY] Added {category_code}: {name} to {codes_file.name} (at end)")
+                                    break
                 except Exception as e:
                     print(f"[CATEGORY] Could not update category file: {e}")
 
