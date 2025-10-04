@@ -315,12 +315,44 @@ For immediate impact with minimal effort:
 
 ---
 
-## 📋 Phase 4+ Strategic Plan
+## ✅ Phase 5 Complete (2025-10-04) - AdvancedTab Extraction
+
+**Results:**
+- Created and integrated AdvancedTab module
+- Replaced 157 lines of Advanced tab UI with 2-line initialization
+- Removed 155 lines from gui_config.py (3560 → 3405)
+- Total reduction: 2005 lines (37.0% from original 5410 lines)
+
+**What was extracted:**
+- Created `gui/advanced_tab.py` (315 lines) for all Advanced settings
+- Replaced lines 419-576 (Advanced tab UI) with AdvancedTab initialization
+- Updated all Advanced tab variable references:
+  - `self.fast_var`, `self.resume_var`, `self.debug_var`, `self.mimic_var`
+  - `self.ebay_search_method`, `self.schedule_var`
+  - All marketplace toggle variables (mandarake, ebay, surugaya, dejapan, alerts)
+  - `self.max_csv_items_var`
+
+**Impact:**
+- Advanced settings tab fully modularized
+- gui/advanced_tab.py: 315 lines (complete settings encapsulation)
+- Cleaner separation of scraper options, marketplace toggles, scheduling, output settings
+- All settings functionality accessible through advanced_tab module
+
+**Next Steps:**
+- Phase 6: Extract Config Tree Manager (~360 lines)
+- Phase 7-10: Additional extractions (~1050 lines)
+- **Remaining: Need 1405 more lines to reach <2000 target (41.2% remaining)**
+
+See `PHASE_5_AUDIT.md` for detailed analysis and path to <2000 lines.
+
+---
+
+## 📋 Phase 5+ Strategic Plan
 
 ### Current Position
-- **3560 lines** (was 5410, removed 1850)
+- **3405 lines** (was 5410, removed 2005)
 - **Target**: <2000 lines
-- **Remaining**: Need to remove **1560 more lines (43.8%)**
+- **Remaining**: Need to remove **1405 more lines (41.2%)**
 
 ### Identified Extraction Opportunities
 
