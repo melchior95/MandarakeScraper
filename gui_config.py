@@ -385,7 +385,7 @@ With RANSAC enabled:
         advanced_frame = ttk.Frame(notebook)
 
         # Always create alert tab first (other tabs may reference it)
-        self.alert_tab = AlertTab(notebook)
+        self.alert_tab = AlertTab(notebook, settings_manager=self.settings)
 
         if marketplace_toggles.get('mandarake', True):
             notebook.add(basic_frame, text="Stores")
@@ -764,15 +764,22 @@ With RANSAC enabled:
         self.alert_threshold_active = tk.BooleanVar(value=True)
         ttk.Checkbutton(alert_threshold_frame, text="Active", variable=self.alert_threshold_active).pack(side=tk.LEFT, padx=5)
 
+        # Load saved alert send settings
+        alert_settings = self.settings.get_alert_settings()
+        ebay_send_sim = alert_settings.get('ebay_send_min_similarity', 70.0)
+        ebay_send_profit = alert_settings.get('ebay_send_min_profit', 20.0)
+
         # Min Similarity
         ttk.Label(alert_threshold_frame, text="Min Similarity %:").pack(side=tk.LEFT, padx=5)
-        self.alert_min_similarity = tk.DoubleVar(value=70.0)
+        self.alert_min_similarity = tk.DoubleVar(value=ebay_send_sim)
         ttk.Spinbox(alert_threshold_frame, from_=0, to=100, textvariable=self.alert_min_similarity, width=8).pack(side=tk.LEFT, padx=5)
+        self.alert_min_similarity.trace_add("write", lambda *args: self._save_ebay_alert_settings())
 
         # Min Profit
         ttk.Label(alert_threshold_frame, text="Min Profit %:").pack(side=tk.LEFT, padx=5)
-        self.alert_min_profit = tk.DoubleVar(value=20.0)
+        self.alert_min_profit = tk.DoubleVar(value=ebay_send_profit)
         ttk.Spinbox(alert_threshold_frame, from_=-100, to=1000, textvariable=self.alert_min_profit, width=8).pack(side=tk.LEFT, padx=5)
+        self.alert_min_profit.trace_add("write", lambda *args: self._save_ebay_alert_settings())
 
         # Progress bar (row 4)
         self.browserless_progress = ttk.Progressbar(browserless_frame, mode='indeterminate')
@@ -1381,6 +1388,16 @@ With RANSAC enabled:
                 return 780, 760, 100, 100
         except:
             return 780, 760, 100, 100
+
+    def _save_ebay_alert_settings(self):
+        """Save eBay alert threshold settings when they change."""
+        try:
+            self.settings.save_alert_settings(
+                ebay_send_min_similarity=self.alert_min_similarity.get(),
+                ebay_send_min_profit=self.alert_min_profit.get()
+            )
+        except:
+            pass  # Ignore errors during saving
 
     def on_closing(self):
         """Handle application closing - save settings and cleanup resources"""
@@ -5019,23 +5036,37 @@ With RANSAC enabled:
         self._display_browserless_results(display_results)
 
     def open_browserless_url(self, event):
-        """Open selected eBay URL in browser"""
+        """Open eBay or Mandarake URL based on which column is double-clicked"""
         selection = self.browserless_tree.selection()
         if not selection:
             return
 
         item_id = selection[0]
+
+        # Identify which column was clicked
+        column = self.browserless_tree.identify_column(event.x)
+        # Column format is '#0', '#1', '#2', etc. where #0 is thumbnail, #1 is first data column
+
         try:
             index = int(item_id) - 1
             if 0 <= index < len(self.browserless_results_data):
                 result = self.browserless_results_data[index]
-                url = result.get('url', '')
-                print(f"[URL DEBUG] Item {index}: title={result.get('title', '')[:50]}, url={url[:100] if url else 'EMPTY'}")
+
+                # Determine which URL to open based on column
+                # Columns: title(#1), price(#2), shipping(#3), mandarake_price(#4), profit_margin(#5),
+                #          sold_date(#6), similarity(#7), url(#8), mandarake_url(#9)
+                if column == '#9':  # Mandarake URL column
+                    url = result.get('mandarake_url', '')
+                    url_type = "Mandarake"
+                else:  # Default to eBay URL for all other columns
+                    url = result.get('url', '')
+                    url_type = "eBay"
+
                 if url and not any(x in url for x in ["No URL available", "Placeholder URL", "Invalid URL", "URL Error"]):
-                    print(f"[BROWSERLESS SEARCH] Opening URL: {url}")
+                    print(f"[BROWSERLESS SEARCH] Opening {url_type} URL: {url}")
                     webbrowser.open(url)
                 else:
-                    messagebox.showwarning("Invalid URL", f"Cannot open URL: {url}")
+                    print(f"[BROWSERLESS SEARCH] Cannot open {url_type} URL: {url}")
             else:
                 print(f"[URL DEBUG] Index {index} out of range (data length: {len(self.browserless_results_data)})")
         except (ValueError, IndexError) as e:
@@ -5087,6 +5118,8 @@ With RANSAC enabled:
                     if matching_result:
                         # Send to alerts using existing method
                         self.alert_tab.add_filtered_alerts([matching_result])
+                        # Explicitly refresh the alert tab to ensure it displays the new item
+                        self.alert_tab._load_alerts()
                         self.browserless_status.set(f"Sent '{result['title'][:50]}...' to Review/Alerts")
                         print(f"[SEND TO REVIEW] Added item to alerts: {result['title']}")
                     else:

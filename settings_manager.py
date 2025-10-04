@@ -37,6 +37,14 @@ class SettingsManager:
                 "usd_jpy_rate": 150.0
             },
 
+            # Alert tab filter settings
+            "alerts": {
+                "filter_min_similarity": 70.0,
+                "filter_min_profit": 20.0,
+                "ebay_send_min_similarity": 70.0,
+                "ebay_send_min_profit": 20.0
+            },
+
             # Scraper settings
             "scraper": {
                 "last_config_directory": "",
@@ -267,6 +275,21 @@ class SettingsManager:
         """Save DejaJapan settings"""
         for key, value in kwargs.items():
             self.set_setting(f"marketplaces.dejapan.{key}", value)
+        self.save_settings()
+
+    def get_alert_settings(self) -> Dict[str, Any]:
+        """Get alert filter settings"""
+        return self.get_setting("alerts", {
+            "filter_min_similarity": 70.0,
+            "filter_min_profit": 20.0,
+            "ebay_send_min_similarity": 70.0,
+            "ebay_send_min_profit": 20.0
+        })
+
+    def save_alert_settings(self, **kwargs):
+        """Save alert filter settings"""
+        for key, value in kwargs.items():
+            self.set_setting(f"alerts.{key}", value)
         self.save_settings()
 
     def add_dejapan_favorite_seller(self, seller_id: str, name: str, notes: str = ""):
