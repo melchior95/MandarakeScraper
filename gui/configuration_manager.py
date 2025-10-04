@@ -3,6 +3,7 @@
 
 import json
 import time
+import tkinter as tk
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 from tkinter import messagebox, filedialog
@@ -46,9 +47,9 @@ class ConfigurationManager:
                 'csv_show_in_stock_only': gui_instance.csv_in_stock_only.get() if hasattr(gui_instance, 'csv_in_stock_only') else False,
                 'csv_add_secondary_keyword': gui_instance.csv_add_secondary_keyword.get() if hasattr(gui_instance, 'csv_add_secondary_keyword') else False,
                 'language': gui_instance.language_var.get(),
-                'fast': gui_instance.fast_var.get(),
-                'resume': gui_instance.resume_var.get(),
-                'debug': gui_instance.debug_var.get(),
+                'fast': gui_instance.advanced_tab.fast_var.get() if hasattr(gui_instance, 'advanced_tab') else False,
+                'resume': gui_instance.advanced_tab.resume_var.get() if hasattr(gui_instance, 'advanced_tab') else True,
+                'debug': gui_instance.advanced_tab.debug_var.get() if hasattr(gui_instance, 'advanced_tab') else False,
             }
             
             # Store URL if provided
@@ -257,9 +258,10 @@ class ConfigurationManager:
             if hasattr(gui_instance, 'csv_add_secondary_keyword'):
                 gui_instance.csv_add_secondary_keyword.set(config.get('csv_add_secondary_keyword', False))
             gui_instance.language_var.set(config.get('language', 'en'))
-            gui_instance.fast_var.set(config.get('fast', False))
-            gui_instance.resume_var.set(config.get('resume', True))
-            gui_instance.debug_var.set(config.get('debug', False))
+            if hasattr(gui_instance, 'advanced_tab'):
+                gui_instance.advanced_tab.fast_var.set(config.get('fast', False))
+                gui_instance.advanced_tab.resume_var.set(config.get('resume', True))
+                gui_instance.advanced_tab.debug_var.set(config.get('debug', False))
             
             # Adult filter
             if hasattr(gui_instance, 'adult_filter_var'):
@@ -276,8 +278,9 @@ class ConfigurationManager:
                 gui_instance.results_per_page_var.set('50')
             else:
                 gui_instance.results_per_page_var.set(str(config.get('results_per_page', '240')))
-            
-            gui_instance.schedule_var.set(config.get('schedule', ''))
+
+            if hasattr(gui_instance, 'advanced_tab'):
+                gui_instance.advanced_tab.schedule_var.set(config.get('schedule', ''))
             gui_instance._update_preview()
             
         finally:

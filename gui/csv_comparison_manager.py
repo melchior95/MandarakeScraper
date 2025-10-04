@@ -1,6 +1,7 @@
 """CSV Comparison Manager - Handles CSV loading, filtering, and comparison operations."""
 
 import csv
+import logging
 import threading
 import time
 from datetime import datetime, timedelta
@@ -113,7 +114,8 @@ class CSVComparisonManager:
                         first_seen = datetime.fromisoformat(first_seen_str)
                         if first_seen < cutoff_time:
                             continue  # Skip items older than 24 hours
-                    except:
+                    except (ValueError, TypeError) as e:
+                        logging.debug(f"Skipping item with invalid first_seen date '{first_seen_str}': {e}")
                         continue  # Skip items with invalid dates
                 else:
                     continue  # Skip items without first_seen date
@@ -135,8 +137,8 @@ class CSVComparisonManager:
                     first_seen = datetime.fromisoformat(first_seen_str)
                     if first_seen >= new_indicator_cutoff:
                         self.csv_new_items.add(str(i))  # Mark as new
-                except:
-                    pass
+                except (ValueError, TypeError):
+                    pass  # Skip NEW indicator for items with invalid dates
 
             # Use English translated title if available, otherwise use original title
             title = row.get('title_en', row.get('title', ''))
@@ -150,7 +152,7 @@ class CSVComparisonManager:
                 # String but looks like a number (e.g., "160999.0")
                 try:
                     price = f"¥{float(price_raw):,.0f}"
-                except:
+                except (ValueError, TypeError):
                     price = price_raw  # Fallback to original
             else:
                 # Already formatted (e.g., "¥1,234")
@@ -171,7 +173,12 @@ class CSVComparisonManager:
         self.csv_filtered_items = filtered_items
 
         # Load thumbnails in background thread if enabled
-        if getattr(self.gui, 'csv_show_thumbnails', tk.BooleanVar()).get():
+        # Access csv_show_thumbnails from advanced_tab through main_window
+        show_thumbnails = False
+        if hasattr(self.gui, 'main_window') and hasattr(self.gui.main_window, 'advanced_tab'):
+            show_thumbnails = self.gui.main_window.advanced_tab.csv_show_thumbnails.get()
+
+        if show_thumbnails:
             self._start_thread(self._load_csv_thumbnails_worker, filtered_items)
         else:
             print(f"[CSV THUMBNAILS] Thumbnails disabled, skipping load")
@@ -248,7 +255,10 @@ class CSVComparisonManager:
         if not hasattr(self.gui, 'csv_items_tree'):
             return
 
-        show_thumbnails = getattr(self.gui, 'csv_show_thumbnails', tk.BooleanVar()).get()
+        # Access csv_show_thumbnails from advanced_tab through main_window
+        show_thumbnails = False
+        if hasattr(self.gui, 'main_window') and hasattr(self.gui.main_window, 'advanced_tab'):
+            show_thumbnails = self.gui.main_window.advanced_tab.csv_show_thumbnails.get()
 
         if show_thumbnails:
             # Show thumbnails - set column width and rowheight
@@ -334,7 +344,12 @@ class CSVComparisonManager:
 
         def reload_thumbnails():
             # Check if thumbnail column was resized and thumbnails are enabled
-            if (getattr(self.gui, 'csv_show_thumbnails', tk.BooleanVar()).get() and 
+            # Access csv_show_thumbnails from advanced_tab through main_window
+            show_thumbnails = False
+            if hasattr(self.gui, 'main_window') and hasattr(self.gui.main_window, 'advanced_tab'):
+                show_thumbnails = self.gui.main_window.advanced_tab.csv_show_thumbnails.get()
+
+            if (show_thumbnails and
                 hasattr(self, 'csv_filtered_items') and self.csv_filtered_items):
                 current_width = self.gui.csv_items_tree.column('#0', 'width')
                 # Only reload if width changed significantly (more than 5px)
@@ -507,16 +522,18 @@ class CSVComparisonManager:
             # Store results and apply filter
             if hasattr(self.gui, 'all_comparison_results'):
                 self.gui.all_comparison_results = comparison_results
-                self.gui.after(0, self.gui.apply_results_filter)
-                
+                # Access main_window through ebay_tab
+                main_window = self.gui.main_window if hasattr(self.gui, 'main_window') else self.gui
+                self.gui.after(0, main_window.apply_results_filter)
+
                 # Auto-send to alerts if threshold is active
-                if (hasattr(self.gui, 'alert_threshold_active') and 
+                if (hasattr(self.gui, 'alert_threshold_active') and
                     self.gui.alert_threshold_active.get()):
                     min_sim = self.gui.alert_min_similarity.get()
                     min_profit = self.gui.alert_min_profit.get()
-                    self.gui.after(0, lambda: self.gui._send_to_alerts_with_thresholds(
+                    self.gui.after(0, lambda: main_window._send_to_alerts_with_thresholds(
                         comparison_results, min_sim, min_profit))
-            
+
             if hasattr(self.gui, 'csv_compare_progress'):
                 self.gui.after(0, self.gui.csv_compare_progress.stop)
 
@@ -566,16 +583,18 @@ class CSVComparisonManager:
             # Store results and apply filter
             if hasattr(self.gui, 'all_comparison_results'):
                 self.gui.all_comparison_results = comparison_results
-                self.gui.after(0, self.gui.apply_results_filter)
-                
+                # Access main_window through ebay_tab
+                main_window = self.gui.main_window if hasattr(self.gui, 'main_window') else self.gui
+                self.gui.after(0, main_window.apply_results_filter)
+
                 # Auto-send to alerts if threshold is active
-                if (hasattr(self.gui, 'alert_threshold_active') and 
+                if (hasattr(self.gui, 'alert_threshold_active') and
                     self.gui.alert_threshold_active.get()):
                     min_sim = self.gui.alert_min_similarity.get()
                     min_profit = self.gui.alert_min_profit.get()
-                    self.gui.after(0, lambda: self.gui._send_to_alerts_with_thresholds(
+                    self.gui.after(0, lambda: main_window._send_to_alerts_with_thresholds(
                         comparison_results, min_sim, min_profit))
-            
+
             if hasattr(self.gui, 'csv_compare_progress'):
                 self.gui.after(0, self.gui.csv_compare_progress.stop)
 
@@ -973,7 +992,7 @@ class CSVComparisonManager:
             print(f"[CSV MENU] Error adding secondary keyword: {e}")
 
     def _search_csv_by_image_api(self) -> None:
-        """Search selected CSV item by image using eBay API."""
+        """Search selected CSV item by image using eBay API and display results."""
         if not hasattr(self.gui, 'csv_items_tree'):
             return
 
@@ -995,22 +1014,64 @@ class CSVComparisonManager:
                     return
 
                 from mandarake_scraper import EbayAPI
-                # Note: eBay API credentials removed from GUI - using web scraping instead
-                ebay_api = EbayAPI("", "")
+
+                # Get credentials from settings
+                main_window = self.gui.main_window if hasattr(self.gui, 'main_window') else self.gui
+                if hasattr(main_window, 'settings'):
+                    credentials = main_window.settings.get_ebay_credentials()
+                    client_id = credentials.get('client_id', '')
+                    client_secret = credentials.get('client_secret', '')
+                else:
+                    client_id = ''
+                    client_secret = ''
+
+                if not client_id or not client_secret:
+                    messagebox.showerror(
+                        "eBay Credentials Required",
+                        "Please configure your eBay API credentials in Advanced tab.\n\n"
+                        "You need:\n"
+                        "• eBay Client ID (App ID)\n"
+                        "• eBay Client Secret (Cert ID)\n\n"
+                        "Get them from: https://developer.ebay.com/my/keys"
+                    )
+                    return
+
+                ebay_api = EbayAPI(client_id, client_secret)
 
                 if hasattr(self.gui, 'browserless_status'):
                     self.gui.browserless_status.set("Searching by image on eBay (API)...")
-                url = ebay_api.search_by_image_api(local_image_path)
-                if url:
-                    webbrowser.open(url)
-                    if hasattr(self.gui, 'browserless_status'):
-                        self.gui.browserless_status.set("Search by image (API) complete.")
-                else:
-                    messagebox.showerror("Error", "Could not find results using eBay API.")
+
+                # Use new method that returns full results
+                results = ebay_api.search_by_image_api_full(local_image_path)
+
+                if results is None:
+                    messagebox.showerror("Error", "eBay API search failed. Check credentials and logs.")
                     if hasattr(self.gui, 'browserless_status'):
                         self.gui.browserless_status.set("Search by image (API) failed.")
+                    return
+
+                if not results:
+                    messagebox.showinfo("No Results", "No matching items found on eBay.")
+                    if hasattr(self.gui, 'browserless_status'):
+                        self.gui.browserless_status.set("No results found.")
+                    return
+
+                # Display results in eBay results tree
+                if hasattr(self.gui, 'ebay_search_manager') and self.gui.ebay_search_manager:
+                    self.gui.ebay_search_manager.display_scrapy_results(results)
+                    if hasattr(self.gui, 'browserless_status'):
+                        self.gui.browserless_status.set(f"Found {len(results)} results via eBay API")
+                    print(f"[IMAGE SEARCH API] Displayed {len(results)} results")
+                else:
+                    messagebox.showinfo("Results Found", f"Found {len(results)} matching items.\n\nNote: Results display not available.")
+                    if hasattr(self.gui, 'browserless_status'):
+                        self.gui.browserless_status.set(f"Found {len(results)} results")
+
         except Exception as e:
             messagebox.showerror("Error", f"Search failed: {e}")
+            if hasattr(self.gui, 'browserless_status'):
+                self.gui.browserless_status.set("Search failed")
+            print(f"[IMAGE SEARCH API ERROR] {e}")
 
     def _search_csv_by_image_web(self) -> None:
         """Search selected CSV item by image using web method."""
@@ -1089,10 +1150,9 @@ class CSVComparisonManager:
             })
 
         # Delegate to EbaySearchManager for display
-        if (hasattr(self.gui, 'ebay_tab') and
-            hasattr(self.gui.ebay_tab, 'ebay_search_manager') and
-            self.gui.ebay_tab.ebay_search_manager):
-            self.gui.ebay_tab.ebay_search_manager.display_browserless_results(display_results)
+        if (hasattr(self.gui, 'ebay_search_manager') and
+            self.gui.ebay_search_manager):
+            self.gui.ebay_search_manager.display_browserless_results(display_results)
 
     def save_comparison_results_to_csv(self, comparison_results: List[Dict]) -> None:
         """Save eBay comparison results back to the CSV file.
@@ -1155,8 +1215,13 @@ class CSVComparisonManager:
 
         if compared_count == 0:
             # Log to status instead of popup
-            if hasattr(self.gui.ebay_tab, 'browserless_status'):
-                self.gui.ebay_tab.browserless_status.set("No comparison results to clear")
+            if hasattr(self.gui, 'browserless_status'):
+                self.gui.browserless_status.set("No items have been compared yet")
+            messagebox.showinfo(
+                "No Comparison Results",
+                "No items have been compared yet.\n\n"
+                "Please run 'Compare Selected' or 'Compare All' first."
+            )
             print("[CLEAR RESULTS] No results to clear")
             return
 
@@ -1183,8 +1248,8 @@ class CSVComparisonManager:
                 self._save_updated_csv()
 
                 # Log to status instead of popup
-                if hasattr(self.gui.ebay_tab, 'browserless_status'):
-                    self.gui.ebay_tab.browserless_status.set(f"Cleared comparison results for {compared_count} items")
+                if hasattr(self.gui, 'browserless_status'):
+                    self.gui.browserless_status.set(f"Cleared comparison results for {compared_count} items")
                 print(f"[CLEAR RESULTS] Cleared comparison results for {compared_count} items")
 
             except Exception as e:

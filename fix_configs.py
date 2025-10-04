@@ -2,6 +2,7 @@
 """Fix old config files: update paths and rename files to use category/shop names"""
 
 import json
+import logging
 import shutil
 from pathlib import Path
 
@@ -34,7 +35,7 @@ def get_category_name(code, language='en'):
     try:
         from mandarake_codes import get_category_name as get_name
         return get_name(code, language)
-    except:
+    except ImportError:
         return code
 
 def get_store_name(code, language='en'):
@@ -42,14 +43,14 @@ def get_store_name(code, language='en'):
     try:
         from mandarake_codes import get_store_name as get_name
         return get_name(code, language)
-    except:
+    except ImportError:
         return code
 
 def fix_config(config_path):
     """Fix a single config file"""
     try:
         print(f"\nProcessing: {config_path.name}")
-    except:
+    except UnicodeEncodeError:
         print(f"\nProcessing: [Unicode filename]")
 
     with open(config_path, 'r', encoding='utf-8') as f:
@@ -100,7 +101,7 @@ def fix_config(config_path):
 
     try:
         print(f"  Updated config saved to: {new_json_name}")
-    except:
+    except UnicodeEncodeError:
         print(f"  Updated config saved")
 
     # Rename old CSV if it exists
@@ -135,7 +136,7 @@ def fix_config(config_path):
         config_path.unlink()
         try:
             print(f"  Deleted old config: {config_path.name}")
-        except:
+        except UnicodeEncodeError:
             print(f"  Deleted old config")
 
     return new_json_name
@@ -160,7 +161,7 @@ def main():
         except Exception as e:
             try:
                 print(f"  ERROR processing {config_file.name}: {e}")
-            except:
+            except UnicodeEncodeError:
                 print(f"  ERROR processing file: {e}")
 
     print("\n" + "=" * 60)

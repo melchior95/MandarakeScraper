@@ -1670,13 +1670,97 @@ class EbayAPI:
 
             response = requests.post(url, headers=headers, json=data, timeout=30)
             response.raise_for_status()
-            
+
             results = response.json()
-            
+
             if results.get("itemSummaries"):
                 return results["itemSummaries"][0].get("itemWebUrl")
             else:
                 return None
+
+        except Exception as e:
+            logging.error(f"eBay search by image API failed: {e}")
+            if "invalid_scope" in str(e).lower():
+                logging.error("This might be due to missing 'https://api.ebay.com/oauth/api_scope/buy.item.feed' scope in your application's OAuth settings.")
+            return None
+
+    def search_by_image_api_full(self, image_path: str) -> Optional[List[Dict]]:
+        """
+        Search for an image on eBay using the search_by_image API and return full results.
+
+        Args:
+            image_path: Path to the image file to search
+
+        Returns:
+            List of dictionaries with keys: title, price, shipping, url, image_url
+            Returns None if search fails
+        """
+        if not self.is_configured():
+            logging.warning("eBay API not configured for image search.")
+            return None
+
+        try:
+            token = self._get_access_token()
+            url = "https://api.ebay.com/buy/browse/v1/item_summary/search_by_image"
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json'
+            }
+
+            with open(image_path, "rb") as image_file:
+                import base64
+                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+
+            data = {
+                "image": encoded_string
+            }
+
+            response = requests.post(url, headers=headers, json=data, timeout=30)
+            response.raise_for_status()
+
+            results = response.json()
+
+            if not results.get("itemSummaries"):
+                logging.info("No results found from eBay image search API")
+                return []
+
+            # Convert API results to standardized format
+            formatted_results = []
+            for item in results.get("itemSummaries", []):
+                # Extract price (current price for active listings)
+                price_str = "N/A"
+                if item.get("price"):
+                    price_value = item["price"].get("value", "")
+                    price_currency = item["price"].get("currency", "USD")
+                    if price_value:
+                        price_str = f"{price_currency} {price_value}"
+
+                # Extract shipping
+                shipping_str = "N/A"
+                if item.get("shippingOptions"):
+                    shipping = item["shippingOptions"][0]
+                    shipping_cost = shipping.get("shippingCost", {})
+                    if shipping_cost.get("value") == "0.0":
+                        shipping_str = "Free"
+                    elif shipping_cost.get("value"):
+                        shipping_str = f"{shipping_cost.get('currency', 'USD')} {shipping_cost['value']}"
+
+                # Extract image URL
+                image_url = ""
+                if item.get("image"):
+                    image_url = item["image"].get("imageUrl", "")
+
+                formatted_results.append({
+                    "title": item.get("title", "N/A"),
+                    "price": price_str,
+                    "shipping": shipping_str,
+                    "url": item.get("itemWebUrl", ""),
+                    "image_url": image_url,
+                    "sold_date": "Active",  # These are active listings, not sold
+                })
+
+            logging.info(f"eBay image search API returned {len(formatted_results)} results")
+            return formatted_results
 
         except Exception as e:
             logging.error(f"eBay search by image API failed: {e}")

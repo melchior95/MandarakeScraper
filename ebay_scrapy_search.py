@@ -4,6 +4,7 @@ Wrapper for running the Scrapy eBay spider from the GUI
 import sys
 import subprocess
 import json
+import logging
 import tempfile
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -84,8 +85,8 @@ def run_ebay_scrapy_search(query: str, max_results: int = 10, sold_listings: boo
         # Clean up temp file
         try:
             Path(temp_output).unlink(missing_ok=True)
-        except:
-            pass
+        except (OSError, PermissionError) as e:
+            logging.debug(f"Failed to delete temp file {temp_output}: {e}")
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ class WindowManager:
         self.settings = settings_manager
         self._user_sash_ratio = None  # Listbox paned ratio
         self._user_vertical_sash_ratio = None  # Vertical paned ratio
+        self._restoring_sash = False  # Flag to prevent event handlers during restoration
 
     def apply_window_settings(self):
         """Apply saved window settings to the root window."""
@@ -101,9 +102,9 @@ class WindowManager:
                     print(f"[GUI] Restored eBay paned window position: {ebay_paned_pos}")
 
             elif paned_type == 'vertical':
-                # Load from GUI settings (legacy location)
-                gui_settings = self.settings.get_setting('gui_settings', {})
-                ratio = gui_settings.get('vertical_paned_ratio', 0.5)  # Default 50/50 split
+                # Load from settings manager (window section)
+                window_settings = self.settings.get_window_settings()
+                ratio = window_settings.get('vertical_paned_ratio', 0.5)  # Default 50/50 split
                 total_height = paned_widget.winfo_height()
 
                 # If height is too small, the window hasn't been laid out yet - schedule retry
@@ -113,25 +114,33 @@ class WindowManager:
                     return
 
                 sash_pos = int(total_height * ratio)
+                self._restoring_sash = True
                 paned_widget.sash_place(0, 0, sash_pos)
-                self._user_vertical_sash_ratio = ratio  # Initialize user ratio to the restored value
+                # Only set user ratio if not already set by user
+                if self._user_vertical_sash_ratio is None:
+                    self._user_vertical_sash_ratio = ratio
+                self.root.after(150, lambda: setattr(self, '_restoring_sash', False))  # Clear flag after event processing
                 print(f"[VERTICAL PANED] Restored position with ratio: {ratio:.2f} (height={total_height}px, sash={sash_pos}px)")
 
             elif paned_type == 'listbox':
-                # Load from GUI settings (legacy location)
-                gui_settings = self.settings.get_setting('gui_settings', {})
-                ratio = gui_settings.get('listbox_paned_ratio', 0.65)  # Default 65% for categories, 35% for shops
+                # Load from settings manager (window section)
+                window_settings = self.settings.get_window_settings()
+                ratio = window_settings.get('listbox_paned_ratio', 0.50)  # Default 50% for categories, 35% for shops
                 total_width = paned_widget.winfo_width()
 
                 # If width is too small, the window hasn't been laid out yet - schedule retry
                 if total_width < 100:
-                    print(f"[LISTBOX PANED] Width too small ({total_width}px), retrying in 200ms...")
-                    self.root.after(200, lambda: self.restore_paned_position(paned_widget, paned_type))
+                    print(f"[LISTBOX PANED] Width too small ({total_width}px), retrying in 150ms...")
+                    self.root.after(150, lambda: self.restore_paned_position(paned_widget, paned_type))
                     return
 
                 sash_pos = int(total_width * ratio)
+                self._restoring_sash = True
                 paned_widget.sash_place(0, sash_pos, 0)
-                self._user_sash_ratio = ratio  # Initialize user ratio to the restored value
+                # Only set user ratio if not already set by user
+                if self._user_sash_ratio is None:
+                    self._user_sash_ratio = ratio
+                self.root.after(500, lambda: setattr(self, '_restoring_sash', False))  # Clear flag after event processing
                 print(f"[LISTBOX PANED] Restored position with ratio: {ratio:.2f} (width={total_width}px, sash={sash_pos}px)")
 
         except Exception as e:
@@ -156,6 +165,6 @@ class WindowManager:
     def get_sash_ratios(self):
         """Get the current sash ratios for saving."""
         return {
-            'listbox_paned_ratio': self._user_sash_ratio if self._user_sash_ratio is not None else 0.65,
+            'listbox_paned_ratio': self._user_sash_ratio if self._user_sash_ratio is not None else 0.50,
             'vertical_paned_ratio': self._user_vertical_sash_ratio if self._user_vertical_sash_ratio is not None else 0.5
         }

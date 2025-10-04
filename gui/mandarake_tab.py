@@ -753,11 +753,17 @@ class MandarakeTab(ttk.Frame):
         """Track when user manually moves the vertical sash."""
         if not hasattr(self, 'vertical_paned'):
             return
+
+        # Skip if we're currently restoring sash position
+        if hasattr(self.main, 'window_manager') and getattr(self.main.window_manager, '_restoring_sash', False):
+            return
+
         try:
             total_height = self.vertical_paned.winfo_height()
             if total_height > 400:
                 sash_pos = self.vertical_paned.sash_coord(0)[1]  # Y coordinate
-                self.main._user_vertical_sash_ratio = sash_pos / total_height
+                # Set on window_manager, not main
+                self.main.window_manager._user_vertical_sash_ratio = sash_pos / total_height
         except Exception:
             pass
 
@@ -765,12 +771,18 @@ class MandarakeTab(ttk.Frame):
         """Track when user manually moves the horizontal listbox sash."""
         if not hasattr(self, 'listbox_paned'):
             return
+
+        # Skip if we're currently restoring sash position
+        if hasattr(self.main, 'window_manager') and getattr(self.main.window_manager, '_restoring_sash', False):
+            return
+
         try:
             total_width = self.listbox_paned.winfo_width()
             if total_width > 500:
                 sash_pos = self.listbox_paned.sash_coord(0)[0]
                 ratio = sash_pos / total_width
-                self.main._user_sash_ratio = ratio
+                # Set on window_manager, not main
+                self.main.window_manager._user_sash_ratio = ratio
                 print(f"[LISTBOX SASH MOVED] New ratio: {ratio:.2f} (sash={sash_pos}px, width={total_width}px)")
         except Exception as e:
             print(f"[LISTBOX SASH MOVED] Error: {e}")

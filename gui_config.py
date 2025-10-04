@@ -671,19 +671,21 @@ class ScraperGUI(tk.Tk):
         if not getattr(self, '_settings_loaded', False):
             return
         try:
-            SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-
             # Get sash ratios from window manager
             sash_ratios = self.window_manager.get_sash_ratios()
 
+            # Save paned ratios to window settings via SettingsManager
+            self.settings.set_setting("window.listbox_paned_ratio", sash_ratios['listbox_paned_ratio'])
+            self.settings.set_setting("window.vertical_paned_ratio", sash_ratios['vertical_paned_ratio'])
+
+            # Save other GUI settings to legacy location for backward compatibility
+            SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
             data = {
                 'mimic': bool(self.advanced_tab.mimic_var.get()),
                 'ebay_max_results': self.ebay_tab.browserless_max_results.get() if hasattr(self.ebay_tab, 'browserless_max_results') else "10",
                 'ebay_max_comparisons': self.ebay_tab.browserless_max_comparisons.get() if hasattr(self.ebay_tab, 'browserless_max_comparisons') else "MAX",
                 'csv_in_stock_only': bool(self.ebay_tab.csv_in_stock_only.get()) if hasattr(self.ebay_tab, 'csv_in_stock_only') else True,
                 'csv_add_secondary_keyword': bool(self.ebay_tab.csv_add_secondary_keyword.get()) if hasattr(self.ebay_tab, 'csv_add_secondary_keyword') else False,
-                'listbox_paned_ratio': sash_ratios['listbox_paned_ratio'],
-                'vertical_paned_ratio': sash_ratios['vertical_paned_ratio']
             }
             with SETTINGS_PATH.open('w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
@@ -839,6 +841,14 @@ class ScraperGUI(tk.Tk):
         """Select categories in the detail listbox."""
         if hasattr(self, 'mandarake_tab'):
             return self.mandarake_tab._select_categories(categories)
+
+    def _get_selected_categories(self):
+        """Get selected categories from the detail listbox."""
+        if not hasattr(self, 'detail_listbox') or not hasattr(self, 'detail_code_map'):
+            return []
+
+        selection = self.detail_listbox.curselection()
+        return [self.detail_code_map[idx] for idx in selection if idx < len(self.detail_code_map)]
 
     def _get_recent_hours_value(self):
         label = getattr(self, 'recent_hours_var', None)
