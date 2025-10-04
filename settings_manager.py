@@ -96,7 +96,10 @@ class SettingsManager:
                 "filter_min_profit": 20.0,
                 "ebay_send_min_similarity": 70.0,
                 "ebay_send_min_profit": 20.0,
-                "auto_send": False
+                "auto_send": False,
+                "notifications_enabled": False,
+                "notify_min_similarity": 80.0,
+                "notify_min_profit": 30.0
             },
 
             # Output directories

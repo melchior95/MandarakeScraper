@@ -9,19 +9,32 @@ from typing import Dict, List, Optional
 
 from gui.alert_states import AlertState, AlertStateTransition
 from gui.alert_storage_db import AlertStorageDB
+from gui.alert_notifications import AlertNotifier, AlertNotificationFilter
 
 
 class AlertManager:
     """Manages alert items from eBay comparison results."""
 
-    def __init__(self, storage_path: str = "alerts.db"):
+    def __init__(self, storage_path: str = "alerts.db",
+                 notifications_enabled: bool = False,
+                 notify_min_similarity: float = 80.0,
+                 notify_min_profit: float = 30.0):
         """
-        Initialize alert manager with SQLite storage.
+        Initialize alert manager with SQLite storage and notifications.
 
         Args:
             storage_path: Path to SQLite database file (defaults to alerts.db)
+            notifications_enabled: Whether to send desktop notifications
+            notify_min_similarity: Minimum similarity for notifications
+            notify_min_profit: Minimum profit for notifications
         """
         self.storage = AlertStorageDB(storage_path)
+        self.notifier = AlertNotifier(enabled=notifications_enabled)
+        self.notification_filter = AlertNotificationFilter(
+            min_similarity=notify_min_similarity,
+            min_profit=notify_min_profit,
+            enabled=notifications_enabled
+        )
 
     def create_alert_from_comparison(self, comparison_result: Dict) -> Dict:
         """
@@ -119,7 +132,36 @@ class AlertManager:
                     logging.error(f"Failed to create alert: {e}")
 
         logging.info(f"Created {len(created_alerts)} alerts from {len(comparison_results)} comparison results")
+
+        # Send notifications for high-value alerts
+        self._notify_new_alerts(created_alerts)
+
         return created_alerts
+
+    def _notify_new_alerts(self, alerts: List[Dict]):
+        """
+        Send notifications for newly created high-value alerts.
+
+        Args:
+            alerts: List of newly created alerts
+        """
+        if not alerts or not self.notifier.enabled:
+            return
+
+        # Filter alerts that meet notification criteria
+        notify_alerts = self.notification_filter.filter_alerts_for_notification(alerts)
+
+        if not notify_alerts:
+            return
+
+        # Send batch notification or individual notifications
+        if len(notify_alerts) == 1:
+            self.notifier.notify_new_alert(notify_alerts[0])
+        else:
+            # Get highest profit and similarity for batch notification
+            max_profit = max(a.get('profit_margin', 0) for a in notify_alerts)
+            max_similarity = max(a.get('similarity', 0) for a in notify_alerts)
+            self.notifier.notify_batch_alerts(len(notify_alerts), max_profit, max_similarity)
 
     def get_all_alerts(self) -> List[Dict]:
         """Get all alerts from storage."""

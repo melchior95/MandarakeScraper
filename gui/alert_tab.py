@@ -5,9 +5,13 @@ This tab shows comparison results that meet similarity/profit thresholds
 and allows users to manage the reselling workflow.
 """
 
+import csv
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import webbrowser
+import logging
+from datetime import datetime
+from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from gui.alert_manager import AlertManager
@@ -31,7 +35,6 @@ class AlertTab(ttk.Frame):
             settings_manager: Optional settings manager instance
         """
         super().__init__(parent)
-        self.alert_manager = AlertManager()
         self.selected_alert_ids = []
         self.settings_manager = settings_manager
 
@@ -40,9 +43,22 @@ class AlertTab(ttk.Frame):
             alert_settings = settings_manager.get_alert_settings()
             min_sim = alert_settings.get('filter_min_similarity', 70.0)
             min_profit = alert_settings.get('filter_min_profit', 20.0)
+            notifications_enabled = alert_settings.get('notifications_enabled', False)
+            notify_min_sim = alert_settings.get('notify_min_similarity', 80.0)
+            notify_min_profit = alert_settings.get('notify_min_profit', 30.0)
         else:
             min_sim = 70.0
             min_profit = 20.0
+            notifications_enabled = False
+            notify_min_sim = 80.0
+            notify_min_profit = 30.0
+
+        # Initialize alert manager with notification settings
+        self.alert_manager = AlertManager(
+            notifications_enabled=notifications_enabled,
+            notify_min_similarity=notify_min_sim,
+            notify_min_profit=notify_min_profit
+        )
 
         # Threshold variables
         self.min_similarity_var = tk.DoubleVar(value=min_sim)
@@ -108,8 +124,44 @@ class AlertTab(ttk.Frame):
         profit_spinbox.pack(side=tk.LEFT, padx=5)
         self.min_profit_var.trace_add("write", lambda *args: self._on_filter_change())
 
-        # Refresh button
-        ttk.Button(filters_frame, text="Refresh", command=self._load_alerts).pack(side=tk.LEFT, padx=10)
+        # Notification settings (on right side of filters)
+        notify_frame = ttk.LabelFrame(controls_frame, text="Notifications:", padding=5)
+        notify_frame.pack(side=tk.LEFT, padx=(10, 0))
+
+        self.notify_enabled_var = tk.BooleanVar(value=notifications_enabled)
+        notify_check = ttk.Checkbutton(
+            notify_frame,
+            text="Enable",
+            variable=self.notify_enabled_var,
+            command=self._on_notification_toggle
+        )
+        notify_check.pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(notify_frame, text="Min Sim:").pack(side=tk.LEFT, padx=(10, 2))
+        self.notify_sim_var = tk.DoubleVar(value=notify_min_sim)
+        notify_sim_spin = ttk.Spinbox(
+            notify_frame,
+            from_=0,
+            to=100,
+            textvariable=self.notify_sim_var,
+            width=6,
+            command=self._on_notification_settings_change
+        )
+        notify_sim_spin.pack(side=tk.LEFT, padx=2)
+        ttk.Label(notify_frame, text="%").pack(side=tk.LEFT)
+
+        ttk.Label(notify_frame, text="Min Profit:").pack(side=tk.LEFT, padx=(10, 2))
+        self.notify_profit_var = tk.DoubleVar(value=notify_min_profit)
+        notify_profit_spin = ttk.Spinbox(
+            notify_frame,
+            from_=-100,
+            to=1000,
+            textvariable=self.notify_profit_var,
+            width=6,
+            command=self._on_notification_settings_change
+        )
+        notify_profit_spin.pack(side=tk.LEFT, padx=2)
+        ttk.Label(notify_frame, text="%").pack(side=tk.LEFT)
 
         # Bulk actions frame
         actions_frame = ttk.Frame(self)
@@ -129,6 +181,9 @@ class AlertTab(ttk.Frame):
 
         ttk.Separator(actions_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
         ttk.Button(actions_frame, text="Delete Selected", command=self._delete_selected).pack(side=tk.LEFT, padx=2)
+
+        ttk.Separator(actions_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+        ttk.Button(actions_frame, text="Export to Spreadsheet", command=self._export_alerts).pack(side=tk.LEFT, padx=2)
 
         # Treeview frame
         tree_frame = ttk.Frame(self)
@@ -211,11 +266,48 @@ class AlertTab(ttk.Frame):
                     filter_min_similarity=self.min_similarity_var.get(),
                     filter_min_profit=self.min_profit_var.get()
                 )
-            except:
-                pass  # Ignore errors during saving
+            except Exception as e:
+                logging.warning(f"Failed to save alert filter settings: {e}")
 
         # Reload alerts with new filters
         self._load_alerts()
+
+    def _on_notification_toggle(self):
+        """Handle notification enable/disable toggle."""
+        enabled = self.notify_enabled_var.get()
+
+        # Update alert manager notification state
+        self.alert_manager.notifier.enabled = enabled
+        self.alert_manager.notification_filter.enabled = enabled
+
+        # Save to settings
+        if self.settings_manager:
+            try:
+                settings = self.settings_manager.get_alert_settings()
+                settings['notifications_enabled'] = enabled
+                self.settings_manager.save_alert_settings(**settings)
+                logging.info(f"Notifications {'enabled' if enabled else 'disabled'}")
+            except Exception as e:
+                logging.warning(f"Failed to save notification settings: {e}")
+
+    def _on_notification_settings_change(self):
+        """Handle notification threshold changes."""
+        notify_min_sim = self.notify_sim_var.get()
+        notify_min_profit = self.notify_profit_var.get()
+
+        # Update alert manager notification thresholds
+        self.alert_manager.notification_filter.min_similarity = notify_min_sim
+        self.alert_manager.notification_filter.min_profit = notify_min_profit
+
+        # Save to settings
+        if self.settings_manager:
+            try:
+                settings = self.settings_manager.get_alert_settings()
+                settings['notify_min_similarity'] = notify_min_sim
+                settings['notify_min_profit'] = notify_min_profit
+                self.settings_manager.save_alert_settings(**settings)
+            except Exception as e:
+                logging.warning(f"Failed to save notification threshold settings: {e}")
 
     def _ask_yes_no_at_cursor(self, title: str, message: str) -> bool:
         """Show yes/no dialog at cursor position."""
@@ -316,7 +408,7 @@ class AlertTab(ttk.Frame):
                 value = self.tree.item(child, "text")
                 try:
                     value = int(value)
-                except:
+                except (ValueError, TypeError):
                     value = 0
             else:
                 # Get column index
@@ -339,13 +431,13 @@ class AlertTab(ttk.Frame):
                 if col in ["similarity", "profit"]:
                     try:
                         value = float(value.replace("%", "").strip()) if value != "-" else -999999
-                    except:
+                    except (ValueError, AttributeError):
                         value = -999999
                 elif col in ["store_price", "ebay_price", "shipping"]:
                     # Extract numeric value from price strings
                     try:
                         value = float(value.replace("¥", "").replace("$", "").replace(",", "").strip())
-                    except:
+                    except (ValueError, AttributeError):
                         value = 0
 
             items.append((value, child))
@@ -416,8 +508,9 @@ class AlertTab(ttk.Frame):
                 if alert.get('similarity', 0) >= min_similarity and
                    alert.get('profit_margin', 0) >= min_profit
             ]
-        except:
+        except (ValueError, TypeError, tk.TclError) as e:
             # If filter values are invalid, show all
+            logging.warning(f"Invalid filter values, showing all alerts: {e}")
             filtered_alerts = alerts
 
         # Sort by ID (most recent first)
@@ -455,9 +548,9 @@ class AlertTab(ttk.Frame):
             get_state_display_name(state),
             similarity_str,
             profit_str,
-            alert.get('mandarake_title', 'N/A'),
+            alert.get('store_title', 'N/A'),
             alert.get('ebay_title', 'N/A'),
-            alert.get('mandarake_price', '¥0'),
+            alert.get('store_price', '¥0'),
             alert.get('ebay_price', '$0'),
             alert.get('shipping', '$0'),
             alert.get('sold_date', '')
@@ -498,17 +591,17 @@ class AlertTab(ttk.Frame):
         if not new_state:
             return
 
-        # Special handling for "Purchase" state - open all Mandarake URLs in browser tabs
+        # Special handling for "Purchase" state - open all store URLs in browser tabs
         if new_state == AlertState.PURCHASED:
             alerts_data = self.alert_manager.get_alerts_by_ids(alert_ids)
             opened_count = 0
             for alert in alerts_data:
-                url = alert.get('mandarake_link', '')
+                url = alert.get('store_link', '')
                 if url:
                     webbrowser.open(url)
                     opened_count += 1
             if opened_count > 0:
-                print(f"[PURCHASE] Opened {opened_count} Mandarake URLs in browser")
+                print(f"[PURCHASE] Opened {opened_count} store URLs in browser")
 
         # Perform bulk update
         success_count = self.alert_manager.bulk_update_state(alert_ids, new_state)
@@ -551,7 +644,7 @@ class AlertTab(ttk.Frame):
 
         # Open appropriate link based on column
         if column == "#4":  # store_title column (0-indexed: #0=ID, #1=state, #2=similarity, #3=profit, #4=store_title)
-            link = alert.get('mandarake_link', '')
+            link = alert.get('store_link', '')
             if link:
                 webbrowser.open(link)
         elif column == "#5":  # ebay_title column
@@ -581,8 +674,8 @@ class AlertTab(ttk.Frame):
         """Open store link for item."""
         alert_id = int(self.tree.item(item, "text"))
         alert = self.alert_manager.storage.get_alert_by_id(alert_id)
-        if alert and alert.get('mandarake_link'):
-            webbrowser.open(alert['mandarake_link'])
+        if alert and alert.get('store_link'):
+            webbrowser.open(alert['store_link'])
 
     def _open_ebay_link(self, item):
         """Open eBay link for item."""
@@ -637,11 +730,11 @@ class AlertTab(ttk.Frame):
                     # Prepare alert data for listing creator
                     listing_data = {
                         'id': str(alert.get('alert_id', alert.get('id', 'unknown'))),
-                        'mandarake_title': alert.get('mandarake_title', 'Untitled'),
-                        'mandarake_title_en': alert.get('mandarake_title_en', alert.get('mandarake_title', 'Untitled')),
+                        'store_title': alert.get('store_title', 'Untitled'),
+                        'store_title_en': alert.get('store_title_en', alert.get('store_title', 'Untitled')),
                         'ebay_price': ebay_price,
-                        'mandarake_link': alert.get('mandarake_link', ''),
-                        'mandarake_images': alert.get('mandarake_images', [])
+                        'store_link': alert.get('store_link', ''),
+                        'store_images': alert.get('store_images', [])
                     }
 
                     result = create_listing_from_alert(listing_data)
@@ -666,6 +759,131 @@ class AlertTab(ttk.Frame):
             print("[EBAY LISTING] Error: eBay listing creator module not found")
         except Exception as e:
             print(f"[EBAY LISTING] Error: Failed to create eBay listings: {e}")
+
+    def _export_alerts(self):
+        """Export currently visible alerts to CSV or Excel."""
+        # Get currently visible items from treeview
+        items = self.tree.get_children()
+
+        if not items:
+            messagebox.showinfo("Export Alerts", "No alerts to export.")
+            return
+
+        # Ask user for file location and format
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[
+                ("CSV files", "*.csv"),
+                ("Excel files", "*.xlsx"),
+                ("All files", "*.*")
+            ],
+            initialfile=f"alerts_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        )
+
+        if not file_path:
+            return  # User cancelled
+
+        try:
+            # Gather all alert data from visible items
+            export_data = []
+            for item_id in items:
+                values = self.tree.item(item_id, 'values')
+                alert_id = self.tree.item(item_id, 'text')
+
+                # Get full alert data from manager
+                alert = self.alert_manager.storage.get_alert_by_id(int(alert_id))
+
+                if alert:
+                    export_data.append({
+                        'Alert ID': alert_id,
+                        'State': values[0] if len(values) > 0 else '',
+                        'Similarity %': values[1] if len(values) > 1 else '',
+                        'Profit %': values[2] if len(values) > 2 else '',
+                        'Store Title': values[3] if len(values) > 3 else '',
+                        'eBay Title': values[4] if len(values) > 4 else '',
+                        'Store Price': values[5] if len(values) > 5 else '',
+                        'eBay Price': values[6] if len(values) > 6 else '',
+                        'Shipping': values[7] if len(values) > 7 else '',
+                        'Sold Date': values[8] if len(values) > 8 else '',
+                        'Store Link': alert.get('store_link', ''),
+                        'eBay Link': alert.get('ebay_link', ''),
+                        'Created At': alert.get('created_at', ''),
+                        'Updated At': alert.get('updated_at', '')
+                    })
+
+            # Export based on file extension
+            file_ext = Path(file_path).suffix.lower()
+
+            if file_ext == '.xlsx':
+                self._export_to_excel(export_data, file_path)
+            else:
+                self._export_to_csv(export_data, file_path)
+
+            messagebox.showinfo(
+                "Export Complete",
+                f"Successfully exported {len(export_data)} alerts to:\n{file_path}"
+            )
+
+        except Exception as e:
+            logging.error(f"Failed to export alerts: {e}")
+            messagebox.showerror("Export Error", f"Failed to export alerts:\n{e}")
+
+    def _export_to_csv(self, data: List[Dict], file_path: str):
+        """Export data to CSV file."""
+        if not data:
+            return
+
+        with open(file_path, 'w', newline='', encoding='utf-8') as f:
+            fieldnames = data[0].keys()
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(data)
+
+    def _export_to_excel(self, data: List[Dict], file_path: str):
+        """Export data to Excel file using openpyxl."""
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, Alignment
+            from openpyxl.utils import get_column_letter
+
+            # Create workbook
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Alerts"
+
+            if not data:
+                wb.save(file_path)
+                return
+
+            # Write headers
+            headers = list(data[0].keys())
+            for col_idx, header in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col_idx, value=header)
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal='center')
+
+            # Write data
+            for row_idx, row_data in enumerate(data, 2):
+                for col_idx, header in enumerate(headers, 1):
+                    ws.cell(row=row_idx, column=col_idx, value=row_data.get(header, ''))
+
+            # Auto-size columns
+            for col_idx, header in enumerate(headers, 1):
+                column_letter = get_column_letter(col_idx)
+                max_length = len(str(header))
+                for row_idx in range(2, len(data) + 2):
+                    cell_value = str(ws.cell(row=row_idx, column=col_idx).value)
+                    max_length = max(max_length, len(cell_value))
+                ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
+            wb.save(file_path)
+
+        except ImportError:
+            # Fall back to CSV if openpyxl not installed
+            logging.warning("openpyxl not installed, falling back to CSV export")
+            csv_path = str(Path(file_path).with_suffix('.csv'))
+            self._export_to_csv(data, csv_path)
+            raise ImportError(f"Excel export requires openpyxl. Exported to CSV instead: {csv_path}")
 
     def add_filtered_alerts(self, comparison_results: List[Dict]):
         """
