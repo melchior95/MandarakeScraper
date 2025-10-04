@@ -334,3 +334,42 @@ def match_main_code(code: str) -> Optional[str]:
             if main_code == prefix:
                 return main_code
     return None
+
+
+def load_publisher_list() -> set:
+    """Load publisher list from file."""
+    publisher_file = Path('publishers.txt')
+    publishers = set()
+
+    # Default publishers
+    default_publishers = [
+        'Takeshobo', 'S-Digital', 'G-WALK', 'Cosplay Fetish Book',
+        'First', '1st', '2nd', '3rd', 'Book'
+    ]
+    publishers.update(default_publishers)
+
+    # Load from file if exists
+    if publisher_file.exists():
+        try:
+            with open(publisher_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    pub = line.strip()
+                    if pub:
+                        publishers.add(pub)
+            print(f"[PUBLISHERS] Loaded {len(publishers)} publishers from file")
+        except Exception as e:
+            print(f"[PUBLISHERS] Error loading file: {e}")
+
+    return publishers
+
+
+def save_publisher_list(publisher_list: set):
+    """Save publisher list to file."""
+    try:
+        publisher_file = Path('publishers.txt')
+        with open(publisher_file, 'w', encoding='utf-8') as f:
+            for pub in sorted(publisher_list):
+                f.write(f"{pub}\n")
+        print(f"[PUBLISHERS] Saved {len(publisher_list)} publishers to file")
+    except Exception as e:
+        print(f"[PUBLISHERS] Error saving file: {e}")

@@ -3,73 +3,84 @@
 ## Overview
 This document serves as a comprehensive index to all documentation files in the Mandarake Scraper project. It provides a roadmap for understanding the project structure, features, and implementation details.
 
-## 📚 Core Documentation
+**Last Updated**: October 4, 2025
+**Status**: Active Development
 
-### User-Facing Guides
-- **[README.md](README.md)** - Main project documentation, setup instructions, and basic usage
-- **[CLAUDE.md](CLAUDE.md)** - Comprehensive development guide for Claude AI and developers
-- **[MANDARAKE_CODES.md](MANDARAKE_CODES.md)** - Complete reference for Mandarake store and category codes
+---
 
-### Feature Documentation
-- **[NEW_FEATURES.md](NEW_FEATURES.md)** - Recent GUI improvements (New Config button, Space key fix)
-- **[LATEST_FEATURES.md](LATEST_FEATURES.md)** - Quality-of-life features (Deselect on empty click, Auto-load CSV, Auto-rename configs)
-- **[EBAY_IMAGE_COMPARISON_GUIDE.md](EBAY_IMAGE_COMPARISON_GUIDE.md)** - User guide for eBay image comparison feature
-- **[ALERT_TAB_COMPLETE.md](ALERT_TAB_COMPLETE.md)** - Complete documentation for the Review/Alerts workflow system
+## 📚 Essential Documentation
+
+### Getting Started
+1. **[README.md](README.md)** - Main project documentation, setup instructions, and basic usage
+2. **[setup_guide.md](setup_guide.md)** - Detailed installation and configuration guide
+3. **[MANDARAKE_CODES.md](MANDARAKE_CODES.md)** - Complete reference for Mandarake store and category codes
+
+### Development Guide
+- **[CLAUDE.md](CLAUDE.md)** - Comprehensive development guide for AI assistants and developers
+
+---
 
 ## 🏗️ Architecture & Implementation
 
-### Development Phases
-- **[PHASE1_INFRASTRUCTURE_COMPLETE.md](PHASE1_INFRASTRUCTURE_COMPLETE.md)** - Base infrastructure for modular marketplace tabs
-- **[PHASE2_SURUGAYA_COMPLETE.md](PHASE2_SURUGAYA_COMPLETE.md)** - Suruga-ya marketplace implementation
-- **[PHASE3_DEJAPAN_PLAN.md](PHASE3_DEJAPAN_PLAN.md)** - Planning for DejaJapan integration
+### Core Architecture
+- **[GUI_MODULARIZATION_COMPLETE.md](GUI_MODULARIZATION_COMPLETE.md)** - Complete GUI modularization documentation
+  - Architecture overview
+  - Module dependencies
+  - Refactoring phases (1-7)
+  - Metrics: 63% code reduction (4000+ → 1473 lines)
+  - 20+ modules created
+  - All improvements and lessons learned
 
-### Refactoring & Planning
-- **[REFACTORING_PLAN.md](REFACTORING_PLAN.md)** - GUI refactoring strategy and modularization plan
-- **[MODULARIZATION_TODO.md](MODULARIZATION_TODO.md)** - Tasks for breaking down monolithic GUI
-- **[MODULAR_TABS_PLAN.md](MODULAR_TABS_PLAN.md)** - Detailed plan for modular tab architecture
+### Module Structure
+```
+gui_config.py (1473 lines)
+├── gui/mandarake_tab.py      - Store/category/config UI
+├── gui/ebay_tab.py            - eBay search and CSV comparison
+├── gui/advanced_tab.py        - Advanced settings
+├── gui/alert_tab.py           - Review/Alerts workflow
+├── gui/window_manager.py      - Window geometry management
+├── gui/menu_manager.py        - Menu bar and dialogs
+├── gui/configuration_manager.py
+├── gui/tree_manager.py
+├── gui/csv_comparison_manager.py
+├── gui/ebay_search_manager.py
+├── gui/alert_manager.py
+└── gui/utils.py               - Shared utilities
+```
 
-### Integration Summaries
-- **[INTEGRATION_SUMMARY.md](INTEGRATION_SUMMARY.md)** - Overview of system integrations
-- **[UNIFIED_STORES_PLAN.md](UNIFIED_STORES_PLAN.md)** - Plan for unified store management
-- **[UNIFIED_STORES_INTEGRATION_COMPLETE.md](UNIFIED_STORES_INTEGRATION_COMPLETE.md)** - Completed unified stores system
+---
 
-## 🛠️ Technical Documentation
+## 🚀 Feature Documentation
 
-### API & Endpoints
+### Alert System
+- **[ALERT_TAB_COMPLETE.md](ALERT_TAB_COMPLETE.md)** - Complete documentation for the Review/Alerts workflow
+  - State machine: Pending → Yay → Purchased → Shipped → Received → Posted → Sold
+  - Bulk operations
+  - Threshold filtering
+  - JSON persistence
+
+### eBay Integration
+- **[EBAY_IMAGE_COMPARISON_GUIDE.md](EBAY_IMAGE_COMPARISON_GUIDE.md)** - User guide for eBay image comparison
+  - Multi-metric computer vision
+  - Template matching, ORB features, SSIM, histogram
+  - RANSAC geometric verification
+  - Debug output system
+
+- **[SOLD_LISTING_MATCHER.md](SOLD_LISTING_MATCHER.md)** - Sold listing matching system documentation
+  - Playwright-based image matching
+  - Requests-based headless matching
+  - Performance optimizations
+
+---
+
+## 🛠️ API & Integration
+
+### eBay API
 - **[api_setup_guide.md](api_setup_guide.md)** - API configuration and setup guide
 - **[EBAY_ENDPOINT_SETUP.md](EBAY_ENDPOINT_SETUP.md)** - eBay API endpoint configuration
 - **[ebay_exemption_request.md](ebay_exemption_request.md)** - eBay API exemption documentation
 
-### eBay Integration
-- **[EBAY_SCRAPER_FIXES.md](EBAY_SCRAPER_FIXES.md)** - eBay scraper fixes and improvements
-- **[SOLD_LISTING_MATCHER.md](SOLD_LISTING_MATCHER.md)** - Sold listing matching system documentation
-
-### Marketplaces
-- **[SURUGAYA_INTEGRATION_PLAN.md](SURUGAYA_INTEGRATION_PLAN.md)** - Suruga-ya integration planning
-- **[SURUGAYA_ADVANCED_SEARCH_COMPLETE.md](SURUGAYA_ADVANCED_SEARCH_COMPLETE.md)** - Advanced search implementation
-- **[SURUGAYA_CATEGORIES_COMPLETE.md](SURUGAYA_CATEGORIES_COMPLETE.md)** - Category system completion
-
-## 🐛 Bug Fixes & Issues
-
-### Bug Fix Documentation
-- **[BUGFIX_SHOP_CATEGORY_MATCHING.md](BUGFIX_SHOP_CATEGORY_MATCHING.md)** - Shop and category matching fixes
-- **[CATEGORY_SELECTION_FIX.md](CATEGORY_SELECTION_FIX.md)** - Category selection issues and solutions
-- **[CRITICAL_SPACE_KEY_FIX.md](CRITICAL_SPACE_KEY_FIX.md)** - Space key input fix
-- **[SPACE_KEY_FIX.md](SPACE_KEY_FIX.md)** - Space key handling improvements
-- **[SPACE_KEY_FINAL_FIX.md](SPACE_KEY_FINAL_FIX.md)** - Final space key fix implementation
-- **[DYNAMIC_TREE_UPDATE_FIX.md](DYNAMIC_TREE_UPDATE_FIX.md)** - Tree view update fixes
-- **[MINIMAL_STORE_INTEGRATION.md](MINIMAL_STORE_INTEGRATION.md)** - Minimal store integration fixes
-
-## 📋 Session & Development Records
-
-### Session Summaries
-- **[SESSION_SUMMARY.md](SESSION_SUMMARY.md)** - General development session summary
-- **[COMPLETE_SESSION_SUMMARY.md](COMPLETE_SESSION_SUMMARY.md)** - Complete session documentation
-- **[FINAL_SESSION_SUMMARY.md](FINAL_SESSION_SUMMARY.md)** - Final session summary
-
-### Development Logs
-- **[setup_guide.md](setup_guide.md)** - Initial setup guide
-- **[REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md)** - Refactoring completion summary
+---
 
 ## 🗂️ File Organization
 
@@ -78,51 +89,57 @@ This document serves as a comprehensive index to all documentation files in the 
 mandarake_scraper/
 ├── README.md                    # Main project documentation
 ├── CLAUDE.md                    # Development guide
-├── *.md                         # Various feature and fix documentation
-├── gui/                         # Modular GUI components
+├── gui_config.py                # Main GUI application (1473 lines)
+├── mandarake_scraper.py         # Core scraper
+├── gui/                         # Modular GUI components (20+ modules)
+│   ├── *_tab.py                # Tab modules (Mandarake, eBay, Advanced, Alert)
+│   ├── *_manager.py            # Manager classes
 │   ├── alert_*.py              # Alert system modules
-│   ├── base_*.py               # Base classes
-│   ├── *_tab.py                # Marketplace tabs
-│   └── utils.py                # Shared utilities
-├── scrapers/                    # Modular scraper classes
-│   ├── base_scraper.py         # Base scraper class
-│   └── surugaya_scraper.py     # Suruga-ya scraper
+│   ├── workers.py              # Background workers
+│   ├── utils.py                # Shared utilities
+│   └── constants.py            # Shared constants
 ├── configs/                     # Configuration files
-├── results/                     # Output files
-└── images/                      # Downloaded images
+├── results/                     # Output CSV files
+├── images/                      # Downloaded images
+└── debug_comparison/            # Image comparison debug output
 ```
 
 ### Key Configuration Files
 - `user_settings.json` - User preferences and settings
 - `alerts.json` - Alert system data
-- `category_keywords.json` - Category keyword mappings
 - `schedules.json` - Scheduled task configurations
+- `publishers.txt` - Publisher list for keyword extraction
 
-## 🚀 Getting Started
+---
+
+## 🚀 Quick Start Guide
 
 ### For New Users
 1. Read **[README.md](README.md)** for basic setup and usage
-2. Check **[MANDARAKE_CODES.md](MANDARAKE_CODES.md)** for store/category references
-3. Review **[EBAY_IMAGE_COMPARISON_GUIDE.md](EBAY_IMAGE_COMPARISON_GUIDE.md)** for price comparison features
+2. Check **[setup_guide.md](setup_guide.md)** for installation
+3. Reference **[MANDARAKE_CODES.md](MANDARAKE_CODES.md)** for store/category codes
+4. Review **[EBAY_IMAGE_COMPARISON_GUIDE.md](EBAY_IMAGE_COMPARISON_GUIDE.md)** for price comparison
 
 ### For Developers
-1. Start with **[CLAUDE.md](CLAUDE.md)** for comprehensive development context
-2. Review **[PHASE1_INFRASTRUCTURE_COMPLETE.md](PHASE1_INFRASTRUCTURE_COMPLETE.md)** for architecture understanding
-3. Check **[REFACTORING_PLAN.md](REFACTORING_PLAN.md)** for code organization
+1. Start with **[CLAUDE.md](CLAUDE.md)** for development context
+2. Review **[GUI_MODULARIZATION_COMPLETE.md](GUI_MODULARIZATION_COMPLETE.md)** for architecture
+3. Study the module structure in `gui/` directory
+4. Follow the refactoring patterns and best practices
 
-### For Adding New Marketplaces
-1. Study **[PHASE2_SURUGAYA_COMPLETE.md](PHASE2_SURUGAYA_COMPLETE.md)** as a reference implementation
-2. Review **[PHASE1_INFRASTRUCTURE_COMPLETE.md](PHASE1_INFRASTRUCTURE_COMPLETE.md)** for base classes
-3. Check **[PHASE3_DEJAPAN_PLAN.md](PHASE3_DEJAPAN_PLAN.md)** for planning approach
+### For Feature Development
+1. Review existing manager patterns in `gui/*_manager.py`
+2. Follow separation of concerns principle
+3. Use queue-based threading for background operations
+4. Implement proper state management with flags
 
-## 🔍 Quick Reference
+---
 
-### Core Features
-- **Mandarake Scraping**: Primary marketplace scraping with anti-detection
-- **eBay Integration**: Price comparison and image matching
-- **Alert System**: Complete reselling workflow management
-- **GUI Application**: Tkinter-based interface with 4 main tabs
-- **Multi-Marketplace**: Modular architecture supporting multiple marketplaces
+## 🔍 Core Features
+
+### Main Workflows
+1. **Scraping**: Configure → Search → Export results
+2. **Price Comparison**: Load CSV → Compare with eBay → Send to alerts
+3. **Review Workflow**: Review → Approve → Purchase → Track → Sold
 
 ### Key Technologies
 - **Python 3.10+** - Main programming language
@@ -130,40 +147,105 @@ mandarake_scraper/
 - **Requests** - HTTP client with session management
 - **BeautifulSoup4** - HTML parsing
 - **OpenCV** - Image comparison and computer vision
-- **Playwright** - Browser automation for eBay
+- **Scrapy** - eBay scraping
 - **Google APIs** - Sheets and Drive integration
 
-### Main Workflows
-1. **Scraping**: Configure → Search → Export results
-2. **Price Comparison**: Load CSV → Compare with eBay → Send to alerts
-3. **Review Workflow**: Review → Approve → Purchase → Track → Sold
-4. **Multi-Marketplace**: Enable marketplaces → Search across all → Compare results
+### Configuration System
+- **Auto-naming**: `{keyword}_{category}_{shop}.json`
+- **Auto-save**: Debounced (50ms) config persistence
+- **CSV/Images**: Same naming scheme as configs
+- **Settings**: User preferences in `user_settings.json`
 
-## 📝 Documentation Standards
+---
+
+## 📝 Code Quality
+
+### Recent Improvements (Phase 7)
+- ✅ Fixed 6+ broken attribute references
+- ✅ Removed 7 dead methods (~90 lines)
+- ✅ Removed 9 unused imports
+- ✅ Fixed duplicate protocol bindings
+- ✅ 131 lines of dead code removed (8.2% reduction)
+
+### Best Practices
+1. **Thread Safety**: Use `self.after()` for UI updates from threads
+2. **Queue Communication**: Workers use `run_queue` for status updates
+3. **Manager Delegation**: Delegate to managers, not inline logic
+4. **State Flags**: Use flags to prevent recursive updates
+
+---
+
+## 🧪 Testing
+
+### Manual Testing Coverage
+- ✅ GUI launches without errors
+- ✅ All tabs load correctly
+- ✅ Mandarake scraping works
+- ✅ eBay search and comparison works
+- ✅ CSV loading and filtering works
+- ✅ Alert workflow functions
+- ✅ Settings persistence works
+- ✅ Window positions restore correctly
+
+---
+
+## 🔮 Future Enhancements
+
+### Planned Improvements
+1. Remove wrapper methods (call utils directly)
+2. Extract complex methods (`run_now()`, `_poll_queue()`)
+3. Add type hints for better IDE support
+4. Create unit tests for manager classes
+5. Replace print statements with proper logging
+6. Consider event-driven architecture
+
+---
+
+## 📋 Documentation Standards
 
 ### File Naming Conventions
-- `FEATURE_NAME.md` - Feature documentation
-- `BUGFIX_DESCRIPTION.md` - Bug fix documentation
-- `PHASE_NUMBER_DESCRIPTION.md` - Development phase documentation
+- `FEATURE_COMPLETE.md` - Feature documentation
 - `COMPONENT_COMPLETE.md` - Completed component documentation
+- `*_GUIDE.md` - User guides and tutorials
 
 ### Documentation Structure
 Each markdown file should include:
 - Clear title and overview
-- Problem statement (for bug fixes)
 - Implementation details
 - Usage examples
-- Testing results
-- File change summary
-
-### Maintenance
-- Keep documentation updated with code changes
-- Use consistent formatting and structure
-- Include relevant code examples
-- Cross-reference related documentation
+- Testing results (if applicable)
+- Related documentation links
 
 ---
 
-**Last Updated**: October 3, 2025
-**Project Version**: Multi-marketplace scraper with modular GUI
-**Documentation Files**: 40+ markdown files covering all aspects of the project
+## 📊 Project Metrics
+
+### Current State
+- **Main GUI**: 1473 lines (down from 4000+)
+- **Modules Created**: 20+
+- **Code Reduction**: 63%
+- **Documentation Files**: 12 core documents
+- **Active Development**: Yes
+
+### Module Count
+- **Tab Modules**: 4 (Mandarake, eBay, Advanced, Alert)
+- **Manager Modules**: 8+
+- **Worker Modules**: 2
+- **Utility Modules**: 3
+- **Alert System**: 3 modules
+
+---
+
+## 🔗 Related Documentation
+
+### External References
+- [Python Tkinter Documentation](https://docs.python.org/3/library/tkinter.html)
+- [OpenCV Python Tutorials](https://docs.opencv.org/4.x/d6/d00/tutorial_py_root.html)
+- [eBay API Documentation](https://developer.ebay.com/)
+- [Scrapy Documentation](https://docs.scrapy.org/)
+
+---
+
+**Maintainer**: Development Team
+**Status**: Active
+**Version**: 1.0 (Modularized)

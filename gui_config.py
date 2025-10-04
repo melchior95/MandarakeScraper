@@ -4,34 +4,22 @@
 import json
 import queue
 import threading
-import time
 import tkinter as tk
 from pathlib import Path
-import re
 from tkinter import filedialog, messagebox, ttk
 from typing import Optional
-from urllib.parse import quote
-import csv
 import webbrowser
 import logging
-from PIL import Image, ImageTk
 
 from mandarake_scraper import MandarakeScraper, schedule_scraper
 from settings_manager import get_settings_manager
-from mandarake_codes import (
-    MANDARAKE_STORES,
-    MANDARAKE_MAIN_CATEGORIES,
-    MANDARAKE_ALL_CATEGORIES,
-    STORE_SLUG_TO_NAME,
-)
+from mandarake_codes import MANDARAKE_MAIN_CATEGORIES
 
 # Import refactored modules
 from gui.constants import (
-    STORE_OPTIONS,
     MAIN_CATEGORY_OPTIONS,
     RECENT_OPTIONS,
     SETTINGS_PATH,
-    CATEGORY_KEYWORDS,
 )
 from gui import utils
 from gui import workers
@@ -47,6 +35,8 @@ from gui.config_tree_manager import ConfigTreeManager
 from gui.ebay_search_manager import EbaySearchManager
 from gui.csv_comparison_manager import CSVComparisonManager
 from gui.surugaya_manager import SurugayaManager
+from gui.window_manager import WindowManager
+from gui.menu_manager import MenuManager
 
 
 class ScraperGUI(tk.Tk):
@@ -66,24 +56,14 @@ class ScraperGUI(tk.Tk):
 
         self.title("Mandarake Scraper GUI")
 
-        # Load window settings or use defaults
-        window_settings = self.settings.get_window_settings()
-        width = window_settings.get('width', 780)
-        height = window_settings.get('height', 760)
-        x = window_settings.get('x', 100)
-        y = window_settings.get('y', 100)
+        # Initialize managers
+        self.window_manager = WindowManager(self, self.settings)
+        self.menu_manager = MenuManager(self, self.settings)
 
-        self.geometry(f"{width}x{height}+{x}+{y}")
+        # Apply window settings
+        self.window_manager.apply_window_settings()
         self.resizable(True, True)
         self.minsize(780, 600)
-
-        # Restore maximized state if it was maximized
-        if window_settings.get('maximized', False):
-            self.state('zoomed')  # Windows/Linux
-            # For macOS, use: self.attributes('-zoomed', True)
-
-        # Bind window close event to save settings
-        self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self.run_thread = None
         self.run_queue: "queue.Queue[tuple[str, str]]" = queue.Queue()
@@ -105,14 +85,14 @@ class ScraperGUI(tk.Tk):
         self.thumbnails_var = tk.StringVar(value="400")
 
         # Load publisher list
-        self.publisher_list = self._load_publisher_list()
+        self.publisher_list = utils.load_publisher_list()
 
         # Initialize modular components
         self.config_manager = ConfigurationManager(self.settings)
         self.tree_manager = None  # Will be initialized after tree widget is created
 
         # Create menu bar
-        self._create_menu_bar()
+        self.menu_manager.create_menu_bar()
 
         self._build_widgets()
         self._load_gui_settings()
@@ -139,226 +119,10 @@ class ScraperGUI(tk.Tk):
         self.usd_jpy_rate = rate
         print(f"[EXCHANGE RATE] Updated USD/JPY: {self.usd_jpy_rate}")
 
-    def _create_menu_bar(self):
-        """Create the application menu bar"""
-        menubar = tk.Menu(self)
-        self.config(menu=menubar)
-
-        # File menu
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=file_menu)
-
-        # Recent files submenu
-        self.recent_menu = tk.Menu(file_menu, tearoff=0)
-        file_menu.add_cascade(label="Recent Configs", menu=self.recent_menu)
-        self._update_recent_menu()
-
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.on_closing)
-
-        # Settings menu
-        settings_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Settings", menu=settings_menu)
-        settings_menu.add_command(label="View Settings Summary", command=self._show_settings_summary)
-        settings_menu.add_command(label="Reset to Defaults", command=self._reset_settings)
-        settings_menu.add_separator()
-        settings_menu.add_command(label="Export Settings", command=self._export_settings)
-        settings_menu.add_command(label="Import Settings", command=self._import_settings)
-
-
-        # Help menu
-        help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Help", menu=help_menu)
-        help_menu.add_command(label="Image Search Guide", command=self._show_image_search_help)
-        help_menu.add_command(label="About", command=self._show_about)
-
-    def _update_recent_menu(self):
-        """Update the recent files menu"""
-        self.recent_menu.delete(0, tk.END)
-        recent_files = self.settings.get_recent_config_files()
-
-        if recent_files:
-            for file_path in recent_files:
-                file_name = Path(file_path).name
-                self.recent_menu.add_command(
-                    label=file_name,
-                    command=lambda path=file_path: self._load_recent_config(path)
-                )
-        else:
-            self.recent_menu.add_command(label="No recent files", state=tk.DISABLED)
-
-    def _load_recent_config(self, file_path: str):
-        """Load a recent config file"""
-        try:
-            if Path(file_path).exists():
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                self._populate_from_config(config)
-                self.last_saved_path = Path(file_path)
-                self.status_var.set(f"Loaded recent config: {Path(file_path).name}")
-            else:
-                messagebox.showerror("Error", f"File not found: {file_path}")
-                # Remove from recent files
-                recent_files = self.settings.get_recent_config_files()
-                if file_path in recent_files:
-                    recent_files.remove(file_path)
-                    self.settings.set_setting("recent.config_files", recent_files)
-                    self._update_recent_menu()
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to load config: {e}")
-
-    def _show_settings_summary(self):
-        """Show a dialog with current settings summary"""
-        summary = self.settings.get_settings_summary()
-
-        # Create summary window
-        summary_window = tk.Toplevel(self)
-        summary_window.title("Settings Summary")
-        summary_window.geometry("600x500")
-        summary_window.transient(self)
-
-        # Text widget with scrollbar
-        text_frame = ttk.Frame(summary_window)
-        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        text_widget = tk.Text(text_frame, wrap=tk.WORD, font=("Courier", 10))
-        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
-        text_widget.configure(yscrollcommand=scrollbar.set)
-
-        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        text_widget.insert(tk.END, summary)
-        text_widget.config(state=tk.DISABLED)
-
-        ttk.Button(summary_window, text="Close", command=summary_window.destroy).pack(pady=10)
-
-    def _reset_settings(self):
-        """Reset all settings to defaults"""
-        if messagebox.askyesno("Reset Settings", "Are you sure you want to reset all settings to defaults?\n\nThis action cannot be undone."):
-            if self.settings.reset_to_defaults():
-                messagebox.showinfo("Success", "Settings have been reset to defaults.\n\nRestart the application to see all changes.")
-            else:
-                messagebox.showerror("Error", "Failed to reset settings.")
-
-    def _export_settings(self):
-        """Export current settings to a file"""
-        file_path = filedialog.asksaveasfilename(
-            title="Export Settings",
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
-        )
-
-        if file_path:
-            if self.settings.export_settings(file_path):
-                messagebox.showinfo("Success", f"Settings exported to:\n{file_path}")
-            else:
-                messagebox.showerror("Error", "Failed to export settings.")
-
-    def _import_settings(self):
-        """Import settings from a file"""
-        file_path = filedialog.askopenfilename(
-            title="Import Settings",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
-        )
-
-        if file_path:
-            if messagebox.askyesno("Import Settings", "Importing settings will overwrite your current settings.\n\nAre you sure you want to continue?"):
-                if self.settings.import_settings(file_path):
-                    messagebox.showinfo("Success", "Settings imported successfully.\n\nRestart the application to see all changes.")
-                else:
-                    messagebox.showerror("Error", "Failed to import settings.")
-
-    def _show_image_search_help(self):
-        """Show image search help dialog"""
-        help_text = """
-IMAGE SEARCH HELP
-
-🎯 QUICK START:
-1. Click "Select Image..." to upload a product photo
-2. Use the search functionality to find similar items
-
-📊 RESULTS:
-- Shows sold item counts and price ranges
-- Calculates profit margins with different scenarios
-- Estimates fees and shipping costs
-- Provides market recommendations
-        """
-
-        # Create help window
-        help_window = tk.Toplevel(self)
-        help_window.title("Image Search Help")
-        help_window.geometry("500x400")
-        help_window.transient(self)
-
-        text_frame = ttk.Frame(help_window)
-        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        text_widget = tk.Text(text_frame, wrap=tk.WORD, font=("Arial", 10))
-        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
-        text_widget.configure(yscrollcommand=scrollbar.set)
-
-        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        text_widget.insert(tk.END, help_text)
-        text_widget.config(state=tk.DISABLED)
-
-        ttk.Button(help_window, text="Close", command=help_window.destroy).pack(pady=10)
-
-    def _show_about(self):
-        """Show about dialog"""
-        about_text = f"""
-Mandarake Scraper GUI v1.0.0
-
-A comprehensive tool for analyzing Mandarake listings
-and comparing prices with eBay sold listings.
-
-Features:
-• Advanced image search with comparison methods
-• Profit margin calculations and market analysis
-• Persistent settings and window preferences
-
-Settings file: {self.settings.settings_file}
-Last updated: {self.settings.get_setting('meta.last_updated', 'Never')}
-        """
-
-        messagebox.showinfo("About Mandarake Scraper", about_text)
-
     def _show_ransac_info(self):
         """Show RANSAC information dialog"""
-        info_text = """
-RANSAC GEOMETRIC VERIFICATION
-
-What it does:
-• Verifies that matched image features have consistent spatial relationships
-• Uses RANSAC (Random Sample Consensus) algorithm to detect true matches
-• Adds ~40-50% processing time but significantly improves accuracy
-
-When to use:
-✓ When you need maximum accuracy for difficult matches
-✓ When comparing similar-looking items that are different editions
-✓ When false positives are costly (e.g., expensive items)
-
-When to skip:
-• For quick exploratory searches
-• When processing large batches (hundreds of items)
-• When visual similarity is good enough
-
-Current algorithm (without RANSAC):
-• Template matching: 60% weight
-• Feature matching: 25% weight
-• SSIM: 10% weight
-• Histogram: 5% weight
-• Consistency bonus: up to 25% boost
-
-With RANSAC enabled:
-• Adds geometric coherence verification (15-20% weight)
-• Penalizes random/scattered feature matches
-• Increases match confidence scores
-        """
-
-        messagebox.showinfo("RANSAC Geometric Verification", info_text)
+        from gui import ui_helpers
+        ui_helpers.show_ransac_info()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -461,119 +225,14 @@ With RANSAC enabled:
             self._load_results_table(csv_path)
             self.status_var.set(f"Loaded CSV: {csv_path.name}")
 
-    def _search_ebay_sold(self, title):
-        """Search eBay for sold listings - delegated to EbaySearchManager"""
-        if hasattr(self, 'ebay_tab') and self.ebay_tab.ebay_search_manager:
-            return self.ebay_tab.ebay_search_manager.search_ebay_sold(title)
-        return None
-
-    def _display_ebay_results(self, results):
-        """Display eBay analysis results in the treeview"""
-        # Clear existing results
-        for item in self.ebay_results_tree.get_children():
-            self.ebay_results_tree.delete(item)
-
-        # Check if these are image comparison results (have string values) or regular eBay results (have numeric values)
-        is_image_comparison = results and isinstance(results[0].get('mandarake_price'), str)
-
-        if is_image_comparison:
-            # Image comparison results - display as-is without numeric formatting
-            for result in results:
-                values = (
-                    result['title'][:40] + ('...' if len(result['title']) > 40 else ''),
-                    result['mandarake_price'],  # Already formatted string
-                    str(result['ebay_sold_count']),
-                    result['ebay_median_price'],  # Already formatted string
-                    result.get('ebay_price_range', 'N/A'),
-                    result['profit_margin'],  # Already formatted string
-                    result.get('estimated_profit', 'N/A')  # Already formatted string
-                )
-                self.ebay_results_tree.insert('', tk.END, values=values)
-        else:
-            # Regular eBay results - format as numbers
-            # Sort by profit margin (highest first)
-            results.sort(key=lambda x: x['profit_margin'], reverse=True)
-
-            # Add results to treeview
-            for result in results:
-                values = (
-                    result['title'][:40] + ('...' if len(result['title']) > 40 else ''),
-                    f"¥{result['mandarake_price']:,}",
-                    str(result['ebay_sold_count']),
-                    f"${result['ebay_median_price']:.2f}",
-                    result.get('ebay_price_range', 'N/A'),
-                    f"{result['profit_margin']:+.1f}%",
-                    f"${result.get('estimated_profit', 0):.2f}"
-                )
-                self.ebay_results_tree.insert('', tk.END, values=values)
-
-
     def _restore_paned_position(self):
         """Restore the paned window sash position from saved settings"""
-        try:
-            if not hasattr(self, 'ebay_paned'):
-                return
-
-            window_settings = self.settings.get_window_settings()
-            ebay_paned_pos = window_settings.get('ebay_paned_pos')
-
-            if ebay_paned_pos is not None:
-                # Set the sash position
-                self.ebay_tab.ebay_paned.sash_place(0, 0, ebay_paned_pos)
-                print(f"[GUI] Restored eBay paned window position: {ebay_paned_pos}")
-        except Exception as e:
-            print(f"[GUI] Could not restore paned position: {e}")
+        if hasattr(self, 'ebay_tab') and hasattr(self.ebay_tab, 'ebay_paned'):
+            self.window_manager.restore_paned_position(self.ebay_tab.ebay_paned, 'ebay')
 
     def _save_window_settings(self):
         """Save current window settings"""
-        try:
-            # Get current window geometry
-            geometry = self.geometry()
-            width, height, x, y = self._parse_geometry(geometry)
-
-            # Check if maximized
-            maximized = self.state() == 'zoomed'
-
-            # Get paned window sash position (if it exists)
-            ebay_paned_pos = None
-            if hasattr(self, 'ebay_paned'):
-                try:
-                    # Get sash position (distance from top)
-                    sash_coords = self.ebay_tab.ebay_paned.sash_coord(0)  # First sash
-                    if sash_coords:
-                        ebay_paned_pos = sash_coords[1]  # Y coordinate
-                except:
-                    pass
-
-            # Save window settings with paned position
-            settings_dict = {
-                'width': width,
-                'height': height,
-                'x': x,
-                'y': y,
-                'maximized': maximized
-            }
-            if ebay_paned_pos is not None:
-                settings_dict['ebay_paned_pos'] = ebay_paned_pos
-
-            self.settings.save_window_settings(**settings_dict)
-            self.settings.save_settings()
-
-        except Exception as e:
-            logging.error(f"Error saving window settings: {e}")
-
-    def _parse_geometry(self, geometry_string: str) -> tuple:
-        """Parse tkinter geometry string into width, height, x, y"""
-        try:
-            # Format: "800x600+100+50"
-            import re
-            match = re.match(r'(\d+)x(\d+)\+(\d+)\+(\d+)', geometry_string)
-            if match:
-                return int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
-            else:
-                return 780, 760, 100, 100
-        except:
-            return 780, 760, 100, 100
+        self.window_manager.save_window_settings()
 
     def _save_ebay_alert_settings(self):
         """Save eBay alert threshold settings when they change."""
@@ -678,7 +337,7 @@ With RANSAC enabled:
             self.status_var.set(f"Loaded config: {path}")
             # Add to recent files
             self.settings.add_recent_config_file(str(Path(path)))
-            self._update_recent_menu()
+            self.menu_manager.update_recent_menu()
         except Exception as exc:
             messagebox.showerror("Error", f"Failed to load config: {exc}")
 
@@ -692,7 +351,7 @@ With RANSAC enabled:
             config_path = self._save_config_autoname(config)
             # Add to recent files
             self.settings.add_recent_config_file(str(config_path))
-            self._update_recent_menu()
+            self.menu_manager.update_recent_menu()
             self.status_var.set(f"Saved: {config_path.name}")
         except Exception as exc:
             messagebox.showerror('Error', f'Failed to save config: {exc}')
@@ -711,7 +370,7 @@ With RANSAC enabled:
             config_path = self._save_config_autoname(config)
             # Add to recent files
             self.settings.add_recent_config_file(str(config_path))
-            self._update_recent_menu()
+            self.menu_manager.update_recent_menu()
 
             # Reload the tree to ensure the new file appears
             self._load_config_tree()
@@ -875,16 +534,6 @@ With RANSAC enabled:
             return self.mandarake_tab._resolve_shop()
         return "all"
 
-    def _resolve_shop_old(self):
-        """Old method - keeping for reference during migration."""
-        for code, name in STORE_OPTIONS:
-            label = f"{name} ({code})"
-            if selection == label:
-                return code
-        # Default to shop '0' instead of searching all shops
-        resolved = selection.strip()
-        return resolved if resolved else '0'
-
     def _write_temp_config(self, config: dict) -> str:
         Path('configs').mkdir(exist_ok=True)
         temp_path = Path('configs/gui_temp.json')
@@ -990,10 +639,10 @@ With RANSAC enabled:
             self.advanced_tab.mimic_var.set(settings.get('mimic', True))  # Default to True for Unicode support
 
             # Load eBay search settings if they exist
-            if hasattr(self, 'browserless_max_results'):
+            if hasattr(self.ebay_tab, 'browserless_max_results'):
                 self.ebay_tab.browserless_max_results.set(settings.get('ebay_max_results', "10"))
-            if hasattr(self, 'browserless_max_comparisons'):
-                self.browserless_max_comparisons.set(settings.get('ebay_max_comparisons', "MAX"))
+            if hasattr(self.ebay_tab, 'browserless_max_comparisons'):
+                self.ebay_tab.browserless_max_comparisons.set(settings.get('ebay_max_comparisons', "MAX"))
 
             # Load CSV filter settings
             if hasattr(self, 'csv_in_stock_only'):
@@ -1005,55 +654,18 @@ With RANSAC enabled:
 
     def _on_listbox_sash_moved(self, event=None):
         """Track when user manually moves the sash."""
-        if hasattr(self, 'mandarake_tab'):
-            return self.mandarake_tab._on_listbox_sash_moved(event)
+        if hasattr(self, 'mandarake_tab') and hasattr(self.mandarake_tab, 'listbox_paned'):
+            self.window_manager.on_listbox_sash_moved(event, self.mandarake_tab.listbox_paned)
 
     def _restore_vertical_paned_position(self):
         """Restore the vertical paned window sash position from saved settings."""
-        if not hasattr(self, 'mandarake_tab') or not hasattr(self.mandarake_tab, 'vertical_paned'):
-            return
-        try:
-            ratio = self.gui_settings.get('vertical_paned_ratio', 0.5)  # Default 50/50 split
-            total_height = self.mandarake_tab.vertical_paned.winfo_height()
-
-            # If height is too small, the window hasn't been laid out yet - schedule retry
-            if total_height < 100:
-                print(f"[VERTICAL PANED] Height too small ({total_height}px), retrying in 200ms...")
-                self.after(200, self._restore_vertical_paned_position)
-                return
-
-            sash_pos = int(total_height * ratio)
-            self.mandarake_tab.vertical_paned.sash_place(0, 0, sash_pos)
-            self._user_vertical_sash_ratio = ratio  # Initialize user ratio to the restored value
-            print(f"[VERTICAL PANED] Restored position with ratio: {ratio:.2f} (height={total_height}px, sash={sash_pos}px)")
-        except Exception as e:
-            print(f"[VERTICAL PANED] Error restoring position: {e}")
-            import traceback
-            traceback.print_exc()
+        if hasattr(self, 'mandarake_tab') and hasattr(self.mandarake_tab, 'vertical_paned'):
+            self.window_manager.restore_paned_position(self.mandarake_tab.vertical_paned, 'vertical')
 
     def _restore_listbox_paned_position(self):
         """Restore the listbox paned window sash position from saved settings."""
-        if not hasattr(self, 'mandarake_tab') or not hasattr(self.mandarake_tab, 'listbox_paned'):
-            print(f"[LISTBOX PANED] Widget not found - skipping restore")
-            return
-        try:
-            ratio = self.gui_settings.get('listbox_paned_ratio', 0.65)  # Default 65% for categories, 35% for shops
-            total_width = self.mandarake_tab.listbox_paned.winfo_width()
-
-            # If width is too small, the window hasn't been laid out yet - schedule retry
-            if total_width < 100:
-                print(f"[LISTBOX PANED] Width too small ({total_width}px), retrying in 200ms...")
-                self.after(200, self._restore_listbox_paned_position)
-                return
-
-            sash_pos = int(total_width * ratio)
-            self.mandarake_tab.listbox_paned.sash_place(0, sash_pos, 0)
-            self._user_sash_ratio = ratio  # Initialize user ratio to the restored value
-            print(f"[LISTBOX PANED] Restored position with ratio: {ratio:.2f} (width={total_width}px, sash={sash_pos}px)")
-        except Exception as e:
-            print(f"[LISTBOX PANED] Error restoring position: {e}")
-            import traceback
-            traceback.print_exc()
+        if hasattr(self, 'mandarake_tab') and hasattr(self.mandarake_tab, 'listbox_paned'):
+            self.window_manager.restore_paned_position(self.mandarake_tab.listbox_paned, 'listbox')
 
     def _save_gui_settings(self):
         if not getattr(self, '_settings_loaded', False):
@@ -1061,23 +673,17 @@ With RANSAC enabled:
         try:
             SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-            # Save paned positions - use tracked user ratios if available
-            listbox_ratio = self.gui_settings.get('listbox_paned_ratio', 0.65)
-            if hasattr(self, '_user_sash_ratio') and self._user_sash_ratio is not None:
-                listbox_ratio = self._user_sash_ratio
-
-            vertical_ratio = self.gui_settings.get('vertical_paned_ratio', 0.5)
-            if hasattr(self, '_user_vertical_sash_ratio') and self._user_vertical_sash_ratio is not None:
-                vertical_ratio = self._user_vertical_sash_ratio
+            # Get sash ratios from window manager
+            sash_ratios = self.window_manager.get_sash_ratios()
 
             data = {
                 'mimic': bool(self.advanced_tab.mimic_var.get()),
-                'ebay_max_results': self.ebay_tab.browserless_max_results.get() if hasattr(self, 'browserless_max_results') else "10",
-                'ebay_max_comparisons': self.browserless_max_comparisons.get() if hasattr(self, 'browserless_max_comparisons') else "MAX",
-                'csv_in_stock_only': bool(self.ebay_tab.csv_in_stock_only.get()) if hasattr(self, 'csv_in_stock_only') else True,
-                'csv_add_secondary_keyword': bool(self.ebay_tab.csv_add_secondary_keyword.get()) if hasattr(self, 'csv_add_secondary_keyword') else False,
-                'listbox_paned_ratio': listbox_ratio,
-                'vertical_paned_ratio': vertical_ratio
+                'ebay_max_results': self.ebay_tab.browserless_max_results.get() if hasattr(self.ebay_tab, 'browserless_max_results') else "10",
+                'ebay_max_comparisons': self.ebay_tab.browserless_max_comparisons.get() if hasattr(self.ebay_tab, 'browserless_max_comparisons') else "MAX",
+                'csv_in_stock_only': bool(self.ebay_tab.csv_in_stock_only.get()) if hasattr(self.ebay_tab, 'csv_in_stock_only') else True,
+                'csv_add_secondary_keyword': bool(self.ebay_tab.csv_add_secondary_keyword.get()) if hasattr(self.ebay_tab, 'csv_add_secondary_keyword') else False,
+                'listbox_paned_ratio': sash_ratios['listbox_paned_ratio'],
+                'vertical_paned_ratio': sash_ratios['vertical_paned_ratio']
             }
             with SETTINGS_PATH.open('w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
@@ -1234,10 +840,6 @@ With RANSAC enabled:
         if hasattr(self, 'mandarake_tab'):
             return self.mandarake_tab._select_categories(categories)
 
-    def _get_selected_categories(self):
-        indices = self.detail_listbox.curselection()
-        return [self.detail_code_map[i] for i in indices] if indices else []
-
     def _get_recent_hours_value(self):
         label = getattr(self, 'recent_hours_var', None)
         label = label.get() if label else None
@@ -1256,90 +858,6 @@ With RANSAC enabled:
         """Load results table - delegated to MandarakeTab"""
         if hasattr(self, 'mandarake_tab'):
             self.mandarake_tab.load_results_table(csv_path)
-
-    def _toggle_thumbnails(self):
-        """Toggle thumbnail display in the results tree"""
-        show_images = self.show_images_var.get()
-
-        # Iterate through all items in the treeview
-        for item_id in self.result_tree.get_children():
-            if show_images:
-                # Show image if available
-                if item_id in self.result_images:
-                    self.result_tree.item(item_id, image=self.result_images[item_id])
-            else:
-                # Hide image by setting empty image
-                self.result_tree.item(item_id, image='')
-
-    def _on_result_double_click(self, event=None):
-        selection = self.result_tree.selection()
-        if not selection:
-            return
-        item = selection[0]
-        link = self.result_links.get(item)
-        if link:
-            webbrowser.open(link)
-
-    def _show_result_tree_menu(self, event):
-        """Show the context menu on the result tree."""
-        selection = self.result_tree.selection()
-        if selection:
-            self.result_tree_menu.post(event.x_root, event.y_root)
-
-    def _search_by_image_api(self):
-        selection = self.result_tree.selection()
-        if not selection:
-            return
-        item_id = selection[0]
-        item_data = self.result_data.get(item_id)
-        if not item_data:
-            messagebox.showerror("Error", "Could not find data for the selected item.")
-            return
-
-        local_image_path = item_data.get('local_image')
-        if not local_image_path or not Path(local_image_path).exists():
-            messagebox.showerror("Error", "Local image not found for this item. Please download images first.")
-            return
-
-        from mandarake_scraper import EbayAPI
-        # Note: eBay API credentials removed from GUI - using web scraping instead
-        ebay_api = EbayAPI("", "")
-
-        self.status_var.set("Searching by image on eBay (API)...")
-        url = ebay_api.search_by_image_api(local_image_path)
-        if url:
-            webbrowser.open(url)
-            self.status_var.set("Search by image (API) complete.")
-        else:
-            messagebox.showerror("Error", "Could not find results using eBay API. Check logs for details.")
-            self.status_var.set("Search by image (API) failed.")
-
-    def _search_by_image_web(self):
-        selection = self.result_tree.selection()
-        if not selection:
-            return
-        item_id = selection[0]
-        item_data = self.result_data.get(item_id)
-        if not item_data:
-            messagebox.showerror("Error", "Could not find data for the selected item.")
-            return
-
-        local_image_path = item_data.get('local_image')
-        if not local_image_path or not Path(local_image_path).exists():
-            messagebox.showerror("Error", "Local image not found for this item. Please download images first.")
-            return
-
-        self.status_var.set("Searching by image on eBay (Web)...")
-        self._start_thread(self._run_web_image_search, local_image_path)
-
-    def _run_web_image_search(self, image_path):
-        from ebay_image_search import run_ebay_image_search
-        url = run_ebay_image_search(image_path)
-        if "Error" not in url:
-            webbrowser.open(url)
-            self.run_queue.put(("status", "Search by image (Web) complete."))
-        else:
-            self.run_queue.put(("error", "Could not find results using web search."))
 
     # CSV tree methods
     def _show_csv_tree_menu(self, event):
@@ -1647,7 +1165,9 @@ With RANSAC enabled:
 
         if file_path:
             self.ebay_tab.browserless_image_path = Path(file_path)
-            self.browserless_image_label.config(text=f"Selected: {self.ebay_tab.browserless_image_path.name}", foreground="black")
+            # Update label in ebay_tab if it exists
+            if hasattr(self.ebay_tab, 'browserless_image_label'):
+                self.ebay_tab.browserless_image_label.config(text=f"Selected: {self.ebay_tab.browserless_image_path.name}", foreground="black")
             print(f"[BROWSERLESS SEARCH] Loaded reference image: {self.ebay_tab.browserless_image_path}")
 
     def run_scrapy_text_search(self):
@@ -1663,74 +1183,17 @@ With RANSAC enabled:
         """Run Scrapy eBay search WITH image comparison"""
         query = self.ebay_tab.browserless_query_var.get().strip()
         max_results = int(self.ebay_tab.browserless_max_results.get())
-        max_comparisons_str = self.browserless_max_comparisons.get()
+        max_comparisons_str = self.ebay_tab.browserless_max_comparisons.get() if hasattr(self.ebay_tab, 'browserless_max_comparisons') else "MAX"
         max_comparisons = None if max_comparisons_str == "MAX" else int(max_comparisons_str)
-        reference_image_path = getattr(self, 'browserless_image_path', None)
+        reference_image_path = getattr(self.ebay_tab, 'browserless_image_path', None)
         
         if self.ebay_tab.ebay_search_manager:
             self.ebay_tab.ebay_search_manager.run_search_with_compare(query, max_results, max_comparisons, reference_image_path)
 
-    def _run_scrapy_text_search_worker(self):
-        """Worker method for eBay text-only search (runs in background thread)"""
-        query = self.ebay_tab.browserless_query_var.get().strip()
-        max_results = int(self.ebay_tab.browserless_max_results.get())
-        search_method = self.advanced_tab.ebay_search_method.get()  # "scrapy" or "api"
-
-        def update_callback(message):
-            self.after(0, lambda: self.ebay_tab.browserless_status.set(message))
-
-        def display_callback(results):
-            self.after(0, lambda: self._display_browserless_results(results))
-            self.after(0, self.ebay_tab.browserless_progress.stop)
-
-        def show_message_callback(title, message):
-            # Log to status instead of popup
-            self.after(0, lambda: self.ebay_tab.browserless_status.set(message))
-            self.after(0, self.ebay_tab.browserless_progress.stop)
-
-        workers.run_scrapy_text_search_worker(
-            query, max_results,
-            update_callback,
-            display_callback,
-            show_message_callback,
-            search_method=search_method
-        )
-
-    def _run_scrapy_search_with_compare_worker(self):
-        """Worker method for Scrapy search WITH image comparison (runs in background thread)"""
-        query = self.ebay_tab.browserless_query_var.get().strip()
-        max_results = int(self.ebay_tab.browserless_max_results.get())
-        max_comparisons_str = self.browserless_max_comparisons.get()
-        max_comparisons = None if max_comparisons_str == "MAX" else int(max_comparisons_str)
-
-        def update_callback(message):
-            self.after(0, lambda: self.ebay_tab.browserless_status.set(message))
-
-        def display_callback(results):
-            self.after(0, lambda: self._display_browserless_results(results))
-            self.after(0, self.ebay_tab.browserless_progress.stop)
-
-        def show_message_callback(title, message):
-            # Log to status instead of popup
-            self.after(0, lambda: self.ebay_tab.browserless_status.set(message))
-            self.after(0, self.ebay_tab.browserless_progress.stop)
-
-        def create_debug_folder_callback(query):
-            return self._create_debug_folder(query)
-
-        workers.run_scrapy_search_with_compare_worker(
-            query, max_results, max_comparisons,
-            self.ebay_tab.browserless_image_path,
-            update_callback,
-            display_callback,
-            show_message_callback,
-            create_debug_folder_callback
-        )
-
     def _run_cached_compare_worker(self):
         """Worker method to compare reference image with CACHED eBay results (State 1)"""
         query = self.ebay_tab.browserless_query_var.get().strip()
-        max_comparisons_str = self.browserless_max_comparisons.get()
+        max_comparisons_str = self.ebay_tab.browserless_max_comparisons.get() if hasattr(self.ebay_tab, 'browserless_max_comparisons') else "MAX"
         max_comparisons = None if max_comparisons_str == "MAX" else int(max_comparisons_str)
 
         def update_callback(message):
@@ -1764,47 +1227,10 @@ With RANSAC enabled:
 
     # CSV Batch Comparison methods
     def _load_csv_worker(self, csv_path: Path, autofill_from_config=None):
-        """
-        Modular worker to load CSV data into comparison tree.
-
-        Args:
-            csv_path: Path to CSV file
-            autofill_from_config: Optional config dict to autofill eBay query from config keyword
-                                 and set in-stock filter
-        """
-        try:
-            self.ebay_tab.csv_compare_path = csv_path
-            self.ebay_tab.csv_compare_label.config(text=f"Loaded: {csv_path.name}", foreground="black")
-            print(f"[CSV WORKER] Loading CSV: {csv_path}")
-
-            # Load CSV data
-            self.ebay_tab.csv_compare_data = []
-            with open(csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    self.ebay_tab.csv_compare_data.append(row)
-
-            # Set in-stock filter from config if provided
-            if autofill_from_config:
-                show_in_stock_only = autofill_from_config.get('csv_show_in_stock_only', False)
-                self.ebay_tab.csv_in_stock_only.set(show_in_stock_only)
-                print(f"[CSV WORKER] Set in-stock filter to: {show_in_stock_only}")
-
-            # Display with filter applied
-            self.filter_csv_items()
-
-            # Auto-fill eBay search query
-            if autofill_from_config:
-                self._autofill_search_query_from_config(autofill_from_config)
-            else:
-                self._autofill_search_query_from_csv()
-
-            print(f"[CSV WORKER] Loaded {len(self.ebay_tab.csv_compare_data)} items")
-            return True
-
-        except Exception as e:
-            print(f"[CSV WORKER ERROR] {e}")
-            return False
+        """Load CSV worker - delegated to CSVComparisonManager (duplicate removed)"""
+        if self.ebay_tab.csv_comparison_manager:
+            return self.ebay_tab.csv_comparison_manager.load_csv_worker(csv_path, autofill_from_config)
+        return False
 
     def load_csv_for_comparison(self):
         """Load CSV file for batch comparison"""
@@ -1852,42 +1278,6 @@ With RANSAC enabled:
         if self.ebay_tab.csv_comparison_manager:
             self.ebay_tab.csv_comparison_manager.toggle_csv_thumbnails()
 
-    def _load_publisher_list(self):
-        """Load publisher list from file"""
-        publisher_file = Path('publishers.txt')
-        publishers = set()
-
-        # Default publishers
-        default_publishers = [
-            'Takeshobo', 'S-Digital', 'G-WALK', 'Cosplay Fetish Book',
-            'First', '1st', '2nd', '3rd', 'Book'
-        ]
-        publishers.update(default_publishers)
-
-        # Load from file if exists
-        if publisher_file.exists():
-            try:
-                with open(publisher_file, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        pub = line.strip()
-                        if pub:
-                            publishers.add(pub)
-                print(f"[PUBLISHERS] Loaded {len(publishers)} publishers from file")
-            except Exception as e:
-                print(f"[PUBLISHERS] Error loading file: {e}")
-
-        return publishers
-
-    def _save_publisher_list(self):
-        """Save publisher list to file"""
-        try:
-            publisher_file = Path('publishers.txt')
-            with open(publisher_file, 'w', encoding='utf-8') as f:
-                for pub in sorted(self.publisher_list):
-                    f.write(f"{pub}\n")
-            print(f"[PUBLISHERS] Saved {len(self.publisher_list)} publishers to file")
-        except Exception as e:
-            print(f"[PUBLISHERS] Error saving file: {e}")
 
     def _show_keyword_menu(self, event):
         """Show context menu on keyword entry"""
@@ -2031,42 +1421,9 @@ With RANSAC enabled:
             self.ebay_tab.csv_comparison_manager.display_csv_comparison_results(results)
 
     def open_browserless_url(self, event):
-        """Open eBay or Mandarake URL based on which column is double-clicked"""
-        selection = self.ebay_tab.browserless_tree.selection()
-        if not selection:
-            return
-
-        item_id = selection[0]
-
-        # Identify which column was clicked
-        column = self.ebay_tab.browserless_tree.identify_column(event.x)
-        # Column format is '#0', '#1', '#2', etc. where #0 is thumbnail, #1 is first data column
-
-        try:
-            index = int(item_id) - 1
-            if 0 <= index < len(self.ebay_tab.browserless_results_data):
-                result = self.ebay_tab.browserless_results_data[index]
-
-                # Determine which URL to open based on column
-                # Columns: title(#1), price(#2), shipping(#3), mandarake_price(#4), profit_margin(#5),
-                #          sold_date(#6), similarity(#7), url(#8), mandarake_url(#9)
-                if column == '#9':  # Mandarake URL column
-                    url = result.get('mandarake_url', '')
-                    url_type = "Mandarake"
-                else:  # Default to eBay URL for all other columns
-                    url = result.get('url', '')
-                    url_type = "eBay"
-
-                if url and not any(x in url for x in ["No URL available", "Placeholder URL", "Invalid URL", "URL Error"]):
-                    print(f"[BROWSERLESS SEARCH] Opening {url_type} URL: {url}")
-                    webbrowser.open(url)
-                else:
-                    print(f"[BROWSERLESS SEARCH] Cannot open {url_type} URL: {url}")
-            else:
-                print(f"[URL DEBUG] Index {index} out of range (data length: {len(self.ebay_tab.browserless_results_data)})")
-        except (ValueError, IndexError) as e:
-            print(f"[BROWSERLESS SEARCH] Error opening URL: {e}")
-            pass
+        """Open URL - delegated to EbaySearchManager"""
+        if self.ebay_tab.ebay_search_manager:
+            self.ebay_tab.ebay_search_manager.open_browserless_url(event)
 
     def _show_browserless_context_menu(self, event):
         """Show context menu for eBay results treeview"""
@@ -2089,43 +1446,9 @@ With RANSAC enabled:
             menu.post(event.x_root, event.y_root)
 
     def _send_browserless_to_review(self):
-        """Send selected eBay result to Review/Alerts tab"""
-        selection = self.ebay_tab.browserless_tree.selection()
-        if not selection:
-            self.ebay_tab.browserless_status.set("No item selected")
-            return
-
-        item_id = selection[0]
-        try:
-            index = int(item_id) - 1
-            if 0 <= index < len(self.ebay_tab.browserless_results_data):
-                result = self.ebay_tab.browserless_results_data[index]
-
-                # Check if this is a comparison result (has similarity/profit data)
-                if 'similarity' in result or 'profit_margin' in result:
-                    # Find the corresponding item in all_comparison_results
-                    matching_result = None
-                    for comp_result in getattr(self, 'all_comparison_results', []):
-                        if comp_result.get('ebay_link') == result.get('url'):
-                            matching_result = comp_result
-                            break
-
-                    if matching_result:
-                        # Send to alerts using existing method
-                        self.alert_tab.add_filtered_alerts([matching_result])
-                        # Explicitly refresh the alert tab to ensure it displays the new item
-                        self.alert_tab._load_alerts()
-                        self.ebay_tab.browserless_status.set(f"Sent '{result['title'][:50]}...' to Review/Alerts")
-                        print(f"[SEND TO REVIEW] Added item to alerts: {result['title']}")
-                    else:
-                        self.ebay_tab.browserless_status.set("Could not find comparison data for this item")
-                else:
-                    # This is a raw eBay search result without comparison data
-                    self.ebay_tab.browserless_status.set("Item has no comparison data - use 'Compare Selected' first")
-                    print("[SEND TO REVIEW] Item has no comparison data")
-        except (ValueError, IndexError) as e:
-            print(f"[SEND TO REVIEW] Error: {e}")
-            self.ebay_tab.browserless_status.set(f"Error sending to review: {e}")
+        """Send to review - delegated to EbaySearchManager"""
+        if self.ebay_tab.ebay_search_manager:
+            self.ebay_tab.ebay_search_manager.send_browserless_to_review(self.alert_tab)
 
     def _display_browserless_results(self, results):
         """Display browserless search results - delegated to EbaySearchManager"""

@@ -636,3 +636,90 @@ class EbaySearchManager:
         results.sort(key=lambda x: x['profit_margin'], reverse=True)
 
         return results[:5]  # Return top 5 scenarios
+
+    def send_browserless_to_review(self, alert_tab) -> None:
+        """Send selected eBay result to Review/Alerts tab.
+
+        Args:
+            alert_tab: AlertTab instance to send results to
+        """
+        selection = self.tree.selection()
+        if not selection:
+            self.status.set("No item selected")
+            return
+
+        item_id = selection[0]
+        try:
+            index = int(item_id) - 1
+            if 0 <= index < len(self.results_data):
+                result = self.results_data[index]
+
+                # Check if this is a comparison result (has similarity/profit data)
+                if 'similarity' in result or 'profit_margin' in result:
+                    # Find the corresponding item in all_comparison_results
+                    matching_result = None
+                    for comp_result in getattr(self.main, 'all_comparison_results', []):
+                        if comp_result.get('ebay_link') == result.get('url'):
+                            matching_result = comp_result
+                            break
+
+                    if matching_result:
+                        # Send to alerts using existing method
+                        alert_tab.add_filtered_alerts([matching_result])
+                        # Explicitly refresh the alert tab to ensure it displays the new item
+                        alert_tab._load_alerts()
+                        self.status.set(f"Sent '{result['title'][:50]}...' to Review/Alerts")
+                        print(f"[SEND TO REVIEW] Added item to alerts: {result['title']}")
+                    else:
+                        self.status.set("Could not find comparison data for this item")
+                else:
+                    # This is a raw eBay search result without comparison data
+                    self.status.set("Item has no comparison data - use 'Compare Selected' first")
+                    print("[SEND TO REVIEW] Item has no comparison data")
+        except (ValueError, IndexError) as e:
+            print(f"[SEND TO REVIEW] Error: {e}")
+            self.status.set(f"Error sending to review: {e}")
+
+    def open_browserless_url(self, event) -> None:
+        """Open eBay or Mandarake URL based on which column is double-clicked.
+
+        Args:
+            event: Mouse event with x, y coordinates
+        """
+        import webbrowser
+
+        selection = self.tree.selection()
+        if not selection:
+            return
+
+        item_id = selection[0]
+
+        # Identify which column was clicked
+        column = self.tree.identify_column(event.x)
+        # Column format is '#0', '#1', '#2', etc. where #0 is thumbnail, #1 is first data column
+
+        try:
+            index = int(item_id) - 1
+            if 0 <= index < len(self.results_data):
+                result = self.results_data[index]
+
+                # Determine which URL to open based on column
+                # Columns: title(#1), price(#2), shipping(#3), mandarake_price(#4), profit_margin(#5),
+                #          sold_date(#6), similarity(#7), url(#8), mandarake_url(#9)
+                if column == '#9':  # Mandarake URL column
+                    url = result.get('mandarake_url', '')
+                    url_type = "Mandarake"
+                else:  # Default to eBay URL for all other columns
+                    url = result.get('url', '')
+                    url_type = "eBay"
+
+                if url and not any(x in url for x in ["No URL available", "Placeholder URL", "Invalid URL", "URL Error"]):
+                    print(f"[BROWSERLESS SEARCH] Opening {url_type} URL: {url}")
+                    webbrowser.open(url)
+                else:
+                    print(f"[BROWSERLESS SEARCH] Cannot open {url_type} URL: {url}")
+            else:
+                print(f"[URL DEBUG] Index {index} out of range (data length: {len(self.results_data)})")
+        except (ValueError, IndexError) as e:
+            print(f"[BROWSERLESS SEARCH] Error opening URL: {e}")
+            pass

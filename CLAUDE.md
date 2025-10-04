@@ -53,10 +53,12 @@ python test_scrapy_ebay.py
 - Integrates with eBay API for price enrichment
 - Exports to CSV and Google Sheets
 
-**GUI Application (`gui_config.py`)**
-- 4000+ line monolithic GUI (refactoring into `gui/` directory in progress)
-- Manages configs, runs scraper, displays results
-- Integrates eBay search, CSV comparison, and alert workflow
+**GUI Application (`gui_config.py`)** - **MODULARIZED ARCHITECTURE**
+- **1473 lines** (down from 4000+, 63% reduction)
+- Main application orchestrator - delegates to modules
+- Initializes managers and tabs
+- Handles queue polling and thread management
+- **IMPORTANT**: Minimal business logic (delegated to modules in `gui/`)
 
 **Browser Mimic (`browser_mimic.py`)**
 - Mimics real browser behavior to avoid bot detection
@@ -74,16 +76,34 @@ python test_scrapy_ebay.py
 
 ### Modular GUI Components (`gui/` directory)
 
-**Alert System** (Review/Alerts tab):
-- `gui/alert_states.py` - State machine (Pending → Yay → Purchased → ... → Sold)
-- `gui/alert_storage.py` - JSON persistence (`alerts.json`)
-- `gui/alert_manager.py` - Business logic, threshold filtering
-- `gui/alert_tab.py` - UI component with treeview, bulk actions
+**⚠️ CRITICAL: The GUI is now fully modularized. DO NOT add functions to `gui_config.py` that belong in modules.**
 
-**Shared Utilities**:
-- `gui/utils.py` - Config filename generation, CSV matching, exchange rates
-- `gui/constants.py` - Store/category mappings, keywords
-- `gui/workers.py` - Background thread workers for scraping, image analysis, CSV comparison
+#### Tab Modules (UI Components)
+- **`gui/mandarake_tab.py`** - Mandarake store/category/config UI, results display
+- **`gui/ebay_tab.py`** - eBay search interface, CSV comparison view
+- **`gui/advanced_tab.py`** - Advanced settings, marketplace toggles
+- **`gui/alert_tab.py`** - Review/Alerts workflow UI
+
+#### Manager Classes (Business Logic)
+- **`gui/configuration_manager.py`** - Config creation, loading, population
+- **`gui/tree_manager.py`** - Treeview operations, drag-to-reorder
+- **`gui/config_tree_manager.py`** - Config tree specific operations
+- **`gui/window_manager.py`** - Window geometry, paned positions
+- **`gui/menu_manager.py`** - Menu bar, recent files, dialogs
+- **`gui/ebay_search_manager.py`** - eBay search, image comparison
+- **`gui/csv_comparison_manager.py`** - CSV loading, filtering, comparison
+- **`gui/alert_manager.py`** - Alert business logic, threshold filtering
+- **`gui/surugaya_manager.py`** - Suruga-ya scraping operations
+- **`gui/schedule_executor.py`** - Background scheduling thread
+
+#### Support Modules
+- **`gui/workers.py`** - Background thread workers for scraping, image analysis, CSV comparison
+- **`gui/utils.py`** - Utility functions (slugify, image comparison, exchange rates, etc.)
+- **`gui/constants.py`** - Shared constants (store/category mappings, keywords)
+- **`gui/alert_storage.py`** - Alert persistence (JSON)
+- **`gui/alert_states.py`** - State machine definitions
+- **`gui/ui_helpers.py`** - Dialog helpers, help screens
+- **`gui/schedule_frame.py`** - Schedule UI component
 
 ### Configuration System
 
@@ -148,7 +168,7 @@ Located in CSV comparison button row:
 
 ### Publisher List Management
 Right-click keyword field → "Add Selected Text to Publisher List"
-- Publishers stored in `user_settings.json` under `publisher_list`
+- Publishers stored in `publishers.txt`
 - Used to extract secondary keywords by removing publisher names from titles
 
 ### Thread Safety
@@ -157,17 +177,77 @@ Right-click keyword field → "Add Selected Text to Publisher List"
 - Progress bars and status updates communicate via queues
 
 ### Settings Persistence
-- **Global settings**: `user_settings.json` (window size, recent files, publisher list)
+- **Global settings**: `user_settings.json` (window size, recent files, etc.)
 - **Alert data**: `alerts.json` (workflow state, timestamps)
 - **Config order**: `configs/.config_order.json` (drag-to-reorder persistence)
 
 ## Code Style and Patterns
 
+### 🚨 CRITICAL: Modularization Rules
+
+#### 1. **NEVER add functions to `gui_config.py` that belong in modules**
+```python
+# ❌ BAD - Adding business logic to gui_config.py
+def search_ebay(self, query):
+    # Search logic here...
+    pass
+
+# ✅ GOOD - Create/use a manager module
+# In gui/ebay_search_manager.py
+class EbaySearchManager:
+    def search_ebay(self, query):
+        # Search logic here...
+        pass
+
+# In gui_config.py - just delegate
+def search_ebay(self, query):
+    if self.ebay_tab.ebay_search_manager:
+        return self.ebay_tab.ebay_search_manager.search_ebay(query)
+```
+
+#### 2. **When to Create a New Module**
+Create a new module in `gui/` when:
+- Adding a new feature with multiple methods
+- Logic spans 50+ lines
+- Functionality is self-contained
+- Multiple files would benefit from the functionality
+
+#### 3. **Module Responsibilities**
+- **`gui_config.py`**: Orchestration, initialization, queue polling, thread management
+- **Tab modules (`*_tab.py`)**: UI layout, widget creation, event binding
+- **Manager modules (`*_manager.py`)**: Business logic, data processing, API calls
+- **`gui/workers.py`**: Background thread operations
+- **`gui/utils.py`**: Pure utility functions (no UI, no state)
+
 ### When Adding GUI Features
-1. **Create separate module in `gui/`** - Don't add to monolithic `gui_config.py`
-2. **Use worker functions** - Add to `gui/workers.py` for background operations
-3. **Import and integrate** - Add minimal integration code to `gui_config.py`
-4. Example: Alert tab is 4 separate files in `gui/`, only 10 lines of integration in main GUI
+
+**Step 1: Choose the right location**
+```python
+# Is it UI layout? → *_tab.py
+# Is it business logic? → *_manager.py
+# Is it a background operation? → workers.py
+# Is it a pure utility function? → utils.py
+# Is it a constant? → constants.py
+```
+
+**Step 2: Create/update the appropriate module**
+```python
+# Example: Adding eBay search feature
+# 1. Create logic in gui/ebay_search_manager.py
+# 2. Create UI in gui/ebay_tab.py
+# 3. Add worker if needed in gui/workers.py
+# 4. Import and integrate in gui_config.py (minimal code)
+```
+
+**Step 3: Integration in `gui_config.py`**
+```python
+# Initialize manager in __init__
+self.ebay_manager = EbaySearchManager(...)
+
+# Delegate in methods (if needed)
+def some_action(self):
+    return self.ebay_manager.perform_action()
+```
 
 ### State Management Pattern
 ```python
@@ -187,6 +267,62 @@ All field changes trigger `self._auto_save_config()` via trace callbacks:
 self.keyword_var.trace_add("write", self._auto_save_config)
 ```
 
+### Best Practices from Refactoring
+
+1. **Thread Safety**: Always use `self.after()` for UI updates from threads
+2. **Queue Communication**: Workers use `run_queue.put()` for status updates
+3. **Manager Delegation**: `gui_config.py` delegates to managers, never implements inline
+4. **State Flags**: Use `_loading_config`, `_settings_loaded` to prevent recursive updates
+5. **Separation of Concerns**: UI in tabs, logic in managers, background ops in workers
+
+### File Size Guidelines
+- **Target**: ≤500 lines per file (sweet spot for AI + human readability)
+- **Utility modules**: ≤200 lines
+- **Tab/Manager modules**: ≤800 lines (split if larger)
+- **`gui_config.py`**: Keep minimal, delegate everything
+
+## Documentation Standards
+
+### 📝 CRITICAL: Update Documentation When Creating New Files
+
+**When you create a new `.md` documentation file**, you MUST update `PROJECT_DOCUMENTATION_INDEX.md`:
+
+1. **Add the file to the appropriate section**:
+   - Essential Documentation
+   - Architecture & Implementation
+   - Feature Documentation
+   - API & Integration
+   - etc.
+
+2. **Include a brief description** of what the document contains
+
+3. **Update the file count** at the bottom of the index
+
+4. **Link to related documentation** if applicable
+
+**Example**:
+```markdown
+### Feature Documentation
+- **[NEW_FEATURE.md](NEW_FEATURE.md)** - Description of new feature
+  - Implementation details
+  - Usage examples
+  - Related modules
+```
+
+### Documentation File Naming
+- `FEATURE_COMPLETE.md` - Feature documentation
+- `COMPONENT_COMPLETE.md` - Component documentation
+- `*_GUIDE.md` - User guides and tutorials
+- `*_PLAN.md` - Planning documents (archive when complete)
+
+### Documentation Standards
+Each markdown file should include:
+- Clear title and overview
+- Implementation details (for technical docs)
+- Usage examples (for guides)
+- Testing results (if applicable)
+- Related documentation links
+
 ## Known Issues and Workarounds
 
 **Mandarake 403 Errors**: Anti-bot protection may block requests. Use browser mimic mode (`use_mimic=True`) or reduce request rate.
@@ -194,8 +330,6 @@ self.keyword_var.trace_add("write", self._auto_save_config)
 **eBay Access Blocked**: eBay blocks automated browsing. Wait 2-5 minutes between searches. Scrapy-based search is more reliable than Playwright.
 
 **Japanese Text Encoding**: Config filenames use MD5 hash for non-ASCII characters. Original keyword stored in JSON.
-
-**Malformed Configs**: `_load_config_tree()` skips configs that aren't dictionaries (line 2316).
 
 **Image Comparison Accuracy**: Template matching works best for exact matches. RANSAC helps with perspective changes. Watermarks can reduce accuracy.
 
@@ -209,7 +343,19 @@ Run individual test files to verify components:
 
 ## References
 
+### Core Documentation
+- `GUI_MODULARIZATION_COMPLETE.md` - **Complete modularization documentation**
+- `PROJECT_DOCUMENTATION_INDEX.md` - **Comprehensive documentation index**
 - `MANDARAKE_CODES.md` - Complete store and category code mappings
 - `ALERT_TAB_COMPLETE.md` - Alert system documentation
 - `EBAY_IMAGE_COMPARISON_GUIDE.md` - Image matching algorithms
 - `README.md` - User-facing setup and usage guide
+
+### Quick Reference
+See `PROJECT_DOCUMENTATION_INDEX.md` for a complete list of all documentation files organized by category.
+
+---
+
+**Last Updated**: October 4, 2025
+**Architecture Status**: ✅ Fully Modularized (20+ modules, 63% code reduction)
+**Documentation Status**: ✅ Consolidated and Current
