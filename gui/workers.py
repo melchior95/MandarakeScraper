@@ -577,19 +577,8 @@ def run_ebay_image_comparison_worker(image_path: Path, search_term: str, days_ba
             # Update status to show where images were saved
             if debug_dir.exists():
                 image_count = len([f for f in debug_dir.iterdir() if f.suffix == '.jpg'])
-                update_callback(f"Analysis complete! {image_count} images saved to: {debug_dir}", 50)
-
-                # Show popup to make debug location obvious
-                show_message_callback(
-                    "Images Saved",
-                    f"Comparison images have been saved!\n\n"
-                    f"Location: {debug_dir.absolute()}\n\n"
-                    f"Files saved:\n"
-                    f"• Your reference image\n"
-                    f"• listing_01.jpg to listing_{image_count:02d}.jpg (eBay images)\n\n"
-                    f"Images were saved immediately as they were found!\n"
-                    f"You can inspect these images to see what was compared."
-                )
+                update_callback(f"Analysis complete! {image_count} comparison images saved to: {debug_dir}", 50)
+                print(f"[IMAGE COMPARISON] Saved {image_count} images to: {debug_dir.absolute()}")
         finally:
             # Handle cleanup for both sync and async versions
             if show_browser:
@@ -625,17 +614,8 @@ def run_ebay_image_comparison_worker(image_path: Path, search_term: str, days_ba
 
         # Provide user-friendly error messages
         if "timeout" in error_message.lower() or "navigation" in error_message.lower():
-            update_callback("eBay blocked request - this is normal. Try again in a few minutes.", 0)
+            update_callback("eBay blocked request - Wait 2-5 minutes before trying again", 0)
             print("[EBAY IMAGE COMPARISON] eBay blocking detected:", str(e))
-            show_message_callback(
-                "eBay Access Temporarily Blocked",
-                "eBay has temporarily blocked automated access. This is normal behavior.\n\n"
-                "Solutions:\n"
-                "• Wait 2-5 minutes and try again\n"
-                "• Try a different search term\n"
-                "• Check your internet connection\n\n"
-                "eBay actively blocks automated browsing to protect their servers."
-            )
         else:
             update_callback(f"eBay image comparison failed: {error_message}", 0)
             print("[EBAY IMAGE COMPARISON] Error:", str(e))
@@ -765,7 +745,7 @@ def run_scrapy_text_search_worker(query: str, max_results: int, update_callback,
             )
 
             if not api_results:
-                show_message_callback("No Results", "No eBay active listings found")
+                update_callback("No eBay active listings found")
                 return
 
             print(f"[eBay API] Found {len(api_results)} results")
@@ -802,7 +782,7 @@ def run_scrapy_text_search_worker(query: str, max_results: int, update_callback,
             )
 
             if not scrapy_results:
-                show_message_callback("No Results", "No eBay sold listings found")
+                update_callback("No eBay sold listings found")
                 return
 
             print(f"[SCRAPY SEARCH] Found {len(scrapy_results)} results")
@@ -862,7 +842,7 @@ def run_scrapy_search_with_compare_worker(query: str, max_results: int, max_comp
         )
 
         if not scrapy_results:
-            show_message_callback("No Results", "No eBay listings found")
+            update_callback("No eBay listings found")
             return
 
         print(f"[SCRAPY COMPARE] Found {len(scrapy_results)} results, comparing images...")
@@ -1033,15 +1013,24 @@ def load_csv_thumbnails_worker(filtered_items: List[Dict], csv_new_items: set,
     print(f"[CSV THUMBNAILS] Loading thumbnails for {len(filtered_items)} items (size: {thumb_width}px)...")
 
     # Calculate thumbnail size with padding (leave some margin)
+    # Use square size to prevent horizontal images from overlapping text
     thumb_size = max(20, thumb_width - 10)
 
     # Track if we downloaded any new images
     downloaded_any = False
 
+    # Batch download images that need downloading
+    import requests
+    from io import BytesIO
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # First pass: load local images and identify URLs to download
+    images_to_download = []  # (index, row, image_url)
+    local_images = {}  # index -> pil_img
+
     for i, row in enumerate(filtered_items):
-        local_image_path = row.get('local_image', '')
-        image_url = row.get('image_url', '')
-        pil_img = None
+        local_image_path = row.get('local_image', '').strip()
+        image_url = row.get('image_url', '').strip()
 
         # Try local image first (fast)
         if local_image_path and Path(local_image_path).exists():
@@ -1049,27 +1038,56 @@ def load_csv_thumbnails_worker(filtered_items: List[Dict], csv_new_items: set,
                 pil_img = Image.open(local_image_path)
                 pil_img.thumbnail((thumb_size, thumb_size), Image.Resampling.LANCZOS)
 
+                # Center image on square background to prevent horizontal images from overlapping
+                square_img = Image.new('RGB', (thumb_size, thumb_size), 'white')
+                offset_x = (thumb_size - pil_img.width) // 2
+                offset_y = (thumb_size - pil_img.height) // 2
+                square_img.paste(pil_img, (offset_x, offset_y))
+                pil_img = square_img
+
                 # Add light blue border if item is NEW
                 item_id = str(i)
                 if item_id in csv_new_items:
-                    pil_img = ImageOps.expand(pil_img, border=3, fill='#87CEEB')  # Light blue border
+                    pil_img = ImageOps.expand(pil_img, border=3, fill='#87CEEB')
 
+                local_images[i] = pil_img
             except Exception as e:
                 print(f"[CSV THUMBNAILS] Failed to load local thumbnail {i+1}: {e}")
+                # Add to download queue if local load failed
+                if image_url and csv_path:
+                    images_to_download.append((i, row, image_url))
+        elif image_url and csv_path:
+            # No local image, need to download
+            images_to_download.append((i, row, image_url))
 
-        # If no local image, try downloading from URL and save to disk
-        if not pil_img and image_url and csv_path:
+    # Download images in parallel using Session (like browsers do)
+    if images_to_download:
+        print(f"[CSV THUMBNAILS] Downloading {len(images_to_download)} thumbnails in parallel...")
+
+        csv_path_obj = Path(csv_path)
+        images_dir = Path('images') / csv_path_obj.stem
+        images_dir.mkdir(parents=True, exist_ok=True)
+
+        downloaded_images = {}  # index -> pil_img
+        csv_updates = []  # List of (img_path, index) to update CSV once at the end
+
+        # Create a shared Session with connection pooling (like browsers)
+        session = requests.Session()
+        # Configure connection pool size to match our thread count
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=20,
+            pool_maxsize=20,
+            max_retries=2
+        )
+        session.mount('http://', adapter)
+        session.mount('https://', adapter)
+
+        def download_image(args):
+            i, row, image_url = args
             try:
-                import requests
-                from io import BytesIO
-
-                response = requests.get(image_url, timeout=5)
+                # Use session for connection pooling and keep-alive
+                response = session.get(image_url, timeout=10)
                 if response.status_code == 200:
-                    # Create images directory based on CSV filename
-                    csv_path_obj = Path(csv_path)
-                    images_dir = Path('images') / csv_path_obj.stem
-                    images_dir.mkdir(parents=True, exist_ok=True)
-
                     # Save image to disk
                     img_filename = f"thumb_product_{i:04d}.jpg"
                     img_path = images_dir / img_filename
@@ -1081,34 +1099,65 @@ def load_csv_thumbnails_worker(filtered_items: List[Dict], csv_new_items: set,
                     pil_img = Image.open(BytesIO(response.content))
                     pil_img.thumbnail((thumb_size, thumb_size), Image.Resampling.LANCZOS)
 
+                    # Center image on square background to prevent horizontal images from overlapping
+                    square_img = Image.new('RGB', (thumb_size, thumb_size), 'white')
+                    offset_x = (thumb_size - pil_img.width) // 2
+                    offset_y = (thumb_size - pil_img.height) // 2
+                    square_img.paste(pil_img, (offset_x, offset_y))
+                    pil_img = square_img
+
                     # Add light blue border if item is NEW
                     item_id = str(i)
                     if item_id in csv_new_items:
-                        pil_img = ImageOps.expand(pil_img, border=3, fill='#87CEEB')  # Light blue border
+                        pil_img = ImageOps.expand(pil_img, border=3, fill='#87CEEB')
 
-                    # Update the row data with local image path
+                    # Update the row data
                     row['local_image'] = str(img_path)
+
+                    return (i, pil_img, str(img_path))
+            except Exception as e:
+                print(f"[CSV THUMBNAILS] Failed to download {i+1} from {image_url}: {e}")
+            return (i, None, None)
+
+        # Download in parallel with max 20 workers (browsers use 6-20 connections per domain)
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            futures = {executor.submit(download_image, args): args for args in images_to_download}
+
+            completed = 0
+            for future in as_completed(futures):
+                i, pil_img, img_path = future.result()
+                if pil_img:
+                    downloaded_images[i] = pil_img
+                    if img_path:
+                        csv_updates.append((img_path, i))
                     downloaded_any = True
 
-                    # Notify main thread to update CSV file
-                    if save_to_csv_callback:
-                        save_to_csv_callback(str(img_path), i)
+                completed += 1
+                if completed % 20 == 0 or completed == len(images_to_download):
+                    print(f"[CSV THUMBNAILS] Downloaded {completed}/{len(images_to_download)} thumbnails")
 
-                    print(f"[CSV THUMBNAILS] Downloaded and saved thumbnail {i+1}/{len(filtered_items)}")
+        # Close the session
+        session.close()
 
-            except Exception as e:
-                print(f"[CSV THUMBNAILS] Failed to download thumbnail {i+1} from {image_url}: {e}")
+        # Update CSV once with all changes
+        if csv_updates and save_to_csv_callback:
+            print(f"[CSV THUMBNAILS] Updating CSV with {len(csv_updates)} downloaded images...")
+            for img_path, i in csv_updates:
+                save_to_csv_callback(img_path, i)
 
-        # Update treeview with PIL image (PhotoImage will be created in main thread)
-        if pil_img:
-            update_image_callback(str(i), pil_img)
+        # Merge downloaded images with local images
+        local_images.update(downloaded_images)
+
+    # Update treeview with all images
+    for i, pil_img in local_images.items():
+        update_image_callback(str(i), pil_img)
 
     print(f"[CSV THUMBNAILS] Finished loading thumbnails (downloaded: {downloaded_any})")
 
 
 def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results: Optional[List[Dict]],
                              search_query: str, usd_jpy_rate: float, update_callback,
-                             display_callback, show_message_callback) -> List[Dict]:
+                             display_callback, show_message_callback, ebay_display_callback=None) -> List[Dict]:
     """
     Worker to compare CSV items with eBay - OPTIMIZED with caching.
 
@@ -1154,7 +1203,7 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
                 search_query = f"{core_words} {category_keyword}".strip()
 
             if not search_query:
-                show_message_callback("Error", "Could not build search query")
+                update_callback("Error: Could not build search query")
                 return []
 
             print(f"[CSV BATCH] Using search query: '{search_query}'")
@@ -1171,10 +1220,14 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
             )
 
             if not ebay_results:
-                show_message_callback("No Results", "No eBay listings found")
+                update_callback("No eBay listings found")
                 return []
 
             print(f"[CSV BATCH] Found {len(ebay_results)} eBay listings")
+
+            # Display eBay results immediately if callback provided
+            if ebay_display_callback:
+                ebay_display_callback(ebay_results)
 
         update_callback(f"Downloading and caching {len(ebay_results)} eBay images...")
 
@@ -1302,6 +1355,7 @@ def compare_csv_items_worker(items: List[Dict], max_results: int, cached_results
 
                     comparison_results.append({
                         'thumbnail': ebay_item.get('main_image') or ebay_item.get('image_url', ''),
+                        'mandarake_thumbnail': item.get('image_url', ''),
                         'ebay_title': ebay_item.get('product_title') or ebay_item.get('title', 'N/A'),
                         'mandarake_title': item.get('title', 'N/A'),
                         'mandarake_price': f"¥{mandarake_price:,.0f}",
