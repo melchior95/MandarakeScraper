@@ -6,7 +6,6 @@ States:
 - yay: User marked as interesting/worth buying
 - nay: User rejected
 - purchased: Item has been purchased
-- shipped: Item has been shipped
 - received: Item has been received
 - posted: Item has been posted to eBay
 - sold: Item has been sold on eBay
@@ -22,7 +21,6 @@ class AlertState(Enum):
     YAY = "yay"
     NAY = "nay"
     PURCHASED = "purchased"
-    SHIPPED = "shipped"
     RECEIVED = "received"
     POSTED = "posted"
     SOLD = "sold"
@@ -36,8 +34,7 @@ class AlertStateTransition:
         AlertState.PENDING: [AlertState.YAY, AlertState.NAY],
         AlertState.YAY: [AlertState.PURCHASED, AlertState.NAY],
         AlertState.NAY: [AlertState.YAY],  # Can reconsider
-        AlertState.PURCHASED: [AlertState.SHIPPED],
-        AlertState.SHIPPED: [AlertState.RECEIVED],
+        AlertState.PURCHASED: [AlertState.RECEIVED],
         AlertState.RECEIVED: [AlertState.POSTED],
         AlertState.POSTED: [AlertState.SOLD],
         AlertState.SOLD: []  # Terminal state
@@ -75,12 +72,8 @@ class AlertBulkActions:
         if all(s == AlertState.YAY for s in states):
             actions.append("Mark as Purchased")
 
-        # If all selected are PURCHASED, can bulk ship
+        # If all selected are PURCHASED, can bulk receive
         if all(s == AlertState.PURCHASED for s in states):
-            actions.append("Mark as Shipped")
-
-        # If all selected are SHIPPED, can bulk receive
-        if all(s == AlertState.SHIPPED for s in states):
             actions.append("Mark as Received")
 
         # If all selected are RECEIVED, can bulk post
@@ -104,7 +97,6 @@ class AlertBulkActions:
         """Map action name to target state."""
         action_map = {
             "Mark as Purchased": AlertState.PURCHASED,
-            "Mark as Shipped": AlertState.SHIPPED,
             "Mark as Received": AlertState.RECEIVED,
             "Mark as Posted to eBay": AlertState.POSTED,
             "Mark as Sold": AlertState.SOLD,
@@ -121,7 +113,6 @@ def get_state_color(state: AlertState) -> str:
         AlertState.YAY: "#90EE90",      # Light green
         AlertState.NAY: "#FFB6C1",      # Light red
         AlertState.PURCHASED: "#87CEEB", # Sky blue
-        AlertState.SHIPPED: "#DDA0DD",   # Plum
         AlertState.RECEIVED: "#F0E68C",  # Khaki
         AlertState.POSTED: "#FFD700",    # Gold
         AlertState.SOLD: "#32CD32"       # Lime green
@@ -136,7 +127,6 @@ def get_state_display_name(state: AlertState) -> str:
         AlertState.YAY: "✓ Yay",
         AlertState.NAY: "✗ Nay",
         AlertState.PURCHASED: "Purchased",
-        AlertState.SHIPPED: "Shipped",
         AlertState.RECEIVED: "Received",
         AlertState.POSTED: "Posted",
         AlertState.SOLD: "Sold"

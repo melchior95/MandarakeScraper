@@ -58,7 +58,7 @@ class AlertTab(ttk.Frame):
         state_combo = ttk.Combobox(
             filters_frame,
             textvariable=self.state_filter_var,
-            values=["all", "pending", "yay", "nay", "purchased", "shipped", "received", "posted", "sold"],
+            values=["all", "pending", "yay", "nay", "purchased", "received", "posted", "sold"],
             state="readonly",
             width=12
         )
@@ -107,7 +107,6 @@ class AlertTab(ttk.Frame):
         ttk.Separator(actions_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
 
         ttk.Button(actions_frame, text="Purchase", command=lambda: self._bulk_action("purchased")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(actions_frame, text="Shipped", command=lambda: self._bulk_action("shipped")).pack(side=tk.LEFT, padx=2)
         ttk.Button(actions_frame, text="Received", command=lambda: self._bulk_action("received")).pack(side=tk.LEFT, padx=2)
         ttk.Button(actions_frame, text="Posted", command=lambda: self._bulk_action("posted")).pack(side=tk.LEFT, padx=2)
         ttk.Button(actions_frame, text="Sold", command=lambda: self._bulk_action("sold")).pack(side=tk.LEFT, padx=2)
@@ -131,9 +130,9 @@ class AlertTab(ttk.Frame):
             "state",
             "similarity",
             "profit",
-            "mandarake_title",
+            "store_title",
             "ebay_title",
-            "mandarake_price",
+            "store_price",
             "ebay_price",
             "shipping",
             "sold_date"
@@ -157,9 +156,9 @@ class AlertTab(ttk.Frame):
         self.tree.column("state", width=100, minwidth=80)
         self.tree.column("similarity", width=80, minwidth=60)
         self.tree.column("profit", width=80, minwidth=60)
-        self.tree.column("mandarake_title", width=250, minwidth=150)
+        self.tree.column("store_title", width=250, minwidth=150)
         self.tree.column("ebay_title", width=250, minwidth=150)
-        self.tree.column("mandarake_price", width=100, minwidth=80)
+        self.tree.column("store_price", width=100, minwidth=80)
         self.tree.column("ebay_price", width=80, minwidth=60)
         self.tree.column("shipping", width=80, minwidth=60)
         self.tree.column("sold_date", width=100, minwidth=80)
@@ -169,9 +168,9 @@ class AlertTab(ttk.Frame):
         self.tree.heading("state", text="State")
         self.tree.heading("similarity", text="Similarity %")
         self.tree.heading("profit", text="Profit %")
-        self.tree.heading("mandarake_title", text="Mandarake Title")
+        self.tree.heading("store_title", text="Store Title")
         self.tree.heading("ebay_title", text="eBay Title")
-        self.tree.heading("mandarake_price", text="Mandarake Price")
+        self.tree.heading("store_price", text="Store Price")
         self.tree.heading("ebay_price", text="eBay Price")
         self.tree.heading("shipping", text="Shipping")
         self.tree.heading("sold_date", text="Sold Date")
@@ -271,11 +270,10 @@ class AlertTab(ttk.Frame):
         Perform bulk action on selected items.
 
         Args:
-            action: Action name (yay, nay, purchased, shipped, etc.)
+            action: Action name (yay, nay, purchased, received, etc.)
         """
         selected_items = self.tree.selection()
         if not selected_items:
-            messagebox.showinfo("No Selection", "Please select items to perform bulk action")
             return
 
         # Get alert IDs
@@ -286,7 +284,6 @@ class AlertTab(ttk.Frame):
             "yay": AlertState.YAY,
             "nay": AlertState.NAY,
             "purchased": AlertState.PURCHASED,
-            "shipped": AlertState.SHIPPED,
             "received": AlertState.RECEIVED,
             "posted": AlertState.POSTED,
             "sold": AlertState.SOLD
@@ -296,23 +293,32 @@ class AlertTab(ttk.Frame):
         if not new_state:
             return
 
-        # Confirm action
-        state_name = get_state_display_name(new_state)
-        if not messagebox.askyesno("Confirm", f"Mark {len(alert_ids)} items as '{state_name}'?"):
-            return
+        # Special handling for "Purchase" state - open all Mandarake URLs in browser tabs
+        if new_state == AlertState.PURCHASED:
+            alerts_data = self.alert_manager.get_alerts_by_ids(alert_ids)
+            opened_count = 0
+            for alert in alerts_data:
+                url = alert.get('mandarake_link', '')
+                if url:
+                    webbrowser.open(url)
+                    opened_count += 1
+            if opened_count > 0:
+                print(f"[PURCHASE] Opened {opened_count} Mandarake URLs in browser")
 
         # Perform bulk update
         success_count = self.alert_manager.bulk_update_state(alert_ids, new_state)
 
+        # Special handling for "Posted" state - create eBay draft listings
+        if new_state == AlertState.POSTED:
+            self._create_ebay_listings(alert_ids)
+
         # Reload
         self._load_alerts()
-        messagebox.showinfo("Success", f"Updated {success_count} alerts to '{state_name}'")
 
     def _delete_selected(self):
         """Delete selected alerts."""
         selected_items = self.tree.selection()
         if not selected_items:
-            messagebox.showinfo("No Selection", "Please select items to delete")
             return
 
         alert_ids = [int(self.tree.item(item, "text")) for item in selected_items]
@@ -322,13 +328,15 @@ class AlertTab(ttk.Frame):
 
         self.alert_manager.delete_alerts(alert_ids)
         self._load_alerts()
-        messagebox.showinfo("Success", f"Deleted {len(alert_ids)} alerts")
 
     def _on_double_click(self, event):
-        """Handle double-click on alert item - open links."""
+        """Handle double-click on alert item - open links based on clicked column."""
         item = self.tree.identify_row(event.y)
         if not item:
             return
+
+        # Identify which column was clicked
+        column = self.tree.identify_column(event.x)
 
         alert_id = int(self.tree.item(item, "text"))
         alert = self.alert_manager.storage.get_alert_by_id(alert_id)
@@ -336,19 +344,12 @@ class AlertTab(ttk.Frame):
         if not alert:
             return
 
-        # Ask which link to open
-        choice = messagebox.askquestion(
-            "Open Link",
-            f"Alert #{alert_id}\n\nWhich link would you like to open?",
-            icon='question',
-            type=messagebox.YESNOCANCEL
-        )
-
-        if choice == 'yes':  # Open Mandarake
+        # Open appropriate link based on column
+        if column == "#4":  # store_title column (0-indexed: #0=ID, #1=state, #2=similarity, #3=profit, #4=store_title)
             link = alert.get('mandarake_link', '')
             if link:
                 webbrowser.open(link)
-        elif choice == 'no':  # Open eBay
+        elif column == "#5":  # ebay_title column
             link = alert.get('ebay_link', '')
             if link:
                 webbrowser.open(link)
@@ -361,7 +362,7 @@ class AlertTab(ttk.Frame):
 
         # Create context menu
         menu = tk.Menu(self, tearoff=0)
-        menu.add_command(label="Open Mandarake Link", command=lambda: self._open_mandarake_link(item))
+        menu.add_command(label="Open Store Link", command=lambda: self._open_store_link(item))
         menu.add_command(label="Open eBay Link", command=lambda: self._open_ebay_link(item))
         menu.add_separator()
         menu.add_command(label="Mark as Yay", command=lambda: self._quick_action(item, AlertState.YAY))
@@ -371,8 +372,8 @@ class AlertTab(ttk.Frame):
 
         menu.post(event.x_root, event.y_root)
 
-    def _open_mandarake_link(self, item):
-        """Open Mandarake link for item."""
+    def _open_store_link(self, item):
+        """Open store link for item."""
         alert_id = int(self.tree.item(item, "text"))
         alert = self.alert_manager.storage.get_alert_by_id(alert_id)
         if alert and alert.get('mandarake_link'):
@@ -392,11 +393,74 @@ class AlertTab(ttk.Frame):
         self._load_alerts()
 
     def _delete_item(self, item):
-        """Delete single item."""
-        alert_id = int(self.tree.item(item, "text"))
-        if messagebox.askyesno("Confirm Delete", f"Delete alert #{alert_id}?"):
-            self.alert_manager.delete_alerts([alert_id])
-            self._load_alerts()
+        """Delete selected items (or single item if only one selected)."""
+        selected_items = self.tree.selection()
+
+        # If multiple items selected, delete all of them
+        if len(selected_items) > 1:
+            alert_ids = [int(self.tree.item(i, "text")) for i in selected_items]
+            if messagebox.askyesno("Confirm Delete", f"Delete {len(alert_ids)} alerts? This cannot be undone."):
+                self.alert_manager.delete_alerts(alert_ids)
+                self._load_alerts()
+        else:
+            # Single item delete
+            alert_id = int(self.tree.item(item, "text"))
+            if messagebox.askyesno("Confirm Delete", f"Delete alert #{alert_id}?"):
+                self.alert_manager.delete_alerts([alert_id])
+                self._load_alerts()
+
+    def _create_ebay_listings(self, alert_ids: List[int]):
+        """
+        Create eBay draft listings for selected alerts.
+
+        Args:
+            alert_ids: List of alert IDs to create listings for
+        """
+        try:
+            from ebay_listing_creator import create_listing_from_alert
+
+            alerts_data = self.alert_manager.get_alerts_by_ids(alert_ids)
+            created_count = 0
+            failed_count = 0
+
+            for alert in alerts_data:
+                try:
+                    # Convert price from display format (e.g., "$29.99") to float
+                    ebay_price_str = alert.get('ebay_price', '$0')
+                    ebay_price = float(ebay_price_str.replace('$', '').replace(',', ''))
+
+                    # Prepare alert data for listing creator
+                    listing_data = {
+                        'id': str(alert.get('alert_id', alert.get('id', 'unknown'))),
+                        'mandarake_title': alert.get('mandarake_title', 'Untitled'),
+                        'mandarake_title_en': alert.get('mandarake_title_en', alert.get('mandarake_title', 'Untitled')),
+                        'ebay_price': ebay_price,
+                        'mandarake_link': alert.get('mandarake_link', ''),
+                        'mandarake_images': alert.get('mandarake_images', [])
+                    }
+
+                    result = create_listing_from_alert(listing_data)
+                    if result:
+                        created_count += 1
+                        print(f"[EBAY LISTING] ✓ Created listing for alert #{listing_data['id']}")
+                    else:
+                        failed_count += 1
+                        print(f"[EBAY LISTING] ✗ Failed for alert #{listing_data['id']}")
+
+                except Exception as e:
+                    failed_count += 1
+                    print(f"[EBAY LISTING] Error creating listing: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            # Print summary to console
+            if created_count > 0 or failed_count > 0:
+                print(f"[EBAY LISTING] Created: {created_count}, Failed: {failed_count}")
+
+        except ImportError:
+            print("[EBAY LISTING] Error: eBay listing creator module not found")
+        except Exception as e:
+            print(f"[EBAY LISTING] Error: Failed to create eBay listings: {e}")
 
     def add_filtered_alerts(self, comparison_results: List[Dict]):
         """

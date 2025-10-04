@@ -30,36 +30,60 @@ class AlertManager:
         Args:
             comparison_result: Dictionary from eBay comparison with keys:
                 - ebay_title
-                - mandarake_title (or csv_title)
-                - mandarake_link
+                - store_title (or mandarake_title or csv_title)
+                - store_link (or mandarake_link)
                 - ebay_link
                 - similarity
                 - profit_margin
-                - mandarake_price
+                - store_price (or mandarake_price)
                 - ebay_price
                 - shipping
                 - sold_date
                 - thumbnail
+                - store_title_en (or mandarake_title_en, optional)
+                - store_images (or mandarake_images, optional)
+                - store_thumbnail (or mandarake_thumbnail, optional)
 
         Returns:
             Created alert dictionary with alert_id
         """
-        # Extract mandarake_title from either field name
-        mandarake_title = comparison_result.get('mandarake_title') or comparison_result.get('csv_title', 'N/A')
+        # Extract store title from any field name (prefer generic, fallback to legacy)
+        store_title = (comparison_result.get('store_title') or
+                      comparison_result.get('mandarake_title') or
+                      comparison_result.get('csv_title', 'N/A'))
+        store_title_en = (comparison_result.get('store_title_en') or
+                         comparison_result.get('mandarake_title_en', store_title))
+
+        # Extract store link (prefer generic, fallback to legacy)
+        store_link = (comparison_result.get('store_link') or
+                     comparison_result.get('mandarake_link', ''))
+
+        # Extract store price (prefer generic, fallback to legacy)
+        store_price = (comparison_result.get('store_price') or
+                      comparison_result.get('mandarake_price', '¥0'))
+
+        # Extract store images/thumbnail (prefer generic, fallback to legacy)
+        store_thumbnail = (comparison_result.get('store_thumbnail') or
+                          comparison_result.get('mandarake_thumbnail', ''))
+        store_images = (comparison_result.get('store_images') or
+                       comparison_result.get('mandarake_images', []))
 
         alert_data = {
             'state': AlertState.PENDING,
             'ebay_title': comparison_result.get('ebay_title', 'N/A'),
-            'mandarake_title': mandarake_title,
-            'mandarake_link': comparison_result.get('mandarake_link', ''),
+            'mandarake_title': store_title,  # Keep legacy field name for backwards compatibility
+            'mandarake_title_en': store_title_en,
+            'mandarake_link': store_link,
             'ebay_link': comparison_result.get('ebay_link', ''),
             'similarity': comparison_result.get('similarity', 0),
             'profit_margin': comparison_result.get('profit_margin', 0),
-            'mandarake_price': comparison_result.get('mandarake_price', '¥0'),
+            'mandarake_price': store_price,
             'ebay_price': comparison_result.get('ebay_price', '$0'),
             'shipping': comparison_result.get('shipping', '$0'),
             'sold_date': comparison_result.get('sold_date', ''),
-            'thumbnail': comparison_result.get('thumbnail', '')
+            'thumbnail': comparison_result.get('thumbnail', ''),
+            'mandarake_thumbnail': store_thumbnail,
+            'mandarake_images': store_images
         }
 
         return self.storage.add_alert(alert_data)
@@ -203,3 +227,20 @@ class AlertManager:
     def mark_sold(self, alert_ids: List[int]) -> int:
         """Mark alerts as sold."""
         return self.bulk_update_state(alert_ids, AlertState.SOLD)
+
+    def get_alerts_by_ids(self, alert_ids: List[int]) -> List[Dict]:
+        """
+        Get alert data for multiple alert IDs.
+
+        Args:
+            alert_ids: List of alert IDs
+
+        Returns:
+            List of alert dictionaries
+        """
+        alerts = []
+        for alert_id in alert_ids:
+            alert = self.storage.get_alert_by_id(alert_id)
+            if alert:
+                alerts.append(alert)
+        return alerts
