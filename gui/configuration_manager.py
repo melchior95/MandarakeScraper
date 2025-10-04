@@ -318,9 +318,30 @@ class ConfigurationManager:
         return path
     
     def delete_config(self, path: Path) -> bool:
-        """Delete a configuration file."""
+        """Delete a configuration file and its associated CSV/images."""
         try:
+            # Delete the config file
             path.unlink()
+
+            # Clean up associated CSV file
+            csv_path = Path('results') / f"{path.stem}.csv"
+            if csv_path.exists():
+                try:
+                    csv_path.unlink()
+                    print(f"[DELETE] Removed CSV: {csv_path.name}")
+                except Exception as e:
+                    print(f"[DELETE] Could not remove CSV {csv_path.name}: {e}")
+
+            # Clean up associated images folder
+            images_dir = Path('images') / path.stem
+            if images_dir.exists() and images_dir.is_dir():
+                try:
+                    import shutil
+                    shutil.rmtree(images_dir)
+                    print(f"[DELETE] Removed images folder: {images_dir.name}")
+                except Exception as e:
+                    print(f"[DELETE] Could not remove images folder {images_dir.name}: {e}")
+
             return True
         except Exception as e:
             messagebox.showerror("Error", f"Failed to delete config: {e}")

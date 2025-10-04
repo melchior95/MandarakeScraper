@@ -152,24 +152,44 @@ class SurugayaScraper(BaseScraper):
             else:
                 item_data['product_id'] = ''
 
-            # Price - format: "中古：￥1,234 税込" or "新品：￥5,678 税込"
-            price_elem = item_elem.select_one('.price, .item_price')
-            if price_elem:
-                price_text = price_elem.get_text(strip=True)
-                item_data['price'] = price_text
-            else:
-                item_data['price'] = '0'
+            # Price - Suruga-ya shows both new and used prices
+            # Format: "新品：￥2,600 税込" and "中古：￥1,400 税込"
+            # We need to extract the correct price based on condition
+            price_container = item_elem.select_one('.item_price')
+            if price_container:
+                # Find all price_teika elements (one for new, one for used)
+                price_elems = price_container.select('.price_teika')
 
-            # Condition - extract from price text or separate element
-            if price_elem:
-                price_text = price_elem.get_text(strip=True)
-                if '中古' in price_text:
+                used_price = None
+                new_price = None
+
+                for price_elem in price_elems:
+                    price_text = price_elem.get_text(strip=True)
+
+                    # Extract numeric price using regex
+                    # Format: "中古：￥1,400 税込" or "新品：￥2,600 税込"
+                    price_match = re.search(r'￥([\d,]+)', price_text)
+                    if price_match:
+                        # Remove commas and convert to int
+                        price_value = int(price_match.group(1).replace(',', ''))
+
+                        if '中古' in price_text:
+                            used_price = price_value
+                        elif '新品' in price_text:
+                            new_price = price_value
+
+                # Prioritize used price if available, otherwise use new price
+                if used_price:
+                    item_data['price'] = used_price
                     item_data['condition'] = 'Used'
-                elif '新品' in price_text:
+                elif new_price:
+                    item_data['price'] = new_price
                     item_data['condition'] = 'New'
                 else:
+                    item_data['price'] = 0
                     item_data['condition'] = 'Unknown'
             else:
+                item_data['price'] = 0
                 item_data['condition'] = 'Unknown'
 
             # Stock status - look for out of stock indicators
