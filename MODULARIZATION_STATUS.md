@@ -75,8 +75,9 @@
 - **After Phase 1 (CSV)**: 4621 lines (-789 lines, -14.6%)
 - **After Phase 2a (Mandarake UI)**: 4295 lines (-1115 lines total, -20.6%)
 - **After Phase 2b (Mandarake Methods)**: 4115 lines (-1295 lines total, -23.9%)
+- **After Phase 3 (Utility Delegation)**: 3945 lines (-1465 lines total, -27.1%)
 - **Target**: < 2000 lines
-- **Progress**: Phases 1 & 2 Complete ✅
+- **Progress**: Phases 1, 2 & 3 Complete ✅
 
 ### Breakdown by Section
 
@@ -132,16 +133,19 @@ Created `gui/mandarake_tab.py` (840 lines):
 
 **Benefit**: Reduced `gui_config.py` by 11.8%, clearer separation of concerns
 
-### Priority 3: Clean Up Utility Methods (2-3 hours)
-**Goal**: Remove ~500 lines from `gui_config.py`
+### ✅ Priority 3: Utility Method Delegation - COMPLETE
+**Goal**: Remove duplicate utility methods from `gui_config.py`
+**Result**: Removed 170 lines (4.1% reduction from 4115 → 3945 lines)
 
-Move to `gui/utils.py`:
-- Image handling utilities
-- Thumbnail management
-- CSV filename generation
-- Common UI helpers
+**Replaced duplicate methods with delegation to `gui/utils.py`:**
+- ✅ `_slugify()` - ~30 lines → delegates to `utils.slugify()`
+- ✅ `_fetch_exchange_rate()` - ~15 lines → delegates to `utils.fetch_exchange_rate()`
+- ✅ `_extract_price()` - ~10 lines → delegates to `utils.extract_price()`
+- ✅ `_compare_images()` - ~43 lines → delegates to `utils.compare_images()`
+- ✅ `_create_debug_folder()` - ~17 lines → delegates to `utils.create_debug_folder()`
+- ✅ `_clean_ebay_url()` - ~73 lines → delegates to `utils.clean_ebay_url()`
 
-**Benefit**: Reduces `gui_config.py` by 9%, improves reusability
+**Benefit**: Reduced `gui_config.py` by 4.1%, eliminated code duplication, improved maintainability
 
 ---
 
@@ -152,10 +156,11 @@ Move to `gui/utils.py`:
 - ✅ eBay search: Fully modularized (386 lines extracted)
 - ✅ CSV comparison: 100% complete (1072 lines module, 789 lines removed from main)
 - ✅ Mandarake tab: 100% complete (840 lines module, 506 lines removed from main)
+- ✅ Utility delegation: 100% complete (170 lines removed, 6 methods delegated)
 - ✅ Workers: Fully modularized (800 lines extracted)
 - ✅ Other utilities: Fully modularized (~500 lines extracted)
 
-**Total extracted so far**: ~4695 lines (was 5410, now 4115)
+**Total extracted/delegated so far**: ~4865 lines (was 5410, now 3945)
 
 ### If Priority 1-3 Completed
 - **gui_config.py** would be: ~2900 lines (down from 5410)
@@ -226,6 +231,28 @@ For immediate impact with minimal effort:
 **Next Steps:**
 - Phase 3: Clean up utility methods (~500 lines)
 - Phase 4: Extract eBay tab UI (~300 lines)
+
+## ✅ Phase 3 Complete (2025-10-04)
+
+**Results:**
+- Removed 170 lines from `gui_config.py` (4.1% reduction from 4115 → 3945)
+- Total reduction: 1465 lines (27.1% from original 5410 lines)
+- Eliminated code duplication by delegating to existing `gui/utils.py` functions
+
+**Delegated Methods:**
+- `_slugify()`, `_fetch_exchange_rate()`, `_extract_price()`
+- `_compare_images()`, `_create_debug_folder()`, `_clean_ebay_url()`
+- All 6 methods now use single-line delegation to `gui/utils.py`
+
+**Impact:**
+- Eliminated ~188 lines of duplicate code
+- Improved code maintainability (single source of truth)
+- All utility functions now centralized in `gui/utils.py`
+
+**Next Steps:**
+- Phase 4: Extract eBay tab UI (~300-400 lines)
+- Phase 5: Review and optimize remaining code
+- Target: <2000 lines (currently at 3945, 50.5% remaining)
 
 ---
 

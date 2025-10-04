@@ -1367,36 +1367,8 @@ With RANSAC enabled:
     # Helpers
     # ------------------------------------------------------------------
     def _slugify(self, value: str) -> str:
-        if not value:
-            return 'all'
-        value = str(value).strip()
-
-        # Handle Unicode characters better - create readable ASCII representation
-        import unicodedata
-        try:
-            # Try to normalize and convert to ASCII
-            normalized = unicodedata.normalize('NFKD', value)
-            ascii_value = normalized.encode('ascii', 'ignore').decode('ascii')
-            if ascii_value.strip():
-                value = ascii_value
-        except:
-            pass
-
-        # If still contains non-ASCII, use a hash-based approach for unique identification
-        if not value.isascii():
-            import hashlib
-            hash_part = hashlib.md5(value.encode('utf-8')).hexdigest()[:8]
-            # Try to extract any ASCII parts
-            ascii_parts = re.findall(r'[a-zA-Z0-9]+', value)
-            if ascii_parts:
-                value = '_'.join(ascii_parts) + '_' + hash_part
-            else:
-                value = 'unicode_' + hash_part
-
-        value = value.lower()
-        value = re.sub(r"[^a-z0-9]+", '_', value)
-        value = value.strip('_')
-        return value or 'all'
+        """Convert string to filesystem-safe slug."""
+        return utils.slugify(value)
 
     def _suggest_config_filename(self, config: dict) -> str:
         return utils.suggest_config_filename(config)
@@ -3587,91 +3559,19 @@ With RANSAC enabled:
 
     def _fetch_exchange_rate(self):
         """Fetch current USD to JPY exchange rate"""
-        try:
-            import requests
-            # Use exchangerate-api.com (free, no API key needed)
-            response = requests.get('https://api.exchangerate-api.com/v4/latest/USD', timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                rate = data['rates']['JPY']
-                return rate
-        except Exception as e:
-            print(f"[EXCHANGE RATE] Error fetching rate: {e}")
-
-        # Fallback to a reasonable default if fetch fails
-        return 150.0
+        return utils.fetch_exchange_rate()
 
     def _extract_price(self, price_text):
         """Extract numeric price from text"""
-        import re
-        if not price_text:
-            return 0.0
-        # Remove currency symbols and commas, extract number
-        match = re.search(r'[\d,]+\.?\d*', str(price_text).replace(',', ''))
-        if match:
-            return float(match.group(0))
-        return 0.0
+        return utils.extract_price(price_text)
 
     def _compare_images(self, ref_image, compare_image):
-        """
-        Compare two images and return similarity score (0-100).
-        Uses SSIM (70%) + Histogram (30%) for robust comparison.
-
-        Args:
-            ref_image: Reference image (numpy array)
-            compare_image: Image to compare (numpy array)
-
-        Returns:
-            float: Similarity score from 0-100
-        """
-        import cv2
-        from skimage.metrics import structural_similarity as ssim
-
-        try:
-            # Resize images to same size for comparison
-            ref_resized = cv2.resize(ref_image, (300, 300))
-            compare_resized = cv2.resize(compare_image, (300, 300))
-
-            # Convert to grayscale for SSIM
-            ref_gray = cv2.cvtColor(ref_resized, cv2.COLOR_BGR2GRAY)
-            compare_gray = cv2.cvtColor(compare_resized, cv2.COLOR_BGR2GRAY)
-
-            # Calculate SSIM (Structural Similarity Index)
-            ssim_score = ssim(ref_gray, compare_gray)
-
-            # Calculate histogram similarity as secondary metric
-            ref_hist = cv2.calcHist([ref_resized], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-            compare_hist = cv2.calcHist([compare_resized], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-            cv2.normalize(ref_hist, ref_hist)
-            cv2.normalize(compare_hist, compare_hist)
-            hist_score = cv2.compareHist(ref_hist, compare_hist, cv2.HISTCMP_CORREL)
-
-            # Weighted combination: SSIM (70%) + Histogram (30%)
-            similarity = (ssim_score * 0.7 + hist_score * 0.3) * 100
-
-            return similarity
-
-        except Exception as e:
-            print(f"[IMAGE COMPARE] Error: {e}")
-            return 0.0
+        """Compare two images and return similarity score (0-100)."""
+        return utils.compare_images(ref_image, compare_image)
 
     def _create_debug_folder(self, query):
-        """
-        Create debug folder for saving comparison images.
-
-        Args:
-            query: Search query string
-
-        Returns:
-            Path: Debug folder path
-        """
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_query = "".join(c for c in query if c.isalnum() or c in (' ', '_')).strip().replace(' ', '_')
-        debug_folder = Path(f"debug_comparison/{safe_query}_{timestamp}")
-        debug_folder.mkdir(parents=True, exist_ok=True)
-        print(f"[DEBUG] Debug folder: {debug_folder}")
-        return debug_folder
+        """Create debug folder for saving comparison images."""
+        return utils.create_debug_folder(query)
 
     def _send_to_alerts_with_thresholds(self, comparison_results, min_similarity, min_profit):
         """Send comparison results to alerts with specified thresholds."""
@@ -3922,77 +3822,7 @@ With RANSAC enabled:
 
     def _clean_ebay_url(self, url: str) -> str:
         """Clean and validate eBay URL"""
-        if not url:
-            return "No URL available"
-
-        # Handle descriptive URLs (like search results pages)
-        if url.startswith("Search Results Page:"):
-            return url  # Return as-is for descriptive URLs
-
-        try:
-            from urllib.parse import urljoin, urlparse, parse_qs, urlencode, urlunparse
-            import re
-
-            # Remove any placeholder URLs
-            if ("listing/" in url and url.count("/") < 4) or re.match(r'https://www\.ebay\.com/listing/\d+$', url):
-                return "Placeholder URL - not accessible"
-
-            # Handle relative URLs
-            if url.startswith("/"):
-                url = f"https://www.ebay.com{url}"
-            elif not url.startswith("http"):
-                url = f"https://www.ebay.com/{url}"
-
-            # Parse the URL
-            parsed = urlparse(url)
-
-            # Extract item ID from various eBay URL formats
-            item_id = None
-
-            # Try to extract from /itm/ URLs
-            itm_match = re.search(r'/itm/([^/?]+)', parsed.path)
-            if itm_match:
-                item_id = itm_match.group(1)
-
-            # Try to extract from query parameters
-            if not item_id and parsed.query:
-                query_params = parse_qs(parsed.query)
-                if 'item' in query_params:
-                    item_id = query_params['item'][0]
-
-            # If we found an item ID, construct a clean URL
-            if item_id:
-                # Remove non-numeric characters from item ID to get core ID
-                clean_item_id = re.sub(r'[^0-9]', '', item_id)
-                if clean_item_id:
-                    return f"https://www.ebay.com/itm/{clean_item_id}"
-
-            # If no item ID found, return the cleaned original URL
-            if parsed.netloc and 'ebay.com' in parsed.netloc.lower():
-                # Remove tracking parameters but keep essential ones
-                essential_params = ['_nkw', '_sacat', 'item', 'hash']
-                if parsed.query:
-                    query_params = parse_qs(parsed.query, keep_blank_values=True)
-                    cleaned_params = {k: v for k, v in query_params.items() if k in essential_params}
-                    clean_query = urlencode(cleaned_params, doseq=True) if cleaned_params else ""
-                else:
-                    clean_query = ""
-
-                return urlunparse((
-                    parsed.scheme or 'https',
-                    parsed.netloc,
-                    parsed.path,
-                    parsed.params,
-                    clean_query,
-                    ''  # Remove fragment
-                ))
-
-            # Fallback - return original if it looks like a valid URL
-            return url if url.startswith('http') else f"Invalid URL: {url}"
-
-        except Exception as e:
-            print(f"[BROWSERLESS SEARCH] URL cleaning error: {e}")
-            return f"URL Error: {url}"
+        return utils.clean_ebay_url(url)
 
     def _update_preview(self, *args):
         # Also trigger auto-save when preview updates
