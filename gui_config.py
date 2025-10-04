@@ -1395,81 +1395,9 @@ With RANSAC enabled:
         return RECENT_OPTIONS[0][0]
 
     def _load_results_table(self, csv_path: Path | None):
-        print(f"[GUI DEBUG] Loading results table from: {csv_path}")
-        if not hasattr(self, 'result_tree'):
-            return
-        for item in self.result_tree.get_children():
-            self.result_tree.delete(item)
-        self.result_links.clear()
-        self.result_images.clear()
-        self.result_data.clear()
-        if not csv_path or not csv_path.exists():
-            print(f"[GUI DEBUG] CSV not found: {csv_path}")
-            self.status_var.set(f'CSV not found: {csv_path}')
-            return
-        show_images = getattr(self, 'show_images_var', None)
-        show_images = show_images.get() if show_images else False
-        print(f"[GUI DEBUG] Show images setting: {show_images}")
-        try:
-            with csv_path.open('r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    title = row.get('title', '')
-                    price = row.get('price_text') or row.get('price') or ''
-                    shop = row.get('shop') or row.get('shop_text') or ''
-                    stock = row.get('in_stock') or row.get('stock_status') or ''
-                    if isinstance(stock, str) and stock.lower() in {'true', 'false'}:
-                        stock = 'Yes' if stock.lower() == 'true' else 'No'
-                    category = row.get('category', '')
-                    link = row.get('product_url') or row.get('url') or ''
-                    local_image_path = row.get('local_image') or ''
-                    web_image_url = row.get('image_url') or ''
-                    item_kwargs = {'values': (title, price, shop, stock, category, link)}
-                    photo = None
-
-                    if show_images:
-                        # Try local image first, then fallback to web image
-                        if local_image_path:
-                            print(f"[GUI DEBUG] Attempting to load local image: {local_image_path}")
-                            try:
-                                pil_img = Image.open(local_image_path)
-                                pil_img.thumbnail((60, 60), Image.Resampling.LANCZOS)  # Slightly smaller for better fit
-                                photo = ImageTk.PhotoImage(pil_img)
-                                item_kwargs['image'] = photo
-                                print(f"[GUI DEBUG] Successfully loaded local thumbnail: {local_image_path}")
-                            except Exception as e:
-                                print(f"[GUI DEBUG] Failed to load local image {local_image_path}: {e}")
-                                photo = None
-
-                        # If no local image or local image failed, try web image
-                        if not photo and web_image_url:
-                            print(f"[GUI DEBUG] Attempting to download web image: {web_image_url}")
-                            try:
-                                import requests
-                                response = requests.get(web_image_url, timeout=10)
-                                response.raise_for_status()
-                                from io import BytesIO
-                                pil_img = Image.open(BytesIO(response.content))
-                                pil_img.thumbnail((60, 60), Image.Resampling.LANCZOS)  # Slightly smaller for better fit
-                                photo = ImageTk.PhotoImage(pil_img)
-                                item_kwargs['image'] = photo
-                                print(f"[GUI DEBUG] Successfully downloaded web thumbnail: {web_image_url}")
-                            except Exception as e:
-                                print(f"[GUI DEBUG] Failed to download web image {web_image_url}: {e}")
-                                photo = None
-
-                        if not photo:
-                            print(f"[GUI DEBUG] No image available for row: {title}")
-                    else:
-                        print(f"[GUI DEBUG] Show images disabled")
-                    item_id = self.result_tree.insert('', tk.END, **item_kwargs)
-                    self.result_data[item_id] = row
-                    if photo:
-                        self.result_images[item_id] = photo
-                    self.result_links[item_id] = link
-            self.status_var.set(f'Loaded results from {csv_path}')
-        except Exception as exc:
-            messagebox.showerror('Error', f'Failed to load results: {exc}')
+        """Load results table - delegated to MandarakeTab"""
+        if hasattr(self, 'mandarake_tab'):
+            self.mandarake_tab.load_results_table(csv_path)
 
     def _toggle_thumbnails(self):
         """Toggle thumbnail display in the results tree"""
@@ -2364,25 +2292,9 @@ With RANSAC enabled:
             self._display_csv_comparison_results(self.ebay_tab.all_comparison_results)
 
     def _display_csv_comparison_results(self, results):
-        """Display CSV comparison results in the browserless tree"""
-        # Convert format to match existing display
-        display_results = []
-        for r in results:
-            display_results.append({
-                'title': r['ebay_title'],
-                'price': r['ebay_price'],
-                'shipping': r['shipping'],
-                'mandarake_price': r.get('mandarake_price', ''),
-                'profit_margin': r['profit_display'],
-                'sold_date': r.get('sold_date', ''),  # Keep actual sold date
-                'similarity': r['similarity_display'],
-                'url': r['ebay_link'],
-                'mandarake_url': r.get('mandarake_link', ''),
-                'image_url': r['thumbnail'],
-                'mandarake_image_url': r.get('mandarake_thumbnail', '')
-            })
-
-        self._display_browserless_results(display_results)
+        """Display CSV comparison results - delegated to CSVComparisonManager"""
+        if self.ebay_tab.csv_comparison_manager:
+            self.ebay_tab.csv_comparison_manager.display_csv_comparison_results(results)
 
     def open_browserless_url(self, event):
         """Open eBay or Mandarake URL based on which column is double-clicked"""
@@ -2482,87 +2394,9 @@ With RANSAC enabled:
             self.ebay_tab.browserless_status.set(f"Error sending to review: {e}")
 
     def _display_browserless_results(self, results):
-        """Display browserless search results in the tree view with thumbnails"""
-        # Clear existing results and images
-        for item in self.ebay_tab.browserless_tree.get_children():
-            self.ebay_tab.browserless_tree.delete(item)
-        self.ebay_tab.browserless_images.clear()
-
-        # Store results for URL opening
-        self.ebay_tab.browserless_results_data = results
-
-        # Add new results with thumbnails
-        for i, result in enumerate(results, 1):
-            values = (
-                result['title'],  # Show full title, no truncation
-                result['price'],
-                result['shipping'],
-                result.get('mandarake_price', ''),
-                result.get('profit_margin', ''),
-                result.get('sold_date', ''),
-                result.get('similarity', ''),
-                result['url'],  # eBay URL
-                result.get('mandarake_url', '')  # Mandarake URL
-            )
-
-            # Try to load thumbnails (eBay and Mandarake side-by-side if both exist)
-            ebay_image_url = result.get('image_url', '')
-            mandarake_image_url = result.get('mandarake_image_url', '')
-            photo = None
-
-            try:
-                import requests
-                from io import BytesIO
-
-                ebay_img = None
-                mandarake_img = None
-
-                # Load eBay image
-                if ebay_image_url:
-                    try:
-                        response = requests.get(ebay_image_url, timeout=5)
-                        response.raise_for_status()
-                        ebay_img = Image.open(BytesIO(response.content))
-                        ebay_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
-                    except Exception as e:
-                        print(f"[THUMB] Failed to load eBay thumbnail {i}: {e}")
-
-                # Load Mandarake image
-                if mandarake_image_url:
-                    try:
-                        response = requests.get(mandarake_image_url, timeout=5)
-                        response.raise_for_status()
-                        mandarake_img = Image.open(BytesIO(response.content))
-                        mandarake_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
-                    except Exception as e:
-                        print(f"[THUMB] Failed to load Mandarake thumbnail {i}: {e}")
-
-                # Create composite image if we have both, or use single image
-                if ebay_img and mandarake_img:
-                    # Side-by-side composite
-                    total_width = ebay_img.width + mandarake_img.width + 2  # +2 for separator
-                    max_height = max(ebay_img.height, mandarake_img.height)
-                    composite = Image.new('RGB', (total_width, max_height), 'white')
-                    composite.paste(ebay_img, (0, 0))
-                    composite.paste(mandarake_img, (ebay_img.width + 2, 0))
-                    photo = ImageTk.PhotoImage(composite)
-                elif ebay_img:
-                    photo = ImageTk.PhotoImage(ebay_img)
-                elif mandarake_img:
-                    photo = ImageTk.PhotoImage(mandarake_img)
-
-            except Exception as e:
-                print(f"[SCRAPY SEARCH] Failed to load thumbnails {i}: {e}")
-                photo = None
-
-            # Insert with or without image
-            if photo:
-                self.ebay_tab.browserless_tree.insert('', 'end', iid=str(i), text='', values=values, image=photo)
-                self.ebay_tab.browserless_images[str(i)] = photo  # Keep reference to prevent garbage collection
-            else:
-                self.ebay_tab.browserless_tree.insert('', 'end', iid=str(i), text=str(i), values=values)
-
-        print(f"[SCRAPY SEARCH] Displayed {len(results)} results in tree view ({len(self.ebay_tab.browserless_images)} with thumbnails)")
+        """Display browserless search results - delegated to EbaySearchManager"""
+        if self.ebay_tab.ebay_search_manager:
+            self.ebay_tab.ebay_search_manager.display_browserless_results(results)
 
     def _clean_ebay_url(self, url: str) -> str:
         """Clean and validate eBay URL"""

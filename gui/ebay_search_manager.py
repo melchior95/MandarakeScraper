@@ -100,7 +100,7 @@ class EbaySearchManager:
         selection = self.tree.selection()
         if not selection:
             return
-        
+
         item_id = selection[0]
         try:
             index = int(item_id) - 1
@@ -113,7 +113,91 @@ class EbaySearchManager:
                     messagebox.showwarning("Invalid URL", f"Cannot open URL: {url}")
         except (ValueError, IndexError) as e:
             print(f"[EBAY SEARCH] Error opening URL: {e}")
-    
+
+    def display_browserless_results(self, results):
+        """Display browserless search results in the tree view with thumbnails."""
+        from PIL import Image, ImageTk
+        import requests
+        from io import BytesIO
+
+        # Clear existing results and images
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        self.images.clear()
+
+        # Store results for URL opening
+        self.results_data = results
+
+        # Add new results with thumbnails
+        for i, result in enumerate(results, 1):
+            values = (
+                result['title'],  # Show full title, no truncation
+                result['price'],
+                result['shipping'],
+                result.get('mandarake_price', ''),
+                result.get('profit_margin', ''),
+                result.get('sold_date', ''),
+                result.get('similarity', ''),
+                result['url'],  # eBay URL
+                result.get('mandarake_url', '')  # Mandarake URL
+            )
+
+            # Try to load thumbnails (eBay and Mandarake side-by-side if both exist)
+            ebay_image_url = result.get('image_url', '')
+            mandarake_image_url = result.get('mandarake_image_url', '')
+            photo = None
+
+            try:
+                ebay_img = None
+                mandarake_img = None
+
+                # Load eBay image
+                if ebay_image_url:
+                    try:
+                        response = requests.get(ebay_image_url, timeout=5)
+                        response.raise_for_status()
+                        ebay_img = Image.open(BytesIO(response.content))
+                        ebay_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
+                    except Exception as e:
+                        print(f"[THUMB] Failed to load eBay thumbnail {i}: {e}")
+
+                # Load Mandarake image
+                if mandarake_image_url:
+                    try:
+                        response = requests.get(mandarake_image_url, timeout=5)
+                        response.raise_for_status()
+                        mandarake_img = Image.open(BytesIO(response.content))
+                        mandarake_img.thumbnail((60, 60), Image.Resampling.LANCZOS)
+                    except Exception as e:
+                        print(f"[THUMB] Failed to load Mandarake thumbnail {i}: {e}")
+
+                # Create composite image if we have both, or use single image
+                if ebay_img and mandarake_img:
+                    # Side-by-side composite
+                    total_width = ebay_img.width + mandarake_img.width + 2  # +2 for separator
+                    max_height = max(ebay_img.height, mandarake_img.height)
+                    composite = Image.new('RGB', (total_width, max_height), 'white')
+                    composite.paste(ebay_img, (0, 0))
+                    composite.paste(mandarake_img, (ebay_img.width + 2, 0))
+                    photo = ImageTk.PhotoImage(composite)
+                elif ebay_img:
+                    photo = ImageTk.PhotoImage(ebay_img)
+                elif mandarake_img:
+                    photo = ImageTk.PhotoImage(mandarake_img)
+
+            except Exception as e:
+                print(f"[SCRAPY SEARCH] Failed to load thumbnails {i}: {e}")
+                photo = None
+
+            # Insert with or without image
+            if photo:
+                self.tree.insert('', 'end', iid=str(i), text='', values=values, image=photo)
+                self.images[str(i)] = photo  # Keep reference to prevent garbage collection
+            else:
+                self.tree.insert('', 'end', iid=str(i), text=str(i), values=values)
+
+        print(f"[SCRAPY SEARCH] Displayed {len(results)} results in tree view ({len(self.images)} with thumbnails)")
+
     def run_text_search(self, query: str, max_results: int, search_method: str = "scrapy"):
         """Run eBay text search.
         

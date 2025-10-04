@@ -1065,6 +1065,35 @@ class CSVComparisonManager:
                     return hours
         return None
 
+    def display_csv_comparison_results(self, results: List[Dict]) -> None:
+        """Display CSV comparison results in the browserless tree.
+
+        Args:
+            results: List of comparison results with ebay_title, mandarake fields
+        """
+        # Convert format to match browserless display
+        display_results = []
+        for r in results:
+            display_results.append({
+                'title': r['ebay_title'],
+                'price': r['ebay_price'],
+                'shipping': r['shipping'],
+                'mandarake_price': r.get('mandarake_price', ''),
+                'profit_margin': r['profit_display'],
+                'sold_date': r.get('sold_date', ''),  # Keep actual sold date
+                'similarity': r['similarity_display'],
+                'url': r['ebay_link'],
+                'mandarake_url': r.get('mandarake_link', ''),
+                'image_url': r['thumbnail'],
+                'mandarake_image_url': r.get('mandarake_thumbnail', '')
+            })
+
+        # Delegate to EbaySearchManager for display
+        if (hasattr(self.gui, 'ebay_tab') and
+            hasattr(self.gui.ebay_tab, 'ebay_search_manager') and
+            self.gui.ebay_tab.ebay_search_manager):
+            self.gui.ebay_tab.ebay_search_manager.display_browserless_results(display_results)
+
     def _start_thread(self, target: Callable, *args) -> None:
         """Start a background thread."""
         thread = threading.Thread(target=target, args=args, daemon=True)

@@ -855,3 +855,91 @@ class MandarakeTab(ttk.Frame):
         # Scroll to make the first selected category visible
         if first_selected_idx is not None:
             self.main.detail_listbox.see(first_selected_idx)
+
+    def load_results_table(self, csv_path: Path | None):
+        """Load and display Mandarake search results from CSV file.
+
+        Args:
+            csv_path: Path to CSV results file
+        """
+        import csv
+        import tkinter as tk
+        from tkinter import messagebox
+        from pathlib import Path
+        from PIL import Image, ImageTk
+
+        print(f"[GUI DEBUG] Loading results table from: {csv_path}")
+        if not hasattr(self.main, 'result_tree'):
+            return
+        for item in self.main.result_tree.get_children():
+            self.main.result_tree.delete(item)
+        self.main.result_links.clear()
+        self.main.result_images.clear()
+        self.main.result_data.clear()
+        if not csv_path or not csv_path.exists():
+            print(f"[GUI DEBUG] CSV not found: {csv_path}")
+            self.main.status_var.set(f'CSV not found: {csv_path}')
+            return
+        show_images = getattr(self.main, 'show_images_var', None)
+        show_images = show_images.get() if show_images else False
+        print(f"[GUI DEBUG] Show images setting: {show_images}")
+        try:
+            with csv_path.open('r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    title = row.get('title', '')
+                    price = row.get('price_text') or row.get('price') or ''
+                    shop = row.get('shop') or row.get('shop_text') or ''
+                    stock = row.get('in_stock') or row.get('stock_status') or ''
+                    if isinstance(stock, str) and stock.lower() in {'true', 'false'}:
+                        stock = 'Yes' if stock.lower() == 'true' else 'No'
+                    category = row.get('category', '')
+                    link = row.get('product_url') or row.get('url') or ''
+                    local_image_path = row.get('local_image') or ''
+                    web_image_url = row.get('image_url') or ''
+                    item_kwargs = {'values': (title, price, shop, stock, category, link)}
+                    photo = None
+
+                    if show_images:
+                        # Try local image first, then fallback to web image
+                        if local_image_path:
+                            print(f"[GUI DEBUG] Attempting to load local image: {local_image_path}")
+                            try:
+                                pil_img = Image.open(local_image_path)
+                                pil_img.thumbnail((60, 60), Image.Resampling.LANCZOS)  # Slightly smaller for better fit
+                                photo = ImageTk.PhotoImage(pil_img)
+                                item_kwargs['image'] = photo
+                                print(f"[GUI DEBUG] Successfully loaded local thumbnail: {local_image_path}")
+                            except Exception as e:
+                                print(f"[GUI DEBUG] Failed to load local image {local_image_path}: {e}")
+                                photo = None
+
+                        # If no local image or local image failed, try web image
+                        if not photo and web_image_url:
+                            print(f"[GUI DEBUG] Attempting to download web image: {web_image_url}")
+                            try:
+                                import requests
+                                response = requests.get(web_image_url, timeout=10)
+                                response.raise_for_status()
+                                from io import BytesIO
+                                pil_img = Image.open(BytesIO(response.content))
+                                pil_img.thumbnail((60, 60), Image.Resampling.LANCZOS)  # Slightly smaller for better fit
+                                photo = ImageTk.PhotoImage(pil_img)
+                                item_kwargs['image'] = photo
+                                print(f"[GUI DEBUG] Successfully downloaded web thumbnail: {web_image_url}")
+                            except Exception as e:
+                                print(f"[GUI DEBUG] Failed to download web image {web_image_url}: {e}")
+                                photo = None
+
+                        if not photo:
+                            print(f"[GUI DEBUG] No image available for row: {title}")
+                    else:
+                        print(f"[GUI DEBUG] Show images disabled")
+                    item_id = self.main.result_tree.insert('', tk.END, **item_kwargs)
+                    self.main.result_data[item_id] = row
+                    if photo:
+                        self.main.result_images[item_id] = photo
+                    self.main.result_links[item_id] = link
+            self.main.status_var.set(f'Loaded results from {csv_path}')
+        except Exception as exc:
+            messagebox.showerror('Error', f'Failed to load results: {exc}')

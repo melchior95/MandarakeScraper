@@ -37,7 +37,10 @@
       "Bash(curl -s \"https://www.suruga-ya.jp/detailed_search?search_word=\" -o surugaya_advanced_search.html)",
       "Bash(curl -s \"https://www.suruga-ya.jp/search?category1=7\" -o surugaya_books_page.html)",
       "Bash(curl:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Read(//c/**)",
+      "Bash(sort:*)",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []
