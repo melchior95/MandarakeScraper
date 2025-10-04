@@ -935,9 +935,6 @@ With RANSAC enabled:
         # Bind column resize to reload thumbnails with new size
         self.csv_items_tree.bind('<ButtonRelease-1>', self._on_csv_column_resize)
 
-        # Bind double-click to open URL
-        self.csv_items_tree.bind('<Double-Button-1>', self._on_csv_item_double_click)
-
         # Enable column drag-to-reorder for CSV items tree
         self._setup_column_drag(self.csv_items_tree)
 
@@ -2849,9 +2846,13 @@ With RANSAC enabled:
             # Use filtered items if available
             items_list = self.csv_filtered_items if hasattr(self, 'csv_filtered_items') and self.csv_filtered_items else self.csv_compare_data
             if 0 <= index < len(items_list):
-                link = items_list[index].get('product_url', '')
+                # Try both 'url' (Suruga-ya) and 'product_url' (Mandarake)
+                link = items_list[index].get('url', '') or items_list[index].get('product_url', '')
                 if link:
                     webbrowser.open(link)
+                    print(f"[CSV] Opened URL: {link}")
+                else:
+                    print(f"[CSV] No URL found for item {index}")
         except Exception as e:
             print(f"[CSV] Error opening link: {e}")
 
@@ -4243,9 +4244,10 @@ With RANSAC enabled:
             return
 
         # Get the URL from the item's values (last column)
+        # Columns: title(0), price(1), shop(2), stock(3), category(4), compared(5), url(6)
         item_values = self.csv_items_tree.item(item_id, 'values')
-        if len(item_values) >= 6:  # Make sure URL column exists
-            url = item_values[5]  # URL is the 6th column (index 5)
+        if len(item_values) >= 7:  # Make sure URL column exists
+            url = item_values[6]  # URL is the 7th column (index 6)
             if url:
                 # Open URL in default browser in a separate thread to avoid blocking
                 def open_url():
