@@ -4482,8 +4482,8 @@ With RANSAC enabled:
             if 0 <= index < len(items_list):
                 row = items_list[index]
 
-                # Extract core word from title and category keyword
-                title = row.get('title', '')
+                # Extract core word from title and category keyword (prefer English translation)
+                title = row.get('title_en', row.get('title', ''))
                 category = row.get('category', '')
                 keyword = row.get('keyword', '')  # Use extracted keyword if available
 
