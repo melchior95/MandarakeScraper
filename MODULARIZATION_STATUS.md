@@ -250,9 +250,64 @@ For immediate impact with minimal effort:
 - All utility functions now centralized in `gui/utils.py`
 
 **Next Steps:**
-- Phase 4: Extract eBay tab UI (~300-400 lines)
-- Phase 5: Review and optimize remaining code
-- Target: <2000 lines (currently at 3945, 50.5% remaining)
+- Phase 4: Complete eBay tab UI extraction (~270 lines)
+- Phase 5: Extract Advanced tab (~165 lines)
+- Phase 6: Extract Config Tree Manager (~370 lines)
+- Additional phases: Results manager, worker coordination, final cleanup
+- Target: <2000 lines (currently at 3945, need 1945 more lines removed)
+
+---
+
+## 📋 Phase 4+ Strategic Plan
+
+### Current Position
+- **3945 lines** (was 5410, removed 1465)
+- **Target**: <2000 lines
+- **Remaining**: Need to remove **1945 more lines (49.3%)**
+
+### Identified Extraction Opportunities
+
+#### 🎯 High Priority
+1. **eBay Tab UI** (~270 lines) - Skeleton exists in `gui/ebay_tab.py`
+2. **Config Tree Manager** (~370 lines) - Complex tree logic
+3. **Advanced Tab** (~165 lines) - Settings UI
+
+#### 🔧 Medium Priority
+4. **Results Display Module** (~210 lines)
+5. **Remaining Mandarake Helpers** (~100 lines)
+6. **Worker Coordination** (~165 lines)
+
+#### ⚡ Lower Priority
+7. **Inline trivial wrappers** (~100 lines)
+8. **Remove duplications** (~200 lines)
+9. **Final cleanup** (~265 lines)
+
+### Recommended Path (Option A)
+
+**Phase 4**: Complete eBay Tab (270 lines) - **Medium effort, medium risk**
+- Implement TODOs in existing `gui/ebay_tab.py`
+- Extract eBay search UI (lines 415-556)
+- Extract CSV comparison UI (lines 557-682)
+
+**Phase 5**: Extract Advanced Tab (165 lines) - **Low effort, low risk**
+- Create `gui/advanced_tab.py`
+- Move settings controls
+- Simple delegation pattern
+
+**Phase 6**: Extract Config Tree Manager (370 lines) - **High effort, medium risk**
+- Create `gui/config_tree_manager.py`
+- Move tree management logic
+- Significant complexity reduction
+
+**Result after Phases 4-6**: 3945 → **3140 lines** (-805 lines, -20.4%)
+
+**Phases 7-10**: Additional extractions to reach target
+- Results Manager + delegations + cleanup: ~1140 lines
+- **Final target**: ~**2000 lines** ✅
+
+**Total estimated effort**: 12-15 hours across 6-8 phases
+
+See `PHASE_4_ANALYSIS.md` for detailed breakdown and options.
 
 ---
 
