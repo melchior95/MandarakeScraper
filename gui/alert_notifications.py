@@ -69,7 +69,6 @@ class AlertNotifier:
             return
 
         try:
-            similarity = alert.get('similarity', 0)
             profit = alert.get('profit_margin', 0)
             store_title = alert.get('store_title', 'Unknown Item')
             store_price = alert.get('store_price', '')
@@ -79,10 +78,10 @@ class AlertNotifier:
             if len(store_title) > 50:
                 store_title = store_title[:47] + "..."
 
-            title = "New High-Value Alert!"
+            title = "🔥 High-Profit Alert!"
             message = (
                 f"{store_title}\n"
-                f"Similarity: {similarity:.1f}% | Profit: {profit:.1f}%\n"
+                f"Profit: {profit:.1f}%\n"
                 f"Store: {store_price} → eBay: {ebay_price}"
             )
 
@@ -92,14 +91,13 @@ class AlertNotifier:
         except Exception as e:
             logging.error(f"Failed to send notification: {e}")
 
-    def notify_batch_alerts(self, count: int, max_profit: float, max_similarity: float):
+    def notify_batch_alerts(self, count: int, max_profit: float):
         """
         Send notification for multiple new alerts added at once.
 
         Args:
             count: Number of new alerts
             max_profit: Highest profit margin in batch
-            max_similarity: Highest similarity in batch
         """
         if not self.enabled or not self.notifier:
             return
@@ -107,8 +105,7 @@ class AlertNotifier:
         try:
             title = f"🔔 {count} New Alert{'s' if count != 1 else ''}!"
             message = (
-                f"Added {count} new high-value alert{'s' if count != 1 else ''}\n"
-                f"Max Similarity: {max_similarity:.1f}%\n"
+                f"Added {count} new high-profit alert{'s' if count != 1 else ''}\n"
                 f"Max Profit: {max_profit:.1f}%"
             )
 

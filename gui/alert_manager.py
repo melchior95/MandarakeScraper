@@ -140,7 +140,7 @@ class AlertManager:
 
     def _notify_new_alerts(self, alerts: List[Dict]):
         """
-        Send notifications for newly created high-value alerts.
+        Send notifications for newly created high-profit alerts.
 
         Args:
             alerts: List of newly created alerts
@@ -148,7 +148,7 @@ class AlertManager:
         if not alerts or not self.notifier.enabled:
             return
 
-        # Filter alerts that meet notification criteria
+        # Filter alerts that meet notification criteria (profit-based only)
         notify_alerts = self.notification_filter.filter_alerts_for_notification(alerts)
 
         if not notify_alerts:
@@ -158,10 +158,9 @@ class AlertManager:
         if len(notify_alerts) == 1:
             self.notifier.notify_new_alert(notify_alerts[0])
         else:
-            # Get highest profit and similarity for batch notification
+            # Get highest profit for batch notification
             max_profit = max(a.get('profit_margin', 0) for a in notify_alerts)
-            max_similarity = max(a.get('similarity', 0) for a in notify_alerts)
-            self.notifier.notify_batch_alerts(len(notify_alerts), max_profit, max_similarity)
+            self.notifier.notify_batch_alerts(len(notify_alerts), max_profit)
 
     def get_all_alerts(self) -> List[Dict]:
         """Get all alerts from storage."""

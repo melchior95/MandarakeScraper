@@ -21,6 +21,7 @@ from gui.alert_states import (
     get_state_color,
     get_state_display_name
 )
+from gui.image_comparison_window import ImageComparisonWindow
 
 
 class AlertTab(ttk.Frame):
@@ -53,10 +54,10 @@ class AlertTab(ttk.Frame):
             self.notify_min_sim = 80.0
             self.notify_min_profit = 30.0
 
-        # Initialize alert manager with notification settings
+        # Initialize alert manager with notification settings (profit-based only)
         self.alert_manager = AlertManager(
             notifications_enabled=self.notifications_enabled,
-            notify_min_similarity=self.notify_min_sim,
+            notify_min_similarity=0.0,  # No similarity check - if it's an alert, it's similar enough
             notify_min_profit=self.notify_min_profit
         )
 
@@ -124,9 +125,9 @@ class AlertTab(ttk.Frame):
         profit_spinbox.pack(side=tk.LEFT, padx=5)
         self.min_profit_var.trace_add("write", lambda *args: self._on_filter_change())
 
-        # Notification settings (on right side of filters)
+        # Notification settings (right-justified)
         notify_frame = ttk.LabelFrame(controls_frame, text="Notifications:", padding=5)
-        notify_frame.pack(side=tk.LEFT, padx=(10, 0))
+        notify_frame.pack(side=tk.RIGHT, padx=(10, 0))
 
         self.notify_enabled_var = tk.BooleanVar(value=self.notifications_enabled)
         notify_check = ttk.Checkbutton(
@@ -136,19 +137,6 @@ class AlertTab(ttk.Frame):
             command=self._on_notification_toggle
         )
         notify_check.pack(side=tk.LEFT, padx=5)
-
-        ttk.Label(notify_frame, text="Min Sim:").pack(side=tk.LEFT, padx=(10, 2))
-        self.notify_sim_var = tk.DoubleVar(value=self.notify_min_sim)
-        notify_sim_spin = ttk.Spinbox(
-            notify_frame,
-            from_=0,
-            to=100,
-            textvariable=self.notify_sim_var,
-            width=6,
-            command=self._on_notification_settings_change
-        )
-        notify_sim_spin.pack(side=tk.LEFT, padx=2)
-        ttk.Label(notify_frame, text="%").pack(side=tk.LEFT)
 
         ttk.Label(notify_frame, text="Min Profit:").pack(side=tk.LEFT, padx=(10, 2))
         self.notify_profit_var = tk.DoubleVar(value=self.notify_min_profit)
@@ -292,18 +280,16 @@ class AlertTab(ttk.Frame):
 
     def _on_notification_settings_change(self):
         """Handle notification threshold changes."""
-        notify_min_sim = self.notify_sim_var.get()
         notify_min_profit = self.notify_profit_var.get()
 
-        # Update alert manager notification thresholds
-        self.alert_manager.notification_filter.min_similarity = notify_min_sim
+        # Update alert manager notification thresholds (only profit, similarity always passes)
+        self.alert_manager.notification_filter.min_similarity = 0.0  # No similarity check
         self.alert_manager.notification_filter.min_profit = notify_min_profit
 
         # Save to settings
         if self.settings_manager:
             try:
                 settings = self.settings_manager.get_alert_settings()
-                settings['notify_min_similarity'] = notify_min_sim
                 settings['notify_min_profit'] = notify_min_profit
                 self.settings_manager.save_alert_settings(**settings)
             except Exception as e:
@@ -628,7 +614,7 @@ class AlertTab(ttk.Frame):
         self._load_alerts()
 
     def _on_double_click(self, event):
-        """Handle double-click on alert item - open links based on clicked column."""
+        """Handle double-click on alert item - show image comparison or open links based on clicked column."""
         item = self.tree.identify_row(event.y)
         if not item:
             return
@@ -642,8 +628,11 @@ class AlertTab(ttk.Frame):
         if not alert:
             return
 
+        # Open image comparison window if ID column or similarity/profit columns clicked
+        if column == "#0" or column == "#2" or column == "#3":  # ID, similarity, or profit column
+            self._show_image_comparison(alert)
         # Open appropriate link based on column
-        if column == "#4":  # store_title column (0-indexed: #0=ID, #1=state, #2=similarity, #3=profit, #4=store_title)
+        elif column == "#4":  # store_title column (0-indexed: #0=ID, #1=state, #2=similarity, #3=profit, #4=store_title)
             link = alert.get('store_link', '')
             if link:
                 webbrowser.open(link)
@@ -651,6 +640,14 @@ class AlertTab(ttk.Frame):
             link = alert.get('ebay_link', '')
             if link:
                 webbrowser.open(link)
+
+    def _show_image_comparison(self, alert: Dict):
+        """Show side-by-side image comparison window for alert."""
+        try:
+            ImageComparisonWindow(self, alert)
+        except Exception as e:
+            logging.error(f"Failed to open image comparison window: {e}")
+            messagebox.showerror("Error", f"Failed to open image comparison:\n{e}")
 
     def _on_right_click(self, event):
         """Handle right-click - show context menu."""
@@ -660,6 +657,13 @@ class AlertTab(ttk.Frame):
 
         # Create context menu
         menu = tk.Menu(self, tearoff=0)
+
+        # Get alert for comparison option
+        alert_id = int(self.tree.item(item, "text"))
+        alert = self.alert_manager.storage.get_alert_by_id(alert_id)
+
+        menu.add_command(label="Show Image Comparison", command=lambda: self._show_image_comparison(alert))
+        menu.add_separator()
         menu.add_command(label="Open Store Link", command=lambda: self._open_store_link(item))
         menu.add_command(label="Open eBay Link", command=lambda: self._open_ebay_link(item))
         menu.add_separator()
