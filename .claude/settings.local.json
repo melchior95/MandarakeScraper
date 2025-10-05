@@ -43,7 +43,9 @@
       "Bash(echo:*)",
       "Bash(for:*)",
       "Bash(do echo \"=== $file ===\")",
-      "Bash(head:*)"
+      "Bash(head:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []
