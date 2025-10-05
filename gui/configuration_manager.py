@@ -372,8 +372,8 @@ class ConfigurationManager:
         language = config.get('language', 'en')
         store = config.get('store', 'Mandarake').title()
         
-        return (store, path.name, keyword, category, shop, hide_sold, 
-                results_per_page, max_pages, latest_additions, language)
+        return (store, keyword, category, shop, hide_sold,
+                results_per_page, max_pages, latest_additions, language, path.name)
     
     def add_to_recent_files(self, path: Path) -> None:
         """Add a config file to recent files list."""

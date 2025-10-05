@@ -326,7 +326,7 @@ class MandarakeTab(ttk.Frame):
         store_filter_combo.pack(side=tk.LEFT)
         store_filter_combo.bind('<<ComboboxSelected>>', lambda e: self.main._filter_config_tree())
 
-        columns = ('store', 'file', 'keyword', 'category', 'shop', 'hide_sold', 'results_per_page', 'max_pages', 'latest_additions', 'language')
+        columns = ('store', 'keyword', 'category', 'shop', 'hide_sold', 'results_per_page', 'max_pages', 'latest_additions', 'language', 'file')
         self.main.config_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=6)
         headings = {
             'store': 'Store',
@@ -500,7 +500,7 @@ class MandarakeTab(ttk.Frame):
 
         # Add "All Stores" option first
         self.main.shop_listbox.insert(tk.END, "All Stores")
-        self.main.shop_code_map.append("all")
+        self.main.shop_code_map.append("0")
 
         # Add all individual stores
         for code, name in STORE_OPTIONS:
@@ -537,7 +537,7 @@ class MandarakeTab(ttk.Frame):
 
         # Add "All Stores" option first
         self.main.shop_listbox.insert(tk.END, "All Stores")
-        self.main.shop_code_map.append("all")
+        self.main.shop_code_map.append("0")
 
         # Add all individual stores
         for code, name in sorted(SURUGAYA_SHOPS.items()):
@@ -796,12 +796,12 @@ class MandarakeTab(ttk.Frame):
         """Get the selected shop code from the listbox."""
         selection = self.main.shop_listbox.curselection()
         if not selection:
-            return "all"  # Default to all stores if nothing selected
+            return "0"  # Default to all stores if nothing selected
 
         index = selection[0]
         shop_code = self.main.shop_code_map[index]
 
-        return shop_code if shop_code else "all"
+        return shop_code if shop_code else "0"
 
     def _extract_code(self, label: str | None):
         """Extract code from label string."""

@@ -325,7 +325,7 @@ class EventHandlersManager:
         language = config.get('language', 'en')
         store = config.get('store', 'Mandarake').title()
 
-        values = (store, path.name, keyword, category, shop, hide, results_per_page, max_pages, timeframe, language)
+        values = (store, keyword, category, shop, hide, results_per_page, max_pages, timeframe, language, path.name)
         item = self.main_window.config_tree.insert('', 'end', values=values)
         self.main_window.config_paths[item] = path
 
@@ -543,9 +543,9 @@ class EventHandlersManager:
         if not item:
             return
 
-        # Check if category column was clicked (column #3, index starts at #1)
-        # Columns: store, file, keyword, category, shop...
-        if column != '#4':  # Category is the 4th column
+        # Check if category column was clicked (column #3)
+        # Columns: store, keyword, category, shop, hide_sold, results_per_page, max_pages, latest_additions, language, file
+        if column != '#3':  # Category is the 3rd column
             return
 
         # Get config path

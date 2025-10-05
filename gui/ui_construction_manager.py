@@ -475,7 +475,7 @@ class UIConstructionManager:
         self.main_window.config_store_filter = config_store_filter
 
         # Create tree
-        columns = ('store', 'file', 'keyword', 'category', 'shop', 'hide_sold', 'results_per_page', 'max_pages', 'latest_additions', 'language')
+        columns = ('store', 'keyword', 'category', 'shop', 'hide_sold', 'results_per_page', 'max_pages', 'latest_additions', 'language', 'file')
         config_tree = ttk.Treeview(parent, columns=columns, show='headings', height=6)
         
         headings = {

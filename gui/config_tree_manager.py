@@ -323,9 +323,9 @@ class ConfigTreeManager:
         if not item:
             return
 
-        # Check if category column was clicked (column #4)
-        # Columns: store, file, keyword, category, shop...
-        if column != '#4':  # Category is the 4th column
+        # Check if category column was clicked (column #3)
+        # Columns: store, keyword, category, shop, hide_sold, results_per_page, max_pages, latest_additions, language, file
+        if column != '#3':  # Category is the 3rd column
             return
 
         # Get config path

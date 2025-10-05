@@ -2,6 +2,7 @@
 """Tree Manager Module - Handles configuration tree operations."""
 
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from tkinter import messagebox, ttk
@@ -34,8 +35,8 @@ class TreeManager:
     
     def _setup_tree_columns(self):
         """Setup tree columns and headings."""
-        columns = ('store', 'file', 'keyword', 'category', 'shop', 'hide_sold', 
-                  'results_per_page', 'max_pages', 'latest_additions', 'language')
+        columns = ('store', 'keyword', 'category', 'shop', 'hide_sold',
+                  'results_per_page', 'max_pages', 'latest_additions', 'language', 'file')
         
         self.tree['columns'] = columns
         
@@ -170,8 +171,8 @@ class TreeManager:
             try:
                 with order_file.open('r', encoding='utf-8') as f:
                     custom_order = json.load(f)
-            except:
-                pass
+            except (json.JSONDecodeError, IOError) as e:
+                logging.warning(f"Failed to load config order file: {e}")
         
         # Sort: custom ordered items first, then new items by modification time
         config_file_names = {f.name: f for f in config_files}
