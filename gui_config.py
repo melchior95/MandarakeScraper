@@ -241,8 +241,8 @@ class ScraperGUI(tk.Tk):
                 ebay_send_min_similarity=self.ebay_tab.alert_min_similarity.get(),
                 ebay_send_min_profit=self.ebay_tab.alert_min_profit.get()
             )
-        except:
-            pass  # Ignore errors during saving
+        except Exception as e:
+            logging.warning(f"Failed to save eBay alert settings: {e}")
 
     def on_closing(self):
         """Handle application closing - save settings and cleanup resources"""
@@ -618,6 +618,10 @@ class ScraperGUI(tk.Tk):
                     self.ebay_tab.browserless_status.set(payload)
                 elif message_type == "browserless_progress_stop":
                     self.ebay_tab.browserless_progress.stop()
+                elif message_type == "refresh_csv_tree":
+                    # Refresh CSV tree to show updated checkmarks
+                    if self.ebay_tab.csv_comparison_manager:
+                        self.ebay_tab.csv_comparison_manager.filter_csv_items()
         except queue.Empty:
             pass
         self.after(500, self._poll_queue)
@@ -755,8 +759,8 @@ class ScraperGUI(tk.Tk):
             try:
                 self.after_cancel(self._auto_save_timer)
                 self._auto_save_timer = None
-            except:
-                pass
+            except (ValueError, tk.TclError) as e:
+                logging.debug(f"Failed to cancel auto-save timer: {e}")
 
         # Stop schedule executor
         if hasattr(self, 'schedule_executor'):
@@ -773,8 +777,8 @@ class ScraperGUI(tk.Tk):
             for child in children:
                 try:
                     child.kill()
-                except:
-                    pass
+                except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                    logging.debug(f"Failed to kill child process {child.pid}: {e}")
         except ImportError:
             # psutil not available, skip subprocess cleanup
             pass
@@ -1342,11 +1346,22 @@ class ScraperGUI(tk.Tk):
     def compare_new_csv_items(self):
         """Compare only items that haven't been compared yet"""
         if self.ebay_tab.csv_comparison_manager:
-            # CSV manager's method has slightly different logic than compare_all
-            # It tracks which items have been compared before
-            # For now, delegate to compare_all as a fallback
-            # TODO: Implement proper compare_new_items() in CSV manager if needed
-            self.ebay_tab.csv_comparison_manager.compare_all_csv_items(skip_confirmation=False)
+            # Filter items that don't have ebay_compared field set
+            all_items = self.ebay_tab.csv_comparison_manager.csv_filtered_items if hasattr(
+                self.ebay_tab.csv_comparison_manager, 'csv_filtered_items'
+            ) and self.ebay_tab.csv_comparison_manager.csv_filtered_items else self.ebay_tab.csv_comparison_manager.csv_compare_data
+
+            # Get items without ebay_compared (new items)
+            new_items = [item for item in all_items if not item.get('ebay_compared', '')]
+
+            if not new_items:
+                messagebox.showinfo("No New Items", "All filtered CSV items have already been compared.")
+                return
+
+            print(f"[COMPARE NEW] Found {len(new_items)} items that haven't been compared yet (out of {len(all_items)} total)")
+
+            # Compare only the new items
+            self.ebay_tab.csv_comparison_manager.compare_csv_items_individually(new_items)
 
     def clear_comparison_results(self):
         """Clear comparison results - delegated to CSVComparisonManager"""
@@ -1370,10 +1385,6 @@ class ScraperGUI(tk.Tk):
     def _extract_price(self, price_text):
         """Extract numeric price from text"""
         return utils.extract_price(price_text)
-
-    def _compare_images(self, ref_image, compare_image):
-        """Compare two images and return similarity score (0-100)."""
-        return utils.compare_images(ref_image, compare_image)
 
     def _create_debug_folder(self, query):
         """Create debug folder for saving comparison images."""

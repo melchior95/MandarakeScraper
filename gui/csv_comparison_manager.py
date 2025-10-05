@@ -165,10 +165,12 @@ class CSVComparisonManager:
             stock_display = 'Yes' if row.get('in_stock', '').lower() in ('true', 'yes', '1') else 'No'
             category = row.get('category', '')
             url = row.get('url', '')
+            # Check if item has been compared (ebay_compared field exists and is not empty)
+            compared_display = '✓' if row.get('ebay_compared', '') else ''
 
             # Insert WITHOUT image for fast loading (use 0-based index as iid for proper mapping)
             self.gui.csv_items_tree.insert('', 'end', iid=str(i), text=str(i+1),
-                                          values=(title, price, shop, stock_display, category, url))
+                                          values=(title, price, shop, stock_display, category, compared_display, url))
 
         print(f"[CSV COMPARE] Displayed {len(filtered_items)} items (newly listed: {newly_listed_only}, in-stock: {in_stock_only})")
 
@@ -537,6 +539,11 @@ class CSVComparisonManager:
                 main_window = self.gui.main_window if hasattr(self.gui, 'main_window') else self.gui
                 self.gui.after(0, main_window.apply_results_filter)
 
+                # Save comparison results to CSV (update ebay_compared field)
+                self.save_comparison_results_to_csv(comparison_results)
+                # Refresh the CSV tree to show checkmarks
+                self.gui.after(0, self.filter_csv_items)
+
                 # Auto-send to alerts if threshold is active
                 if (hasattr(self.gui, 'alert_threshold_active') and
                     self.gui.alert_threshold_active.get()):
@@ -597,6 +604,11 @@ class CSVComparisonManager:
                 # Access main_window through ebay_tab
                 main_window = self.gui.main_window if hasattr(self.gui, 'main_window') else self.gui
                 self.gui.after(0, main_window.apply_results_filter)
+
+                # Save comparison results to CSV (update ebay_compared field)
+                self.save_comparison_results_to_csv(comparison_results)
+                # Refresh the CSV tree to show checkmarks
+                self.gui.after(0, self.filter_csv_items)
 
                 # Auto-send to alerts if threshold is active
                 if (hasattr(self.gui, 'alert_threshold_active') and
@@ -1067,22 +1079,154 @@ class CSVComparisonManager:
                         self.gui.browserless_status.set("No results found.")
                     return
 
-                # Display results in eBay results tree
+                print(f"[IMAGE SEARCH API] Got {len(results)} raw results, now comparing images...")
+
+                # Get the CSV item data for profit calculation
+                selection = self.gui.csv_items_tree.selection()
+                item_id = selection[0]
+                index = int(item_id)
+                items_list = self.csv_filtered_items if hasattr(self, 'csv_filtered_items') and self.csv_filtered_items else self.csv_compare_data
+                csv_item = items_list[index]
+
+                # Compare images and calculate similarity/profit for each result
+                if hasattr(self.gui, 'browserless_status'):
+                    self.gui.browserless_status.set(f"Comparing {len(results)} images...")
+
+                compared_results = self._compare_image_search_results(local_image_path, results, csv_item)
+
+                if not compared_results:
+                    messagebox.showinfo("No Matches", "No matching items found after image comparison.")
+                    if hasattr(self.gui, 'browserless_status'):
+                        self.gui.browserless_status.set("No matches found.")
+                    return
+
+                # Display compared results in eBay results tree
                 if hasattr(self.gui, 'ebay_search_manager') and self.gui.ebay_search_manager:
-                    self.gui.ebay_search_manager.display_browserless_results(results)
+                    self.gui.ebay_search_manager.display_browserless_results(compared_results)
                     if hasattr(self.gui, 'browserless_status'):
-                        self.gui.browserless_status.set(f"Found {len(results)} results via eBay API")
-                    print(f"[IMAGE SEARCH API] Displayed {len(results)} results")
+                        self.gui.browserless_status.set(f"Found {len(compared_results)} matches (filtered from {len(results)})")
+                    print(f"[IMAGE SEARCH API] Displayed {len(compared_results)} matching results")
                 else:
-                    messagebox.showinfo("Results Found", f"Found {len(results)} matching items.\n\nNote: Results display not available.")
+                    messagebox.showinfo("Results Found", f"Found {len(compared_results)} matching items.\n\nNote: Results display not available.")
                     if hasattr(self.gui, 'browserless_status'):
-                        self.gui.browserless_status.set(f"Found {len(results)} results")
+                        self.gui.browserless_status.set(f"Found {len(compared_results)} matches")
 
         except Exception as e:
             messagebox.showerror("Error", f"Search failed: {e}")
             if hasattr(self.gui, 'browserless_status'):
                 self.gui.browserless_status.set("Search failed")
             print(f"[IMAGE SEARCH API ERROR] {e}")
+
+    def _compare_image_search_results(self, query_image_path: str, ebay_results: List[Dict], csv_item: Dict) -> List[Dict]:
+        """
+        Compare query image against eBay search results and calculate similarity/profit.
+
+        Args:
+            query_image_path: Path to the query image
+            ebay_results: List of eBay search results from API
+            csv_item: CSV item data for profit calculation
+
+        Returns:
+            List of results with similarity and profit, filtered by threshold
+        """
+        import cv2
+        import numpy as np
+        import requests
+        from gui.workers import compare_images
+        from gui.utils import extract_price
+
+        try:
+            # Load query image
+            query_img = cv2.imread(query_image_path)
+            if query_img is None:
+                print(f"[IMAGE COMPARE] Failed to load query image: {query_image_path}")
+                return []
+
+            print(f"[IMAGE COMPARE] Loaded query image: {query_img.shape}")
+
+            # Get USD/JPY rate from settings
+            usd_jpy_rate = 150.0
+            if hasattr(self.gui, 'settings'):
+                usd_jpy_rate = self.gui.settings.get_setting('ebay_analysis.usd_jpy_rate', 150.0)
+
+            # Get max image comparison results from settings
+            max_image_results = 10
+            if hasattr(self.gui, 'settings'):
+                max_image_results = self.gui.settings.get_setting('ebay_analysis.max_image_comparison_results', 10)
+
+            # Limit eBay results to top X (image search returns them in relevance order)
+            limited_ebay_results = ebay_results[:max_image_results]
+            print(f"[IMAGE COMPARE] Comparing top {len(limited_ebay_results)} results (from {len(ebay_results)} total)")
+
+            # Get CSV item price
+            csv_price_text = csv_item.get('price_text', csv_item.get('price', '0'))
+            csv_price_jpy = extract_price(csv_price_text)
+
+            compared_results = []
+            min_similarity = 50.0  # Minimum similarity threshold
+
+            for idx, ebay_result in enumerate(limited_ebay_results):
+                try:
+                    # Get eBay image URL
+                    ebay_image_url = ebay_result.get('image_url', '')
+                    if not ebay_image_url:
+                        continue
+
+                    # Download eBay image
+                    response = requests.get(ebay_image_url, timeout=10)
+                    if response.status_code != 200:
+                        continue
+
+                    img_array = np.frombuffer(response.content, np.uint8)
+                    ebay_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                    if ebay_img is None:
+                        continue
+
+                    # Compare images
+                    similarity = compare_images(query_img, ebay_img)
+
+                    # Only include results above threshold
+                    if similarity < min_similarity:
+                        continue
+
+                    # Calculate profit margin
+                    ebay_price_text = ebay_result.get('price', '$0')
+                    ebay_price_usd = extract_price(ebay_price_text)
+
+                    shipping_text = ebay_result.get('shipping', '$0')
+                    shipping_usd = extract_price(shipping_text)
+
+                    csv_price_usd = csv_price_jpy / usd_jpy_rate if usd_jpy_rate > 0 else 0
+                    total_ebay_usd = ebay_price_usd + shipping_usd
+
+                    profit_margin = ((total_ebay_usd / csv_price_usd - 1) * 100) if csv_price_usd > 0 else 0
+
+                    # Add similarity and profit to result (formatted for display)
+                    result_with_comparison = ebay_result.copy()
+                    result_with_comparison['similarity'] = f"{similarity:.1f}%"
+                    result_with_comparison['profit_margin'] = f"{profit_margin:.1f}%"
+                    result_with_comparison['mandarake_price'] = f"¥{csv_price_jpy:,.0f}"
+
+                    compared_results.append(result_with_comparison)
+
+                    print(f"[IMAGE COMPARE] Result {idx+1}: {similarity:.1f}% similarity, {profit_margin:.1f}% profit - {ebay_result.get('title', 'N/A')[:50]}")
+
+                except Exception as e:
+                    print(f"[IMAGE COMPARE] Error comparing result {idx+1}: {e}")
+                    continue
+
+            # Sort by similarity descending
+            compared_results.sort(key=lambda x: x.get('similarity', 0), reverse=True)
+
+            print(f"[IMAGE COMPARE] Found {len(compared_results)} matches above {min_similarity}% similarity (compared top {len(limited_ebay_results)} of {len(ebay_results)} results)")
+
+            return compared_results
+
+        except Exception as e:
+            print(f"[IMAGE COMPARE ERROR] {e}")
+            import traceback
+            traceback.print_exc()
+            return []
 
     def _search_csv_by_image_web(self) -> None:
         """Search selected CSV item by image using web method."""
@@ -1123,6 +1267,126 @@ class CSVComparisonManager:
         else:
             if hasattr(self.gui, 'run_queue'):
                 self.gui.run_queue.put(("error", "Could not find results using web search."))
+
+    def _image_compare_all_csv_items(self, silent: bool = False) -> None:
+        """
+        Batch image comparison for all filtered CSV items using eBay API.
+
+        Args:
+            silent: If True, skip confirmation dialogs (for scheduled execution)
+        """
+        if not hasattr(self.gui, 'csv_items_tree'):
+            if not silent:
+                messagebox.showwarning("No Data", "Please load a CSV file first.")
+            return
+
+        # Get filtered items
+        items_list = self.csv_filtered_items if hasattr(self, 'csv_filtered_items') and self.csv_filtered_items else self.csv_compare_data
+
+        if not items_list:
+            if not silent:
+                messagebox.showwarning("No Items", "No CSV items to compare.")
+            return
+
+        # Validate items have images
+        items_with_images = [item for item in items_list if item.get('local_image') and Path(item.get('local_image')).exists()]
+
+        if not items_with_images:
+            if not silent:
+                messagebox.showwarning("No Images", "No CSV items have local images. Please download images first.")
+            return
+
+        # Confirm action (skip if silent mode)
+        if not silent:
+            if not messagebox.askyesno(
+                "Confirm Batch Image Search",
+                f"This will perform image comparison for {len(items_with_images)} items using eBay API.\n\n"
+                f"This may take several minutes. Continue?"
+            ):
+                return
+
+        # Start batch comparison in background thread
+        self._start_thread(self._run_batch_image_comparison, items_with_images)
+
+    def _run_batch_image_comparison(self, items: List[Dict]) -> None:
+        """Background worker for batch image comparison."""
+        from ebay_api import EbayAPI
+
+        try:
+            # Get API credentials
+            client_id = None
+            client_secret = None
+
+            if hasattr(self.gui, 'settings'):
+                client_id = self.gui.settings.get_setting('ebay_api.client_id')
+                client_secret = self.gui.settings.get_setting('ebay_api.client_secret')
+
+            if not client_id or not client_secret:
+                if hasattr(self.gui, 'run_queue'):
+                    self.gui.run_queue.put(("error", "eBay API credentials not configured."))
+                return
+
+            # Initialize eBay API
+            ebay_api = EbayAPI(client_id, client_secret)
+
+            # Accumulate all results
+            all_compared_results = []
+
+            # Process each item
+            for idx, csv_item in enumerate(items):
+                local_image_path = csv_item.get('local_image', '')
+
+                if hasattr(self.gui, 'run_queue'):
+                    self.gui.run_queue.put(("browserless_status", f"Image comparing {idx + 1}/{len(items)}..."))
+
+                print(f"[BATCH IMAGE COMPARE] Processing item {idx + 1}/{len(items)}: {csv_item.get('title', 'Unknown')}")
+
+                try:
+                    # Search by image
+                    results = ebay_api.search_by_image_api_full(local_image_path)
+
+                    if not results:
+                        print(f"[BATCH IMAGE COMPARE] No results for item {idx + 1}")
+                        continue
+
+                    print(f"[BATCH IMAGE COMPARE] Got {len(results)} raw results for item {idx + 1}, comparing...")
+
+                    # Compare images and filter
+                    compared_results = self._compare_image_search_results(local_image_path, results, csv_item)
+
+                    if compared_results:
+                        all_compared_results.extend(compared_results)
+                        print(f"[BATCH IMAGE COMPARE] Found {len(compared_results)} matches for item {idx + 1}")
+
+                except Exception as e:
+                    print(f"[BATCH IMAGE COMPARE] Error processing item {idx + 1}: {e}")
+                    continue
+
+            # Display all results
+            if all_compared_results:
+                if hasattr(self.gui, 'run_queue'):
+                    self.gui.run_queue.put(("browserless_results", all_compared_results))
+                    self.gui.run_queue.put(("browserless_status", f"Batch complete: Found {len(all_compared_results)} total matches from {len(items)} items"))
+
+                # Save comparison results to CSV (update ebay_compared field)
+                self.save_comparison_results_to_csv(all_compared_results)
+                # Refresh the CSV tree to show checkmarks
+                if hasattr(self.gui, 'run_queue'):
+                    self.gui.run_queue.put(("refresh_csv_tree", None))
+
+                print(f"[BATCH IMAGE COMPARE] Complete: {len(all_compared_results)} total matches")
+            else:
+                if hasattr(self.gui, 'run_queue'):
+                    self.gui.run_queue.put(("browserless_status", f"Batch complete: No matches found from {len(items)} items"))
+                    self.gui.run_queue.put(("info", "Batch image comparison complete. No matches found."))
+                print(f"[BATCH IMAGE COMPARE] Complete: No matches found")
+
+        except Exception as e:
+            print(f"[BATCH IMAGE COMPARE ERROR] {e}")
+            import traceback
+            traceback.print_exc()
+            if hasattr(self.gui, 'run_queue'):
+                self.gui.run_queue.put(("error", f"Batch image comparison failed: {e}"))
 
     def _get_recent_hours_value(self) -> Optional[int]:
         """Get recent hours value from GUI."""
@@ -1182,17 +1446,36 @@ class CSVComparisonManager:
             # Create a mapping of URLs to comparison results
             url_to_results = {}
             for result in comparison_results:
+                # Support both old format (mandarake_item) and new format (store_link)
                 mandarake_item = result.get('mandarake_item', {})
                 url = mandarake_item.get('url', mandarake_item.get('product_url', ''))
+
+                # If no URL from mandarake_item, try store_link (image comparison format)
+                if not url:
+                    url = result.get('store_link', '')
+
                 if url:
+                    # Handle both old format (best_match) and new format (direct fields)
                     best_match = result.get('best_match', {})
+                    has_match = bool(best_match) or result.get('similarity', 0) > 0
+
+                    # Get similarity - could be float or already formatted string
+                    similarity = result.get('similarity', 0)
+                    if isinstance(similarity, str):
+                        similarity = float(similarity.rstrip('%')) if similarity and similarity != '-' else 0
+
+                    # Get profit margin - could be float or already formatted string
+                    profit = result.get('profit_margin', 0)
+                    if isinstance(profit, str):
+                        profit = float(profit.rstrip('%')) if profit else 0
+
                     url_to_results[url] = {
                         'ebay_compared': datetime.now().isoformat(),
-                        'ebay_match_found': 'Yes' if best_match else 'No',
-                        'ebay_best_match_title': best_match.get('title', '') if best_match else '',
-                        'ebay_similarity': f"{result.get('similarity', 0):.1f}" if best_match else '',
-                        'ebay_price': f"${best_match.get('price', 0):.2f}" if best_match else '',
-                        'ebay_profit_margin': f"{result.get('profit_margin', 0):.1f}%" if best_match else ''
+                        'ebay_match_found': 'Yes' if has_match else 'No',
+                        'ebay_best_match_title': best_match.get('title', '') if best_match else result.get('ebay_title', ''),
+                        'ebay_similarity': f"{similarity:.1f}" if similarity > 0 else '',
+                        'ebay_price': best_match.get('price', '') if best_match else result.get('ebay_price', ''),
+                        'ebay_profit_margin': f"{profit:.1f}%" if profit != 0 else ''
                     }
 
             # Update csv_compare_data with comparison results

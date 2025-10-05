@@ -428,9 +428,15 @@ class EbayTab(ttk.Frame):
 
         ttk.Button(
             button_frame,
+            text="Image Compare All",
+            command=self._image_compare_all_csv_items
+        ).grid(row=1, column=4, sticky=tk.W, **pad)
+
+        ttk.Button(
+            button_frame,
             text="Clear Results",
             command=self._clear_comparison_results
-        ).grid(row=1, column=4, sticky=tk.W, **pad)
+        ).grid(row=1, column=5, sticky=tk.W, **pad)
 
         self.csv_compare_progress = ttk.Progressbar(button_frame, mode='indeterminate', length=200)
         self.csv_compare_progress.grid(row=0, column=5, rowspan=2, sticky=tk.W, padx=(10, 5))
@@ -473,7 +479,7 @@ class EbayTab(ttk.Frame):
     def _on_csv_filter_changed(self):
         """Handle CSV filter change."""
         if self.csv_comparison_manager:
-            return self.csv_comparison_manager._on_csv_filter_changed()
+            return self.csv_comparison_manager.on_csv_filter_changed()
 
     def _on_csv_item_selected(self, event):
         """Handle CSV item selection."""
@@ -538,6 +544,11 @@ class EbayTab(ttk.Frame):
     def _compare_new_csv_items(self):
         """Compare new CSV items only."""
         return self.main_window.compare_new_csv_items()
+
+    def _image_compare_all_csv_items(self):
+        """Image compare all CSV items using eBay API."""
+        if self.csv_comparison_manager:
+            return self.csv_comparison_manager._image_compare_all_csv_items()
 
     def _clear_comparison_results(self):
         """Clear CSV comparison results."""

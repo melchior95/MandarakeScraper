@@ -6,17 +6,20 @@ Displays list of schedules and provides management controls.
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 from gui.schedule_manager import ScheduleManager
 from gui.schedule_dialog import ScheduleDialog
 from gui.schedule_states import Schedule
 
+if TYPE_CHECKING:
+    from gui.schedule_executor import ScheduleExecutor
+
 
 class ScheduleTab(ttk.Frame):
     """Schedule management tab."""
 
-    def __init__(self, parent, executor_ref):
+    def __init__(self, parent: ttk.Notebook, executor_ref: 'ScheduleExecutor') -> None:
         """
         Initialize schedule tab.
 
@@ -31,7 +34,7 @@ class ScheduleTab(ttk.Frame):
         self._build_ui()
         self._load_schedules()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         """Build the UI components."""
         # Top controls
         controls_frame = ttk.Frame(self)
@@ -139,7 +142,29 @@ class ScheduleTab(ttk.Frame):
             text=f"Loaded {len(schedules)} schedules ({active_count} active)"
         )
 
-    def _add_schedule_to_tree(self, schedule: Schedule):
+    def _load_schedules(self) -> None:
+        """Load schedules from storage and populate treeview."""
+        # Clear existing items
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        # Load schedules
+        schedules = self.manager.get_all_schedules()
+
+        # Sort by ID (most recent first)
+        schedules.sort(key=lambda x: x.schedule_id, reverse=True)
+
+        # Populate treeview
+        for schedule in schedules:
+            self._add_schedule_to_tree(schedule)
+
+        # Update status
+        active_count = len([s for s in schedules if s.active])
+        self.status_label.config(
+            text=f"Loaded {len(schedules)} schedules ({active_count} active)"
+        )
+
+    def _add_schedule_to_tree(self, schedule: Schedule) -> None:
         """Add a single schedule to the treeview."""
         # Format values
         active_str = "Yes" if schedule.active else "No"
@@ -191,7 +216,7 @@ class ScheduleTab(ttk.Frame):
         self.tree.tag_configure("active", background="#e8f5e9")  # Light green
         self.tree.tag_configure("inactive", background="#f5f5f5")  # Light gray
 
-    def _on_new_schedule(self):
+    def _on_new_schedule(self) -> None:
         """Handle new schedule button."""
         dialog = ScheduleDialog(self)
         self.wait_window(dialog)
@@ -207,12 +232,13 @@ class ScheduleTab(ttk.Frame):
                 start_time_pst=result.start_time_pst,
                 end_date=result.end_date,
                 config_files=result.config_files,
-                active=result.active
+                active=result.active,
+                comparison_method=result.comparison_method
             )
             self._load_schedules()
             messagebox.showinfo("Success", f"Created schedule: {created.name}")
 
-    def _on_edit_schedule(self):
+    def _on_edit_schedule(self) -> None:
         """Handle edit schedule button."""
         selected_items = self.tree.selection()
         if not selected_items:
@@ -246,7 +272,7 @@ class ScheduleTab(ttk.Frame):
             self._load_schedules()
             messagebox.showinfo("Success", f"Updated schedule: {result.name}")
 
-    def _on_delete_schedule(self):
+    def _on_delete_schedule(self) -> None:
         """Handle delete schedule button."""
         selected_items = self.tree.selection()
         if not selected_items:
@@ -273,7 +299,7 @@ class ScheduleTab(ttk.Frame):
         self._load_schedules()
         messagebox.showinfo("Success", f"Deleted {len(schedule_ids)} schedule(s)")
 
-    def _on_toggle_active(self, active: bool):
+    def _on_toggle_active(self, active: bool) -> None:
         """Handle activate/deactivate button."""
         selected_items = self.tree.selection()
         if not selected_items:
@@ -295,7 +321,7 @@ class ScheduleTab(ttk.Frame):
         action = "Activated" if active else "Deactivated"
         messagebox.showinfo("Success", f"{action} {len(schedule_ids)} schedule(s)")
 
-    def _on_run_now(self):
+    def _on_run_now(self) -> None:
         """Handle run now button - manually trigger schedule execution."""
         selected_items = self.tree.selection()
         if not selected_items:

@@ -39,6 +39,7 @@ class ScheduleDialog(tk.Toplevel):
         self.frequency_var = tk.IntVar(value=schedule.frequency_hours if schedule else 24)
         self.start_time_var = tk.StringVar(value=schedule.start_time_pst if schedule else "09:00")
         self.end_date_var = tk.StringVar(value=schedule.end_date if schedule else "")
+        self.comparison_method_var = tk.StringVar(value=schedule.comparison_method if schedule else "text")
 
         # Day checkboxes
         self.day_vars = {
@@ -148,6 +149,27 @@ class ScheduleDialog(tk.Toplevel):
         ttk.Label(end_frame, text="ENDS ON").pack(side=tk.LEFT, padx=(0, 5))
         ttk.Entry(end_frame, textvariable=self.end_date_var, width=15).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Label(end_frame, text="(YYYY-MM-DD, leave empty for no end)").pack(side=tk.LEFT)
+
+        # Comparison method section
+        comparison_frame = ttk.LabelFrame(main_frame, text="COMPARISON METHOD", padding=10)
+        comparison_frame.pack(fill=tk.X, pady=(0, 10))
+
+        method_frame = ttk.Frame(comparison_frame)
+        method_frame.pack(fill=tk.X)
+
+        ttk.Radiobutton(
+            method_frame,
+            text="Text Search (faster)",
+            variable=self.comparison_method_var,
+            value="text"
+        ).pack(side=tk.LEFT, padx=(0, 20))
+
+        ttk.Radiobutton(
+            method_frame,
+            text="Image Search (more accurate, requires images)",
+            variable=self.comparison_method_var,
+            value="image"
+        ).pack(side=tk.LEFT)
 
         # Config files section
         configs_frame = ttk.LabelFrame(main_frame, text="CONFIG FILES TO RUN (in order)", padding=10)
@@ -337,6 +359,7 @@ class ScheduleDialog(tk.Toplevel):
             self.schedule.start_time_pst = start_time
             self.schedule.end_date = end_date if end_date else None
             self.schedule.config_files = config_files
+            self.schedule.comparison_method = self.comparison_method_var.get()
             self.result = self.schedule
         else:
             # Creating new schedule
@@ -349,7 +372,8 @@ class ScheduleDialog(tk.Toplevel):
                 frequency_hours=frequency,
                 start_time_pst=start_time,
                 end_date=end_date if end_date else None,
-                config_files=config_files
+                config_files=config_files,
+                comparison_method=self.comparison_method_var.get()
             )
 
         self.destroy()

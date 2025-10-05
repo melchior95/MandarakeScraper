@@ -45,6 +45,7 @@ class Schedule:
         csv_newly_listed: Filter CSV to newly listed items only
         csv_in_stock: Filter CSV to in-stock items only
         csv_2nd_keyword: Add secondary keyword to eBay search
+        comparison_method: Comparison method ("text" or "image")
         created_at: Creation timestamp
         last_run: Last execution timestamp
         next_run: Next scheduled execution timestamp
@@ -61,6 +62,7 @@ class Schedule:
     csv_newly_listed: bool = False
     csv_in_stock: bool = True
     csv_2nd_keyword: bool = False
+    comparison_method: str = "text"  # "text" or "image"
     created_at: Optional[str] = None
     last_run: Optional[str] = None
     next_run: Optional[str] = None
@@ -80,6 +82,7 @@ class Schedule:
             'csv_newly_listed': self.csv_newly_listed,
             'csv_in_stock': self.csv_in_stock,
             'csv_2nd_keyword': self.csv_2nd_keyword,
+            'comparison_method': self.comparison_method,
             'created_at': self.created_at,
             'last_run': self.last_run,
             'next_run': self.next_run
@@ -101,6 +104,7 @@ class Schedule:
             csv_newly_listed=data.get('csv_newly_listed', False),
             csv_in_stock=data.get('csv_in_stock', True),
             csv_2nd_keyword=data.get('csv_2nd_keyword', False),
+            comparison_method=data.get('comparison_method', 'text'),
             created_at=data.get('created_at'),
             last_run=data.get('last_run'),
             next_run=data.get('next_run')

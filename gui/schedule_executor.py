@@ -140,14 +140,24 @@ class ScheduleExecutor:
             schedule: Parent schedule (for logging)
         """
         try:
-            print(f"[SCHEDULE EXECUTOR] Running comparison for: {config_path.name}")
+            comparison_method = schedule.comparison_method if hasattr(schedule, 'comparison_method') else "text"
+            print(f"[SCHEDULE EXECUTOR] Running {comparison_method} comparison for: {config_path.name}")
 
             # Get alert tab thresholds
             alert_tab = self.gui.alert_tab
             min_similarity, min_profit = alert_tab.get_threshold_values()
 
-            # Run compare all (this will populate csv_comparison_results)
-            self.gui._run_csv_comparison_async()
+            # Run comparison based on method
+            if comparison_method == "image":
+                # Run image comparison (batch image search)
+                print(f"[SCHEDULE EXECUTOR] Using image comparison method")
+                if hasattr(self.gui.ebay_tab, 'csv_comparison_manager'):
+                    # Pass silent=True to skip confirmation dialogs
+                    self.gui.ebay_tab.csv_comparison_manager._image_compare_all_csv_items(silent=True)
+            else:
+                # Default to text comparison
+                print(f"[SCHEDULE EXECUTOR] Using text comparison method")
+                self.gui._run_csv_comparison_async()
 
             # Wait for comparison to complete, then send to alerts
             # We'll use a callback approach

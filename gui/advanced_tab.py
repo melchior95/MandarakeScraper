@@ -197,6 +197,29 @@ class AdvancedTab(ttk.Frame):
         ).pack(side=tk.LEFT, padx=5)
         current_row += 1
 
+        # Max Image Comparison Results
+        max_image_results = self.settings.get_setting('ebay_analysis.max_image_comparison_results', 10)
+        self.max_image_comparison_results_var = tk.IntVar(value=max_image_results)
+
+        ttk.Label(self, text="Max Image Comparison Results:").grid(
+            row=current_row, column=0, sticky=tk.W, **pad
+        )
+        ttk.Spinbox(
+            self,
+            from_=1,
+            to=50,
+            textvariable=self.max_image_comparison_results_var,
+            width=10
+        ).grid(row=current_row, column=1, sticky=tk.W, **pad)
+        ttk.Label(
+            self,
+            text="(Only compare top X results from image search)",
+            font=('TkDefaultFont', 8),
+            foreground='gray'
+        ).grid(row=current_row, column=2, sticky=tk.W, **pad)
+        self.max_image_comparison_results_var.trace_add('write', self._on_max_image_results_changed)
+        current_row += 1
+
         # Separator
         ttk.Separator(self, orient='horizontal').grid(
             row=current_row, column=0, columnspan=4, sticky='ew', pady=10
@@ -361,6 +384,15 @@ class AdvancedTab(ttk.Frame):
     def _on_max_csv_items_changed(self, *args: Any) -> None:
         """Handle max CSV items change."""
         self.main_window._on_max_csv_items_changed(*args)
+
+    def _on_max_image_results_changed(self, *args: Any) -> None:
+        """Handle max image comparison results change."""
+        try:
+            value = self.max_image_comparison_results_var.get()
+            self.settings.set_setting('ebay_analysis.max_image_comparison_results', value)
+            print(f"[SETTINGS] Max image comparison results set to: {value}")
+        except tk.TclError:
+            pass  # Ignore invalid values during typing
 
     def _on_marketplace_toggle(self) -> None:
         """Handle marketplace toggle change."""

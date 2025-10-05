@@ -67,8 +67,9 @@ class EventHandlersManager:
             self.main_window.main_category_combo['values'] = [f"{name} ({code})" for code, name in MAIN_CATEGORY_OPTIONS]
             # Auto-select "Everything" category
             self.main_window.main_category_var.set("Everything (00)")
-            # Set results per page to 240 (Mandarake default)
-            self.main_window.results_per_page_var.set('240')
+            # Set results per page from settings (default 48)
+            mandarake_results_per_page = self.main_window.settings.get_setting('scrapers.mandarake.results_per_page', 48)
+            self.main_window.results_per_page_var.set(str(mandarake_results_per_page))
             # Trigger category selection to populate detailed categories
             self.main_window._on_main_category_selected()
         elif store == "Suruga-ya":
@@ -509,8 +510,8 @@ class EventHandlersManager:
         try:
             # Always show menu - user can select text before right-clicking
             self.main_window.keyword_menu.post(event.x_root, event.y_root)
-        except:
-            pass
+        except tk.TclError as e:
+            logging.debug(f"Failed to show keyword menu: {e}")
 
     def handle_add_to_publisher_list(self):
         """Add selected text from keyword entry to publisher list."""

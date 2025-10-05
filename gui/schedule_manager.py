@@ -34,7 +34,8 @@ class ScheduleManager:
         start_time_pst: str,
         end_date: Optional[str],
         config_files: List[str],
-        active: bool = True
+        active: bool = True,
+        comparison_method: str = "text"
     ) -> Schedule:
         """
         Create a new schedule.
@@ -48,6 +49,7 @@ class ScheduleManager:
             end_date: End date (YYYY-MM-DD)
             config_files: List of config JSON files
             active: Whether schedule is active
+            comparison_method: Comparison method ("text" or "image")
 
         Returns:
             Created schedule
@@ -61,7 +63,8 @@ class ScheduleManager:
             frequency_hours=frequency_hours,
             start_time_pst=start_time_pst,
             end_date=end_date,
-            config_files=config_files
+            config_files=config_files,
+            comparison_method=comparison_method
         )
 
         # Calculate next run time

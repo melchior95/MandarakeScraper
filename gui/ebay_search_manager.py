@@ -46,7 +46,7 @@ class EbaySearchManager:
         style = ttk.Style()
         style.configure('Browserless.Treeview', rowheight=70)
         
-        self.tree['columns'] = ('title', 'price', 'shipping', 'mandarake_price', 
+        self.tree['columns'] = ('title', 'price', 'shipping', 'store_price',
                                'profit_margin', 'sold_date', 'similarity', 'url')
         self.tree.configure(style='Browserless.Treeview')
         
@@ -59,7 +59,7 @@ class EbaySearchManager:
             'title': 'Title',
             'price': 'eBay Price',
             'shipping': 'Shipping',
-            'mandarake_price': 'Mandarake ¥',
+            'store_price': 'Store ¥',
             'profit_margin': 'Profit %',
             'sold_date': 'Sold Date',
             'similarity': 'Similarity %',
@@ -70,7 +70,7 @@ class EbaySearchManager:
             'title': 280,
             'price': 80,
             'shipping': 70,
-            'mandarake_price': 90,
+            'store_price': 90,
             'profit_margin': 80,
             'sold_date': 100,
             'similarity': 90,
@@ -658,7 +658,7 @@ class EbaySearchManager:
                 if 'similarity' in result or 'profit_margin' in result:
                     # Find the corresponding item in all_comparison_results
                     matching_result = None
-                    for comp_result in getattr(self.main, 'all_comparison_results', []):
+                    for comp_result in getattr(self.gui, 'all_comparison_results', []):
                         if comp_result.get('ebay_link') == result.get('url'):
                             matching_result = comp_result
                             break

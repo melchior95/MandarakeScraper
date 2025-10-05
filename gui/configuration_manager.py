@@ -277,10 +277,10 @@ class ConfigurationManager:
             if config.get('store') == 'suruga-ya':
                 gui_instance.results_per_page_var.set('50')
             else:
-                gui_instance.results_per_page_var.set(str(config.get('results_per_page', '240')))
+                # Use config value or default from settings (48 for Mandarake)
+                mandarake_default = self.settings.get_setting('scrapers.mandarake.results_per_page', 48)
+                gui_instance.results_per_page_var.set(str(config.get('results_per_page', mandarake_default)))
 
-            if hasattr(gui_instance, 'advanced_tab'):
-                gui_instance.advanced_tab.schedule_var.set(config.get('schedule', ''))
             gui_instance._update_preview()
             
         finally:

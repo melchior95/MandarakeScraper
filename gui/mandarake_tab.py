@@ -436,8 +436,9 @@ class MandarakeTab(ttk.Frame):
             self.main.main_category_combo['values'] = [f"{name} ({code})" for code, name in MAIN_CATEGORY_OPTIONS]
             # Auto-select "Everything" category
             self.main.main_category_var.set("Everything (00)")
-            # Set results per page to 240 (Mandarake default)
-            self.main.results_per_page_var.set('240')
+            # Set results per page from settings (default 48)
+            mandarake_results_per_page = self.main.settings.get_setting('scrapers.mandarake.results_per_page', 48)
+            self.main.results_per_page_var.set(str(mandarake_results_per_page))
             # Trigger category selection to populate detailed categories
             self._on_main_category_selected()
 
