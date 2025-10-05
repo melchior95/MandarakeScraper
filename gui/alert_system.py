@@ -7,6 +7,7 @@ and automated monitoring functionality.
 
 import os
 import json
+import logging
 import tkinter as tk
 from tkinter import messagebox, filedialog
 import threading
@@ -416,7 +417,7 @@ class AlertSystem:
         """Get alert ID from tree item."""
         try:
             return tree.set(item_id, 'alert_id')
-        except:
+        except tk.TclError:
             return None
     
     def _edit_alert_dialog(self, alert_id: str, parent_dialog):

@@ -219,14 +219,14 @@ class ResultsDisplayManager:
             self.main_window.ebay_results_tree.delete(item)
 
         # Check if these are image comparison results (have string values) or regular eBay results (have numeric values)
-        is_image_comparison = results and isinstance(results[0].get('mandarake_price'), str)
+        is_image_comparison = results and isinstance(results[0].get('store_price'), str)
 
         if is_image_comparison:
             # Image comparison results - display as-is without numeric formatting
             for result in results:
                 values = (
                     result['title'][:40] + ('...' if len(result['title']) > 40 else ''),
-                    result['mandarake_price'],  # Already formatted string
+                    result['store_price'],  # Already formatted string
                     str(result['ebay_sold_count']),
                     result['ebay_median_price'],  # Already formatted string
                     result.get('ebay_price_range', 'N/A'),
@@ -243,7 +243,7 @@ class ResultsDisplayManager:
             for result in results:
                 values = (
                     result['title'][:40] + ('...' if len(result['title']) > 40 else ''),
-                    f"¥{result['mandarake_price']:,}",
+                    f"¥{result['store_price']:,}",
                     str(result['ebay_sold_count']),
                     f"${result['ebay_median_price']:.2f}",
                     result.get('ebay_price_range', 'N/A'),
@@ -273,7 +273,7 @@ class ResultsDisplayManager:
                 result['title'],  # Show full title, no truncation
                 result['price'],
                 result['shipping'],
-                result.get('mandarake_price', ''),
+                result.get('store_price', ''),
                 result.get('profit_margin', ''),
                 result.get('sold_date', ''),
                 result.get('similarity', ''),
@@ -435,22 +435,22 @@ class ResultsDisplayManager:
         median_price_usd = search_result['median_price']
         avg_price_usd = search_result['avg_price']
 
-        # Estimate various Mandarake price points for comparison
-        # (since we don't have a specific Mandarake price for the image)
-        estimated_mandarake_prices = [
+        # Estimate various store price points for comparison
+        # (since we don't have a specific store price for the image)
+        estimated_store_prices = [
             median_price_usd * usd_to_jpy * 0.3,  # 30% of USD median
             median_price_usd * usd_to_jpy * 0.5,  # 50% of USD median
             median_price_usd * usd_to_jpy * 0.7,  # 70% of USD median
         ]
 
-        for i, mandarake_price_jpy in enumerate(estimated_mandarake_prices):
-            mandarake_usd = mandarake_price_jpy / usd_to_jpy
+        for i, store_price_jpy in enumerate(estimated_store_prices):
+            store_usd = store_price_jpy / usd_to_jpy
 
             # Estimate shipping and fees
             estimated_fees = median_price_usd * 0.15 + 5
             net_proceeds = median_price_usd - estimated_fees
 
-            profit_margin = ((net_proceeds - mandarake_usd) / mandarake_usd) * 100 if mandarake_usd > 0 else 0
+            profit_margin = ((net_proceeds - store_usd) / store_usd) * 100 if store_usd > 0 else 0
 
             if profit_margin > min_profit:
                 # Create search term info
@@ -462,13 +462,13 @@ class ResultsDisplayManager:
 
                 results.append({
                     'title': title,
-                    'mandarake_price': int(mandarake_price_jpy),
+                    'store_price': int(store_price_jpy),
                     'ebay_sold_count': search_result['sold_count'],
                     'ebay_median_price': median_price_usd,
                     'ebay_avg_price': avg_price_usd,
                     'ebay_price_range': f"${search_result['min_price']:.2f} - ${search_result['max_price']:.2f}",
                     'profit_margin': profit_margin,
-                    'estimated_profit': net_proceeds - mandarake_usd
+                    'estimated_profit': net_proceeds - store_usd
                 })
 
         # Sort by profit margin (highest first)
@@ -490,7 +490,7 @@ class ResultsDisplayManager:
                 'title': r['ebay_title'],
                 'price': r['ebay_price'],
                 'shipping': r['shipping'],
-                'mandarake_price': r.get('mandarake_price', ''),
+                'store_price': r.get('store_price', ''),
                 'profit_margin': r['profit_display'],
                 'sold_date': r.get('sold_date', ''),  # Keep actual sold date
                 'similarity': r['similarity_display'],

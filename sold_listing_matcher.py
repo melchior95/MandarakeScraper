@@ -937,8 +937,8 @@ class SoldListingMatcher:
                     confidence += 0.1
             elif 'week' in listing.sold_date.lower():
                 confidence += 0.05
-        except:
-            pass
+        except (AttributeError, TypeError):
+            pass  # sold_date is None or not a string
 
         # Boost confidence for reasonable prices (not too high/low)
         if 10 <= listing.price <= 1000:

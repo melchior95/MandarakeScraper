@@ -3,10 +3,9 @@
 import re
 import unicodedata
 import hashlib
+import logging
 from pathlib import Path
 from typing import Optional
-import cv2
-from skimage.metrics import structural_similarity as ssim
 
 
 def slugify(value: str) -> str:
@@ -22,8 +21,8 @@ def slugify(value: str) -> str:
         ascii_value = normalized.encode('ascii', 'ignore').decode('ascii')
         if ascii_value.strip():
             value = ascii_value
-    except:
-        pass
+    except (UnicodeDecodeError, AttributeError):
+        pass  # Use original value if normalization fails
 
     # If still contains non-ASCII, use a hash-based approach for unique identification
     if not value.isascii():
@@ -67,47 +66,6 @@ def extract_price(price_text: str) -> float:
     if match:
         return float(match.group(0))
     return 0.0
-
-
-def compare_images(ref_image, compare_image) -> float:
-    """
-    Compare two images and return similarity score (0-100).
-    Uses SSIM (70%) + Histogram (30%) for robust comparison.
-
-    Args:
-        ref_image: Reference image (numpy array)
-        compare_image: Image to compare (numpy array)
-
-    Returns:
-        float: Similarity score from 0-100
-    """
-    try:
-        # Resize images to same size for comparison
-        ref_resized = cv2.resize(ref_image, (300, 300))
-        compare_resized = cv2.resize(compare_image, (300, 300))
-
-        # Convert to grayscale for SSIM
-        ref_gray = cv2.cvtColor(ref_resized, cv2.COLOR_BGR2GRAY)
-        compare_gray = cv2.cvtColor(compare_resized, cv2.COLOR_BGR2GRAY)
-
-        # Calculate SSIM (Structural Similarity Index)
-        ssim_score = ssim(ref_gray, compare_gray)
-
-        # Calculate histogram similarity as secondary metric
-        ref_hist = cv2.calcHist([ref_resized], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-        compare_hist = cv2.calcHist([compare_resized], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-        cv2.normalize(ref_hist, ref_hist)
-        cv2.normalize(compare_hist, compare_hist)
-        hist_score = cv2.compareHist(ref_hist, compare_hist, cv2.HISTCMP_CORREL)
-
-        # Weighted combination: SSIM (70%) + Histogram (30%)
-        similarity = (ssim_score * 0.7 + hist_score * 0.3) * 100
-
-        return similarity
-
-    except Exception as e:
-        print(f"[IMAGE COMPARE] Error: {e}")
-        return 0.0
 
 
 def create_debug_folder(query: str) -> Path:

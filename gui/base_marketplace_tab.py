@@ -11,9 +11,13 @@ import tkinter as tk
 from abc import ABC, abstractmethod
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from PIL import Image, ImageTk
+
+if TYPE_CHECKING:
+    from gui.settings_preferences_manager import SettingsPreferencesManager
+    from gui.alert_manager import AlertManager
 
 
 class BaseMarketplaceTab(ttk.Frame, ABC):
@@ -33,7 +37,8 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
     - _build_search_params()
     """
 
-    def __init__(self, parent, settings_manager, alert_manager, marketplace_name: str):
+    def __init__(self, parent: ttk.Notebook, settings_manager: 'SettingsPreferencesManager',
+                 alert_manager: 'AlertManager', marketplace_name: str) -> None:
         """
         Initialize base marketplace tab
 
@@ -50,13 +55,13 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
         self.marketplace_name = marketplace_name
 
         # State management
-        self.results_data = []  # All results
-        self.images = {}  # Image cache for thumbnails
-        self.worker_thread = None
-        self.is_searching = False
+        self.results_data: List[Dict[str, Any]] = []  # All results
+        self.images: Dict[str, ImageTk.PhotoImage] = {}  # Image cache for thumbnails
+        self.worker_thread: Optional[threading.Thread] = None
+        self.is_searching: bool = False
 
         # Communication queue for thread-safe UI updates
-        self.queue = queue.Queue()
+        self.queue: queue.Queue = queue.Queue()
 
         # Create UI
         self._create_ui()
@@ -64,7 +69,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
         # Start queue processor
         self._process_queue()
 
-    def _create_ui(self):
+    def _create_ui(self) -> None:
         """Create the complete UI layout"""
         # Configure grid layout
         self.columnconfigure(0, weight=1)
@@ -117,7 +122,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
         )
         status_label.grid(row=5, column=0, sticky=tk.EW)
 
-    def _create_search_controls(self, parent):
+    def _create_search_controls(self, parent: ttk.Frame) -> None:
         """
         Create search control widgets
 
@@ -164,7 +169,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
         self._create_marketplace_specific_controls(parent, start_row=2)
 
     @abstractmethod
-    def _create_marketplace_specific_controls(self, parent, start_row: int):
+    def _create_marketplace_specific_controls(self, parent: ttk.Frame, start_row: int) -> None:
         """
         Create marketplace-specific controls (override in subclass)
 
@@ -174,7 +179,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
         """
         pass
 
-    def _create_results_tree(self, parent):
+    def _create_results_tree(self, parent: ttk.Frame) -> None:
         """Create results treeview with columns"""
         # Define columns (subclass can customize)
         columns = self._get_tree_columns()
@@ -228,7 +233,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
             'stock_status': 100
         }
 
-    def _create_action_buttons(self, parent):
+    def _create_action_buttons(self, parent: ttk.Frame) -> None:
         """Create action buttons"""
         pad = {'padx': 5, 'pady': 3}
 
@@ -254,7 +259,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
     # Search Methods
     # ========================================================================
 
-    def search(self):
+    def search(self) -> None:
         """Start search (runs in background thread)"""
         if self.is_searching:
             messagebox.showwarning("Search in Progress", "Please wait for current search to complete")
@@ -279,7 +284,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
         self.worker_thread.start()
 
     @abstractmethod
-    def _search_worker(self):
+    def _search_worker(self) -> None:
         """
         Background worker for search (override in subclass)
 
@@ -295,7 +300,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
     # Results Display
     # ========================================================================
 
-    def _display_results(self, results: List[Dict]):
+    def _display_results(self, results: List[Dict]) -> None:
         """
         Display results in treeview
 
@@ -361,7 +366,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
 
         return ImageTk.PhotoImage(image)
 
-    def clear_results(self):
+    def clear_results(self) -> None:
         """Clear all results"""
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -372,7 +377,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
     # Queue Processing (Thread-Safe UI Updates)
     # ========================================================================
 
-    def _process_queue(self):
+    def _process_queue(self) -> None:
         """Process queue messages (runs in main thread)"""
         try:
             while True:
@@ -394,7 +399,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
         # Schedule next check
         self.after(100, self._process_queue)
 
-    def _search_complete(self):
+    def _search_complete(self) -> None:
         """Called when search completes"""
         self.progress.stop()
         self.progress.grid_remove()
@@ -404,7 +409,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
     # Actions
     # ========================================================================
 
-    def export_csv(self):
+    def export_csv(self) -> None:
         """Export results to CSV"""
         if not self.results_data:
             messagebox.showinfo("No Data", "No results to export")
@@ -432,7 +437,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
         except Exception as e:
             messagebox.showerror("Export Failed", f"Failed to export: {e}")
 
-    def send_to_alerts(self):
+    def send_to_alerts(self) -> None:
         """Send selected results to Alert tab"""
         selection = self.tree.selection()
         if not selection:
@@ -468,7 +473,7 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
             'status': 'Pending'
         }
 
-    def _open_selected_url(self):
+    def _open_selected_url(self) -> None:
         """Open selected item URL in browser"""
         selection = self.tree.selection()
         if not selection:
@@ -484,6 +489,6 @@ class BaseMarketplaceTab(ttk.Frame, ABC):
         except (ValueError, IndexError):
             pass
 
-    def _on_item_double_click(self, event):
+    def _on_item_double_click(self, event: tk.Event) -> None:
         """Handle double-click on tree item"""
         self._open_selected_url()

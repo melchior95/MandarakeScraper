@@ -1,12 +1,13 @@
 """Window and paned position management for GUI."""
 import re
 import logging
+from typing import Optional, Tuple, Dict, Any
 
 
 class WindowManager:
     """Manages window geometry, paned positions, and window state."""
 
-    def __init__(self, root, settings_manager):
+    def __init__(self, root, settings_manager) -> None:
         """Initialize window manager.
 
         Args:
@@ -15,11 +16,11 @@ class WindowManager:
         """
         self.root = root
         self.settings = settings_manager
-        self._user_sash_ratio = None  # Listbox paned ratio
-        self._user_vertical_sash_ratio = None  # Vertical paned ratio
-        self._restoring_sash = False  # Flag to prevent event handlers during restoration
+        self._user_sash_ratio: Optional[float] = None  # Listbox paned ratio
+        self._user_vertical_sash_ratio: Optional[float] = None  # Vertical paned ratio
+        self._restoring_sash: bool = False  # Flag to prevent event handlers during restoration
 
-    def apply_window_settings(self):
+    def apply_window_settings(self) -> None:
         """Apply saved window settings to the root window."""
         window_settings = self.settings.get_window_settings()
         width = window_settings.get('width', 780)
@@ -34,7 +35,7 @@ class WindowManager:
             self.root.state('zoomed')  # Windows/Linux
             # For macOS, use: self.root.attributes('-zoomed', True)
 
-    def save_window_settings(self):
+    def save_window_settings(self) -> None:
         """Save current window settings."""
         try:
             # Get current window geometry
@@ -52,8 +53,8 @@ class WindowManager:
                     sash_coords = self.root.ebay_tab.ebay_paned.sash_coord(0)  # First sash
                     if sash_coords:
                         ebay_paned_pos = sash_coords[1]  # Y coordinate
-                except:
-                    pass
+                except Exception as e:
+                    logging.debug(f"Failed to get eBay paned sash position: {e}")
 
             # Save window settings with paned position
             settings_dict = {
@@ -72,7 +73,7 @@ class WindowManager:
         except Exception as e:
             logging.error(f"Error saving window settings: {e}")
 
-    def _parse_geometry(self, geometry_string: str) -> tuple:
+    def _parse_geometry(self, geometry_string: str) -> Tuple[int, int, int, int]:
         """Parse tkinter geometry string into width, height, x, y."""
         try:
             # Format: "800x600+100+50"
@@ -81,10 +82,11 @@ class WindowManager:
                 return int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
             else:
                 return 780, 760, 100, 100
-        except:
+        except (ValueError, AttributeError, TypeError) as e:
+            logging.warning(f"Failed to parse geometry string '{geometry_string}': {e}")
             return 780, 760, 100, 100
 
-    def restore_paned_position(self, paned_widget, paned_type='ebay'):
+    def restore_paned_position(self, paned_widget, paned_type: str = 'ebay') -> None:
         """Restore the paned window sash position from saved settings.
 
         Args:
@@ -109,8 +111,8 @@ class WindowManager:
 
                 # If height is too small, the window hasn't been laid out yet - schedule retry
                 if total_height < 100:
-                    print(f"[VERTICAL PANED] Height too small ({total_height}px), retrying in 200ms...")
-                    self.root.after(200, lambda: self.restore_paned_position(paned_widget, paned_type))
+                    print(f"[VERTICAL PANED] Height too small ({total_height}px), retrying in 150ms...")
+                    self.root.after(150, lambda: self.restore_paned_position(paned_widget, paned_type))
                     return
 
                 sash_pos = int(total_height * ratio)
@@ -148,7 +150,7 @@ class WindowManager:
             import traceback
             traceback.print_exc()
 
-    def on_listbox_sash_moved(self, event, paned_widget):
+    def on_listbox_sash_moved(self, event, paned_widget) -> None:
         """Track when user manually moves the listbox sash."""
         try:
             total_width = paned_widget.winfo_width()
@@ -162,7 +164,7 @@ class WindowManager:
         except Exception as e:
             print(f"[LISTBOX PANED] Error tracking sash movement: {e}")
 
-    def get_sash_ratios(self):
+    def get_sash_ratios(self) -> Dict[str, float]:
         """Get the current sash ratios for saving."""
         return {
             'listbox_paned_ratio': self._user_sash_ratio if self._user_sash_ratio is not None else 0.50,

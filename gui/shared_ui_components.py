@@ -8,7 +8,7 @@ from typing import Dict, Callable, Optional, List, Tuple
 class URLKeywordPanel(ttk.LabelFrame):
     """URL + Keyword entry panel (shared by all stores)"""
 
-    def __init__(self, parent, on_change: Optional[Callable] = None):
+    def __init__(self, parent: tk.Widget, on_change: Optional[Callable] = None) -> None:
         super().__init__(parent, text="Search", padding=5)
 
         # URL entry
@@ -36,7 +36,7 @@ class URLKeywordPanel(ttk.LabelFrame):
             'keyword': self.keyword_var.get().strip()
         }
 
-    def set_values(self, url: str = '', keyword: str = ''):
+    def set_values(self, url: str = '', keyword: str = '') -> None:
         self.url_var.set(url)
         self.keyword_var.set(keyword)
 
@@ -44,8 +44,8 @@ class URLKeywordPanel(ttk.LabelFrame):
 class CategoryShopPanel(ttk.LabelFrame):
     """Main category + Detailed categories + Shop lists (shared by all stores)"""
 
-    def __init__(self, parent, main_categories: Dict, detailed_categories: Dict,
-                 shops: Dict, on_change: Optional[Callable] = None):
+    def __init__(self, parent: tk.Widget, main_categories: Dict, detailed_categories: Dict,
+                 shops: Dict, on_change: Optional[Callable] = None) -> None:
         super().__init__(parent, text="Categories & Shops", padding=5)
 
         self.main_categories = main_categories
@@ -109,11 +109,11 @@ class CategoryShopPanel(ttk.LabelFrame):
         """Format categories as 'code - name' for display"""
         return [f"{code} - {name}" for code, name in sorted(categories.items())]
 
-    def _populate_categories(self, categories: Dict):
+    def _populate_categories(self, categories: Dict) -> None:
         for code, name in sorted(categories.items()):
             self.category_listbox.insert(tk.END, f"{code} - {name}")
 
-    def _populate_shops(self, shops: Dict):
+    def _populate_shops(self, shops: Dict) -> None:
         for code, name in sorted(shops.items()):
             self.shop_listbox.insert(tk.END, f"{code} - {name}")
 
@@ -144,7 +144,7 @@ class CategoryShopPanel(ttk.LabelFrame):
             'shop': self.get_selected_shop_code()
         }
 
-    def set_category(self, category_code: str):
+    def set_category(self, category_code: str) -> None:
         """Select category by code"""
         for i in range(self.category_listbox.size()):
             text = self.category_listbox.get(i)
@@ -154,7 +154,7 @@ class CategoryShopPanel(ttk.LabelFrame):
                 self.category_listbox.see(i)
                 break
 
-    def set_shop(self, shop_code: str):
+    def set_shop(self, shop_code: str) -> None:
         """Select shop by code"""
         for i in range(self.shop_listbox.size()):
             text = self.shop_listbox.get(i)
@@ -168,7 +168,7 @@ class CategoryShopPanel(ttk.LabelFrame):
 class StoreOptionsPanel(ttk.LabelFrame):
     """Store-specific options panel (dynamic based on store)"""
 
-    def __init__(self, parent):
+    def __init__(self, parent: tk.Widget) -> None:
         super().__init__(parent, text="Options", padding=5)
         self.options = {}
 
@@ -204,7 +204,7 @@ class StoreOptionsPanel(ttk.LabelFrame):
     def get_values(self) -> Dict:
         return {key: var.get() for key, var in self.options.items()}
 
-    def set_values(self, values: Dict):
+    def set_values(self, values: Dict) -> None:
         for key, value in values.items():
             if key in self.options:
                 self.options[key].set(value)

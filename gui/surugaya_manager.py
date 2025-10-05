@@ -15,16 +15,19 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import requests
 from deep_translator import GoogleTranslator
+
+if TYPE_CHECKING:
+    from gui.settings_preferences_manager import SettingsPreferencesManager
 
 
 class SurugayaManager:
     """Manager for Suruga-ya scraping operations."""
 
-    def __init__(self, run_queue: queue.Queue, settings_manager):
+    def __init__(self, run_queue: queue.Queue, settings_manager: 'SettingsPreferencesManager') -> None:
         """
         Initialize Suruga-ya Manager.
 
@@ -34,7 +37,7 @@ class SurugayaManager:
         """
         self.run_queue = run_queue
         self.settings = settings_manager
-        self.current_scraper = None
+        self.current_scraper: Optional[Any] = None
 
     def run_scraper(self, config_path: str, cancel_flag: threading.Event) -> None:
         """
@@ -299,7 +302,7 @@ class SurugayaManager:
         session.mount('http://', adapter)
         session.mount('https://', adapter)
 
-        def download_image(args):
+        def download_image(args: Tuple[int, Dict[str, Any]]) -> Tuple[int, Optional[str]]:
             i, item = args
             image_url = item.get('image_url', '')
             if not image_url:
@@ -318,7 +321,7 @@ class SurugayaManager:
             return (i, None)
 
         # Helper to write CSV
-        def write_csv(sorted_items):
+        def write_csv(sorted_items: List[Dict[str, Any]]) -> None:
             with open(csv_path, 'w', newline='', encoding='utf-8') as f:
                 fieldnames = ['first_seen', 'last_seen', 'title', 'title_en', 'price', 'condition', 'stock_status', 'url', 'image_url', 'local_image',
                               'ebay_compared', 'ebay_match_found', 'ebay_best_match_title', 'ebay_similarity', 'ebay_price', 'ebay_profit_margin']

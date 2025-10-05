@@ -59,12 +59,12 @@ class AlertStorage:
                 - alert_id: Unique identifier
                 - state: Current AlertState
                 - ebay_title: eBay listing title
-                - mandarake_title: Mandarake listing title
-                - mandarake_link: URL to Mandarake listing
+                - store_title: Store listing title
+                - store_link: URL to store listing
                 - ebay_link: URL to eBay listing
                 - similarity: Similarity percentage
                 - profit_margin: Profit margin percentage
-                - mandarake_price: Mandarake price
+                - store_price: Store price
                 - ebay_price: eBay price
                 - shipping: Shipping cost
                 - sold_date: eBay sold date
