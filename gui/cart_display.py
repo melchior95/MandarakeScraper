@@ -28,6 +28,9 @@ class CartDisplayFrame(ttk.LabelFrame):
         self.cart_manager = cart_manager
         self.logger = logging.getLogger(__name__)
 
+        # Cache exchange rate to avoid fetching on every refresh
+        self._exchange_rate_cache = None
+
         self._create_ui()
 
     def _create_ui(self):
@@ -40,7 +43,7 @@ class CartDisplayFrame(ttk.LabelFrame):
         ttk.Button(
             button_frame,
             text="🔄 Refresh Cart",
-            command=self.refresh_display
+            command=self._manual_refresh
         ).pack(side=tk.LEFT, padx=2)
 
         ttk.Button(
@@ -139,31 +142,65 @@ class CartDisplayFrame(ttk.LabelFrame):
         )
         self.threshold_label.pack(side=tk.LEFT)
 
-    def refresh_display(self):
+    def _manual_refresh(self):
+        """Manual refresh - clears exchange rate cache"""
+        self._exchange_rate_cache = None
+        self.refresh_display()
+
+    def refresh_display(self, async_refresh=True):
         """Refresh cart display with current data"""
         if not self.cart_manager or not self.cart_manager.is_connected():
             self._show_not_connected()
             return
 
+        if async_refresh:
+            # Show loading state immediately
+            self._show_loading()
+            # Refresh in background thread
+            import threading
+            thread = threading.Thread(target=self._refresh_in_background, daemon=True)
+            thread.start()
+        else:
+            # Synchronous refresh
+            self._do_refresh()
+
+    def _show_loading(self):
+        """Show loading state"""
+        self.total_items_label.config(text="Loading...")
+        self.total_jpy_label.config(text="")
+        self.total_usd_label.config(text="")
+        self.threshold_label.config(text="")
+
+    def _refresh_in_background(self):
+        """Refresh cart data in background thread"""
+        try:
+            self._do_refresh()
+        except Exception as e:
+            self.logger.error(f"Error refreshing cart display: {e}")
+            # Schedule error message on main thread
+            self.after(0, lambda: messagebox.showerror("Error", f"Failed to refresh cart: {e}"))
+
+    def _do_refresh(self):
+        """Do the actual refresh (can be called from background thread)"""
         try:
             # Get cart items from Mandarake
             cart_items = self.cart_manager.cart_api.get_cart_items()
 
             if cart_items is None:
-                messagebox.showerror("Error", "Failed to fetch cart items from Mandarake")
+                self.after(0, lambda: messagebox.showerror("Error", "Failed to fetch cart items from Mandarake"))
                 return
 
             # Group by shop and calculate totals
             shop_breakdown = self._calculate_shop_breakdown(cart_items)
 
-            # Update display
-            self._update_shop_tree(shop_breakdown)
-            self._update_summary(shop_breakdown)
-            self._update_warnings(shop_breakdown)
+            # Update display on main thread
+            self.after(0, lambda: self._update_shop_tree(shop_breakdown))
+            self.after(0, lambda: self._update_summary(shop_breakdown))
+            self.after(0, lambda: self._update_warnings(shop_breakdown))
 
         except Exception as e:
             self.logger.error(f"Error refreshing cart display: {e}")
-            messagebox.showerror("Error", f"Failed to refresh cart: {e}")
+            self.after(0, lambda: messagebox.showerror("Error", f"Failed to refresh cart: {e}"))
 
     def _calculate_shop_breakdown(self, cart_items: List[Dict]) -> Dict:
         """
@@ -187,14 +224,16 @@ class CartDisplayFrame(ttk.LabelFrame):
                 }
             }
         """
-        from gui.utils import fetch_exchange_rate
-
         breakdown = {}
         total_items = 0
         total_jpy = 0
 
-        # Get exchange rate
-        exchange_rate = fetch_exchange_rate()
+        # Get exchange rate (cached)
+        if self._exchange_rate_cache is None:
+            from gui.utils import fetch_exchange_rate
+            self._exchange_rate_cache = fetch_exchange_rate()
+
+        exchange_rate = self._exchange_rate_cache
 
         # Group by shop
         for item in cart_items:
