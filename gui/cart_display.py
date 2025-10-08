@@ -168,10 +168,11 @@ class CartDisplayFrame(ttk.LabelFrame):
 
     def _show_loading(self):
         """Show loading state"""
-        self.total_items_label.config(text="Loading...")
-        self.total_jpy_label.config(text="")
-        self.total_usd_label.config(text="")
-        self.threshold_label.config(text="")
+        self.summary_label.config(text="Loading cart data...")
+        self.roi_label.config(text="")
+        self.warnings_text.config(state='normal')
+        self.warnings_text.delete('1.0', 'end')
+        self.warnings_text.config(state='disabled')
 
     def _refresh_in_background(self):
         """Refresh cart data in background thread"""
