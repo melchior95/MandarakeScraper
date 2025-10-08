@@ -53,10 +53,14 @@ class ScheduleExecutor:
         print("[SCHEDULE EXECUTOR] Stopped")
 
     def _run_loop(self):
-        """Main loop that checks for due schedules."""
+        """Main loop that checks for due schedules AND auto-purchase items."""
         while self.running:
             try:
+                # Check scheduled tasks
                 self._check_and_execute()
+
+                # Check auto-purchase items
+                self._check_auto_purchase_items()
             except Exception as e:
                 print(f"[SCHEDULE EXECUTOR] Error in check loop: {e}")
 
@@ -227,3 +231,362 @@ class ScheduleExecutor:
             print(f"[SCHEDULE EXECUTOR] Manual execution of: {schedule.name}")
             self._execute_schedule(schedule)
             self.manager.mark_schedule_executed(schedule_id)
+
+    # ==================== Auto-Purchase Methods ====================
+
+    def _check_auto_purchase_items(self):
+        """Check all active auto-purchase schedules."""
+        schedules = self.manager.get_all_schedules()
+
+        for schedule in schedules:
+            # Skip non-auto-purchase schedules
+            if not schedule.auto_purchase_enabled:
+                continue
+
+            # Skip if not active
+            if not schedule.active:
+                continue
+
+            # Skip if not time to check yet
+            if not self._is_due_for_check(schedule):
+                continue
+
+            print(f"[AUTO-PURCHASE] Checking: {schedule.name}")
+
+            try:
+                # Check availability
+                result = self._check_item_availability(schedule)
+
+                if result['in_stock']:
+                    # Validate price
+                    if result['price'] <= schedule.auto_purchase_max_price:
+                        print(f"[AUTO-PURCHASE] Item found! Price: ¥{result['price']} (max: ¥{schedule.auto_purchase_max_price})")
+                        # Execute purchase
+                        self._execute_auto_purchase(schedule, result)
+                    else:
+                        print(f"[AUTO-PURCHASE] Price too high: ¥{result['price']} > ¥{schedule.auto_purchase_max_price}")
+
+                # Update last check time
+                self.manager.update_auto_purchase_check_time(schedule.schedule_id)
+            except Exception as e:
+                print(f"[AUTO-PURCHASE] Error checking {schedule.name}: {e}")
+
+    def _is_due_for_check(self, schedule) -> bool:
+        """
+        Check if schedule is due for availability check.
+
+        Uses staggered polling for 30-min checks to avoid bursts of requests.
+
+        Args:
+            schedule: Schedule to check
+
+        Returns:
+            True if check is due
+        """
+        from datetime import datetime, timedelta
+        import hashlib
+
+        # First check ever
+        if not schedule.auto_purchase_last_check:
+            return True
+
+        try:
+            last_check = datetime.fromisoformat(schedule.auto_purchase_last_check)
+            now = datetime.now()
+            minutes_since_check = (now - last_check).total_seconds() / 60
+
+            # Get check interval
+            interval = schedule.auto_purchase_check_interval
+
+            # For polling method (30 min), add stagger to spread requests
+            if schedule.auto_purchase_monitoring_method == 'polling' and interval >= 30:
+                # Use schedule ID to create consistent offset (0-29 minutes)
+                stagger_offset = int(hashlib.md5(str(schedule.schedule_id).encode()).hexdigest(), 16) % 30
+
+                # Add stagger to interval for this specific schedule
+                staggered_interval = interval + stagger_offset / 60.0  # Convert offset to fraction of hour
+
+                # Only check at staggered time
+                return minutes_since_check >= staggered_interval
+
+            # For RSS or other methods, use regular interval
+            return minutes_since_check >= interval
+
+        except (ValueError, AttributeError):
+            # If parsing fails, assume due
+            return True
+
+    def _check_item_availability(self, schedule) -> dict:
+        """
+        Check if item is in stock using keyword search.
+
+        Strategy:
+        1. If direct URL: scrape that page
+        2. If keyword: search all stores using keyword URL
+        3. Parse results for in-stock items
+        4. Return first in-stock match
+
+        Args:
+            schedule: Schedule with auto-purchase config
+
+        Returns:
+            {
+                'in_stock': bool,
+                'price': int,
+                'url': str,
+                'shop_code': str,
+                'item_code': str
+            }
+        """
+        from bs4 import BeautifulSoup
+        from urllib.parse import quote
+        from browser_mimic import BrowserMimic
+
+        mimic = BrowserMimic()
+
+        # Determine URL to check
+        if schedule.auto_purchase_url and 'itemCode=' in schedule.auto_purchase_url:
+            # Direct item URL
+            check_url = schedule.auto_purchase_url
+            is_search = False
+        else:
+            # Search keyword across all stores
+            keyword = schedule.auto_purchase_keyword or schedule.name
+            check_url = f"https://order.mandarake.co.jp/order/listPage/list?keyword={quote(keyword)}&lang=en"
+            is_search = True
+
+        print(f"[AUTO-PURCHASE] Checking URL: {check_url}")
+
+        # Fetch page
+        response = mimic.get(check_url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        if is_search:
+            # Parse search results
+            result_items = soup.find_all('div', class_='block', attrs={'data-itemidx': True})
+
+            for result in result_items:
+                # Skip sold out
+                soldout = result.find('div', class_='soldout')
+                if soldout:
+                    continue
+
+                # Extract details
+                item_code = result.get('data-itemidx', '')
+
+                shop_elem = result.find('p', class_='shop')
+                shop_name = shop_elem.get_text(strip=True) if shop_elem else 'unknown'
+
+                price_div = result.find('div', class_='price')
+                price_text = price_div.get_text(strip=True) if price_div else '0'
+                price_jpy = int(''.join(c for c in price_text if c.isdigit()))
+
+                title_div = result.find('div', class_='title')
+                title_link = title_div.find('a') if title_div else None
+                item_url = f"https://order.mandarake.co.jp{title_link['href']}" if title_link else ''
+
+                # Found in-stock item!
+                print(f"[AUTO-PURCHASE] Found in stock: {shop_name} - ¥{price_jpy}")
+                return {
+                    'in_stock': True,
+                    'price': price_jpy,
+                    'url': item_url,
+                    'shop_code': self._shop_name_to_code(shop_name),
+                    'shop_name': shop_name,
+                    'item_code': item_code
+                }
+
+            return {'in_stock': False}
+
+        else:
+            # Direct item page check
+            # Check for "Add to Cart" button or "Sold Out" indicator
+            soldout = soup.find('div', class_='soldout') or soup.find(string=lambda t: t and 'Sold Out' in t)
+
+            if soldout:
+                print(f"[AUTO-PURCHASE] Still sold out")
+                return {'in_stock': False}
+
+            # Extract price
+            price_elem = soup.find('td', class_='price') or soup.find('div', class_='price')
+            if price_elem:
+                price_text = price_elem.get_text(strip=True)
+                price_jpy = int(''.join(c for c in price_text if c.isdigit()))
+
+                print(f"[AUTO-PURCHASE] Found in stock: ¥{price_jpy}")
+                return {
+                    'in_stock': True,
+                    'price': price_jpy,
+                    'url': schedule.auto_purchase_url,
+                    'shop_code': self._extract_shop_from_url(schedule.auto_purchase_url),
+                    'item_code': self._extract_item_code_from_url(schedule.auto_purchase_url)
+                }
+
+            return {'in_stock': False}
+
+    def _shop_name_to_code(self, shop_name: str) -> str:
+        """Convert shop name to shop code."""
+        shop_map = {
+            'nakano': 'nkn',
+            'shibuya': 'sib',
+            'umeda': 'umd',
+            'fukuoka': 'fko',
+            'kyoto': 'kyo',
+            'chibashop': 'chi',
+            'grandchaos': 'gc',
+            'sahra': 'sah',
+            'complex': 'com'
+        }
+        shop_lower = shop_name.lower()
+        for name, code in shop_map.items():
+            if name in shop_lower:
+                return code
+        return 'unknown'
+
+    def _extract_shop_from_url(self, url: str) -> str:
+        """Extract shop code from URL."""
+        # Simple extraction - can be enhanced
+        return 'unknown'
+
+    def _extract_item_code_from_url(self, url: str) -> str:
+        """Extract item code from URL."""
+        import re
+        match = re.search(r'itemCode=(\d+)', url)
+        return match.group(1) if match else ''
+
+    def _execute_auto_purchase(self, schedule, item_data: dict):
+        """
+        Execute automatic purchase notification.
+
+        Steps:
+        1. Send desktop notification to user
+        2. Add item to alerts page (Pending state)
+        3. Mark schedule as notified
+        4. Open URL in browser (optional)
+
+        Args:
+            schedule: Schedule with auto-purchase config
+            item_data: Item details from availability check
+        """
+        try:
+            print(f"[AUTO-PURCHASE] Item in stock: {schedule.name} at ¥{item_data['price']}")
+
+            # 1. Send desktop notification
+            self._notify_item_found(schedule, item_data)
+
+            # 2. Add to alerts page
+            self._add_to_alerts(schedule, item_data)
+
+            # 3. Mark schedule as notified (don't disable, user might want continuous monitoring)
+            self.manager.update_auto_purchase_check_time(schedule.schedule_id)
+
+            print(f"[AUTO-PURCHASE] ✓ Notified user: {schedule.name}")
+
+        except Exception as e:
+            print(f"[AUTO-PURCHASE] Error during notification: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _notify_item_found(self, schedule, item_data: dict):
+        """
+        Send desktop notification when item is found.
+
+        Args:
+            schedule: Schedule that found the item
+            item_data: Item details
+        """
+        try:
+            message = (
+                f"IN STOCK: {schedule.name}\n"
+                f"Price: ¥{item_data['price']:,}\n"
+                f"Shop: {item_data.get('shop_name', 'Unknown')}\n"
+                f"URL: {item_data.get('url', 'N/A')[:50]}..."
+            )
+
+            print(f"[AUTO-PURCHASE] {message}")
+
+            # Try to show desktop notification
+            try:
+                from plyer import notification
+                notification.notify(
+                    title="🔔 Item Back in Stock!",
+                    message=message,
+                    app_name="Mandarake Auto-Purchase",
+                    timeout=15
+                )
+            except ImportError:
+                print(f"[AUTO-PURCHASE] Desktop notification not available (install plyer)")
+            except Exception as e:
+                print(f"[AUTO-PURCHASE] Notification error: {e}")
+
+        except Exception as e:
+            print(f"[AUTO-PURCHASE] Error sending notification: {e}")
+
+    def _add_to_alerts(self, schedule, item_data: dict):
+        """
+        Add item to alerts page in Pending state.
+
+        Args:
+            schedule: Schedule that found the item
+            item_data: Item details
+        """
+        try:
+            from gui.alert_storage import AlertStorage
+
+            storage = AlertStorage()
+
+            # Create alert entry
+            alert_data = {
+                'title': schedule.name,
+                'mandarake_price': item_data['price'],
+                'mandarake_url': item_data.get('url', ''),
+                'mandarake_shop': item_data.get('shop_name', 'Unknown'),
+                'mandarake_stock': 'In Stock',
+                'state': 'pending',
+                'similarity': 100,  # Direct match
+                'profit_margin': 0,  # Unknown until eBay comparison
+                'source': 'auto_purchase',
+                'auto_purchase_schedule_id': schedule.schedule_id
+            }
+
+            storage.add_alert(alert_data)
+            print(f"[AUTO-PURCHASE] Added to alerts: {schedule.name}")
+
+        except Exception as e:
+            print(f"[AUTO-PURCHASE] Error adding to alerts: {e}")
+
+    def _notify_purchase_success(self, schedule, item_data: dict, checkout_result: dict):
+        """
+        Send desktop notification and log purchase.
+
+        Args:
+            schedule: Schedule that triggered purchase
+            item_data: Item details
+            checkout_result: Checkout result
+        """
+        try:
+            message = (
+                f"Auto-purchased: {schedule.name}\n"
+                f"Price: ¥{item_data['price']:,}\n"
+                f"Shop: {item_data.get('shop_name', 'Unknown')}\n"
+                f"Status: {checkout_result.get('message', 'Success')}"
+            )
+
+            print(f"[AUTO-PURCHASE] {message}")
+
+            # Try to show desktop notification
+            try:
+                from plyer import notification
+                notification.notify(
+                    title="Auto-Purchase Success!",
+                    message=message,
+                    timeout=10
+                )
+            except ImportError:
+                # plyer not available, just print
+                print(f"[AUTO-PURCHASE] Desktop notification not available (install plyer)")
+            except Exception as e:
+                print(f"[AUTO-PURCHASE] Notification failed: {e}")
+
+        except Exception as e:
+            print(f"[AUTO-PURCHASE] Error sending notification: {e}")

@@ -1480,11 +1480,31 @@ class ScraperGUI(tk.Tk):
             menu = tk.Menu(self, tearoff=0)
             menu.add_command(label="Send to Review/Alerts", command=self._send_browserless_to_review)
             menu.add_separator()
-            menu.add_command(label="Open eBay URL", command=lambda: self.open_browserless_url(event))
+
+            # Check if this result has Mandarake data
+            has_mandarake_data = False
+            mandarake_stock_out = False
             if self.ebay_tab.browserless_results_data and int(item) - 1 < len(self.ebay_tab.browserless_results_data):
                 result = self.ebay_tab.browserless_results_data[int(item) - 1]
                 if result.get('mandarake_url'):
-                    menu.add_command(label="Open Mandarake URL", command=lambda: webbrowser.open(result['mandarake_url']))
+                    has_mandarake_data = True
+                    # Check stock status
+                    stock = result.get('mandarake_stock', '')
+                    mandarake_stock_out = 'sold' in stock.lower() or 'out' in stock.lower()
+
+            # Auto-purchase option (conditional)
+            if has_mandarake_data and mandarake_stock_out:
+                menu.add_command(label="📌 Add to Auto-Purchase Monitor (Store Item)", command=lambda: self._add_browserless_to_auto_purchase(int(item) - 1))
+            elif has_mandarake_data:
+                menu.add_command(label="📌 Add to Auto-Purchase Monitor (In Stock)", state="disabled")
+            else:
+                menu.add_command(label="📌 Add to Auto-Purchase Monitor", state="disabled")
+
+            menu.add_separator()
+            menu.add_command(label="Open eBay URL", command=lambda: self.open_browserless_url(event))
+            if has_mandarake_data:
+                result = self.ebay_tab.browserless_results_data[int(item) - 1]
+                menu.add_command(label="Open Mandarake URL", command=lambda: webbrowser.open(result['mandarake_url']))
 
             # Show menu at cursor position
             menu.post(event.x_root, event.y_root)
@@ -1493,6 +1513,77 @@ class ScraperGUI(tk.Tk):
         """Send to review - delegated to EbaySearchManager"""
         if self.ebay_tab.ebay_search_manager:
             self.ebay_tab.ebay_search_manager.send_browserless_to_review(self.alert_tab)
+
+    def _add_browserless_to_auto_purchase(self, result_index: int):
+        """Add eBay search result with Mandarake data to auto-purchase monitor."""
+        from tkinter import messagebox
+        from gui.auto_purchase_dialog import AutoPurchaseDialog
+        from gui.schedule_manager import ScheduleManager
+        from gui.schedule_states import Schedule, ScheduleType
+
+        # Get result data
+        if not self.ebay_tab.browserless_results_data or result_index >= len(self.ebay_tab.browserless_results_data):
+            messagebox.showerror("Error", "Could not find result data")
+            return
+
+        result = self.ebay_tab.browserless_results_data[result_index]
+
+        # Extract Mandarake data
+        mandarake_url = result.get('mandarake_url', '')
+        if not mandarake_url:
+            messagebox.showerror("Error", "No Mandarake data for this item")
+            return
+
+        # Parse Mandarake info
+        mandarake_title = result.get('mandarake_title', result.get('title', 'Unknown'))
+        mandarake_price_str = result.get('mandarake_price', '¥0')
+        mandarake_shop = result.get('mandarake_shop', 'Unknown')
+
+        # Parse price
+        price_jpy = 0
+        try:
+            price_jpy = int(''.join(c for c in mandarake_price_str if c.isdigit()))
+        except ValueError:
+            pass
+
+        # Open auto-purchase dialog
+        dialog = AutoPurchaseDialog(
+            self,
+            item_name=mandarake_title,
+            url=mandarake_url,
+            last_price=price_jpy,
+            shop=mandarake_shop
+        )
+        self.wait_window(dialog)
+
+        dialog_result = dialog.get_result()
+        if dialog_result:
+            # Create auto-purchase schedule
+            manager = ScheduleManager()
+
+            schedule = Schedule(
+                schedule_id=0,  # Auto-assigned
+                name=dialog_result['name'],
+                active=True,
+                schedule_type=ScheduleType.DAILY,
+                frequency_hours=24,
+                config_files=[],  # No config files for auto-purchase
+                auto_purchase_enabled=True,
+                auto_purchase_url=dialog_result.get('url'),
+                auto_purchase_keyword=dialog_result.get('keyword'),
+                auto_purchase_last_price=dialog_result['last_price'],
+                auto_purchase_max_price=dialog_result['max_price'],
+                auto_purchase_check_interval=dialog_result['check_interval'],
+                auto_purchase_expiry=dialog_result['expiry'],
+                auto_purchase_monitoring_method=dialog_result.get('monitoring_method', 'polling')
+            )
+
+            created = manager.storage.add_schedule(schedule)
+            messagebox.showinfo(
+                "Success",
+                f"Added '{created.name}' to auto-purchase monitor!\n\n"
+                f"Check the Scheduler tab to view monitoring status."
+            )
 
     def _display_browserless_results(self, results):
         """Display browserless search results - delegated to EbaySearchManager"""

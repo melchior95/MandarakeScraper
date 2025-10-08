@@ -781,3 +781,132 @@ class CartManager:
         except Exception:
             self.logger.warning("Failed to fetch exchange rate, using default 150")
             return 150.0
+
+    # ==================== Auto-Purchase Methods ====================
+
+    def add_item_to_cart(self, url: str, shop_code: str = None) -> Dict:
+        """
+        Add single item to cart by URL (for auto-purchase).
+
+        Args:
+            url: Item URL
+            shop_code: Shop code (optional, not used by API)
+
+        Returns:
+            {'success': bool, 'error': str}
+        """
+        if not self.cart_api:
+            return {'success': False, 'error': 'Not connected to cart'}
+
+        try:
+            # Extract item code from URL
+            import re
+            match = re.search(r'itemCode=(\d+)', url)
+            if not match:
+                return {'success': False, 'error': 'Could not extract item code from URL'}
+
+            item_code = match.group(1)
+
+            # Add to cart using API
+            success = self.cart_api.add_to_cart(
+                product_id=item_code,
+                shop_code=shop_code,
+                quantity=1,
+                referer=url
+            )
+
+            if success:
+                self.logger.info(f"[AUTO-PURCHASE] Added item {item_code} to cart")
+                return {'success': True}
+            else:
+                return {'success': False, 'error': 'API returned failure'}
+
+        except Exception as e:
+            self.logger.error(f"[AUTO-PURCHASE] Error adding to cart: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def execute_checkout(self, use_auto_checkout: bool = None) -> Dict:
+        """
+        Execute full checkout process.
+
+        Args:
+            use_auto_checkout: Override auto-checkout setting (None = use stored setting)
+
+        Returns:
+            {
+                'success': bool,
+                'order_id': str,
+                'total_jpy': int,
+                'error': str,
+                'message': str
+            }
+        """
+        if not self.cart_api:
+            return {'success': False, 'error': 'Not connected to cart'}
+
+        try:
+            from gui.checkout_settings_storage import CheckoutSettingsStorage
+
+            # Get cart summary
+            summary = self.cart_api.get_cart_summary()
+
+            if not summary or summary.get('total_items', 0) == 0:
+                return {'success': False, 'error': 'Cart is empty'}
+
+            total_jpy = summary.get('total_value_jpy', 0)
+
+            # Load checkout settings
+            checkout_storage = CheckoutSettingsStorage()
+            settings = checkout_storage.load_settings()
+
+            # Determine if auto-checkout should be used
+            if use_auto_checkout is None:
+                use_auto_checkout = checkout_storage.is_auto_checkout_enabled()
+
+            # Auto-checkout if enabled and configured
+            if use_auto_checkout and settings:
+                self.logger.info(f"[AUTO-PURCHASE] Executing automatic checkout - Total: ¥{total_jpy}")
+
+                # Validate spending limits
+                limits = settings.get('spending_limits', {})
+                max_per_purchase = limits.get('max_per_purchase_jpy', 50000)
+
+                if total_jpy > max_per_purchase:
+                    self.logger.warning(f"[AUTO-PURCHASE] Purchase exceeds limit: ¥{total_jpy} > ¥{max_per_purchase}")
+                    # Fall back to manual
+                    self.cart_api.open_cart_in_browser()
+                    return {
+                        'success': False,
+                        'error': f'Amount ¥{total_jpy:,} exceeds spending limit ¥{max_per_purchase:,}',
+                        'message': 'Cart opened for manual review'
+                    }
+
+                # Execute automatic checkout
+                shipping_info = settings.get('shipping_info', {})
+                payment_method = settings.get('payment_method', 'stored')
+
+                result = self.cart_api.execute_checkout(
+                    shipping_info=shipping_info,
+                    payment_method=payment_method
+                )
+
+                if result['success']:
+                    self.logger.info(f"[AUTO-PURCHASE] ✓ Checkout completed! Order: {result['order_id']}")
+
+                return result
+
+            else:
+                # Manual checkout (open browser)
+                self.logger.info(f"[AUTO-PURCHASE] Opening cart for manual checkout - Total: ¥{total_jpy}")
+                self.cart_api.open_cart_in_browser()
+
+                return {
+                    'success': True,
+                    'order_id': 'MANUAL',
+                    'total_jpy': total_jpy,
+                    'message': 'Cart opened in browser for manual checkout'
+                }
+
+        except Exception as e:
+            self.logger.error(f"[AUTO-PURCHASE] Checkout error: {e}")
+            return {'success': False, 'error': str(e)}

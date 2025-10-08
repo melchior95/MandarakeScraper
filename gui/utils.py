@@ -5,7 +5,7 @@ import unicodedata
 import hashlib
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 
 def slugify(value: str) -> str:
@@ -364,3 +364,70 @@ def save_publisher_list(publisher_list: set):
         print(f"[PUBLISHERS] Saved {len(publisher_list)} publishers to file")
     except Exception as e:
         print(f"[PUBLISHERS] Error saving file: {e}")
+
+
+def get_proxy_settings(store: str = 'mandarake') -> Tuple[bool, Optional[str]]:
+    """
+    Get proxy settings for a specific store from user settings.
+
+    Args:
+        store: Store name ('ebay', 'mandarake', or 'surugaya')
+
+    Returns:
+        Tuple of (use_proxy: bool, api_key: str or None)
+
+    Example:
+        >>> use_proxy, api_key = get_proxy_settings('mandarake')
+        >>> if use_proxy and api_key:
+        >>>     browser = BrowserMimic(use_scrapeops=True, scrapeops_api_key=api_key)
+    """
+    try:
+        from gui.settings_manager import SettingsManager
+        settings = SettingsManager()
+
+        # Check if proxy is globally enabled
+        proxy_enabled = settings.get_setting('proxy.enabled', False)
+        if not proxy_enabled:
+            return False, None
+
+        # Check if proxy is enabled for this specific store
+        store_setting_key = f'proxy.{store}_enabled'
+        store_enabled = settings.get_setting(store_setting_key, True)  # Default to True
+        if not store_enabled:
+            return False, None
+
+        # Get API key
+        api_key = settings.get_setting('proxy.api_key', '')
+        if not api_key:
+            return False, None
+
+        return True, api_key
+
+    except Exception as e:
+        logging.error(f"Error getting proxy settings: {e}")
+        return False, None
+
+
+def get_browser_with_proxy(store: str = 'mandarake'):
+    """
+    Get BrowserMimic instance with proxy enabled if configured for the store.
+
+    Args:
+        store: Store name ('mandarake' or 'surugaya')
+
+    Returns:
+        BrowserMimic instance with or without proxy
+
+    Example:
+        >>> browser = get_browser_with_proxy('mandarake')
+        >>> response = browser.get('https://order.mandarake.co.jp/...')
+    """
+    from browser_mimic import BrowserMimic
+
+    use_proxy, api_key = get_proxy_settings(store)
+
+    if use_proxy and api_key:
+        logging.info(f"[PROXY] Using ScrapeOps proxy for {store}")
+        return BrowserMimic(use_scrapeops=True, scrapeops_api_key=api_key)
+    else:
+        return BrowserMimic()

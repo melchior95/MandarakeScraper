@@ -375,6 +375,8 @@ class EbayTab(ttk.Frame):
         self.csv_tree_menu = tk.Menu(self.csv_items_tree, tearoff=0)
         self.csv_tree_menu.add_command(label="Send to Alerts (without eBay data)", command=self._send_csv_to_alerts)
         self.csv_tree_menu.add_separator()
+        self.csv_tree_menu.add_command(label="📌 Add to Auto-Purchase Monitor", command=self._add_csv_to_auto_purchase)
+        self.csv_tree_menu.add_separator()
         self.csv_tree_menu.add_command(label="Add Full Title to Search", command=self._add_full_title_to_search)
         self.csv_tree_menu.add_command(label="Add Secondary Keyword", command=self._add_secondary_keyword_from_csv)
         self.csv_tree_menu.add_separator()
@@ -630,6 +632,93 @@ class EbayTab(ttk.Frame):
     def _clear_comparison_results(self):
         """Clear CSV comparison results."""
         return self.main_window.clear_comparison_results()
+
+    def _add_csv_to_auto_purchase(self):
+        """Add selected CSV item to auto-purchase monitor."""
+        from tkinter import messagebox
+        from gui.auto_purchase_dialog import AutoPurchaseDialog
+        from gui.schedule_manager import ScheduleManager
+        from gui.schedule_states import Schedule, ScheduleType
+
+        # Get selected item
+        selection = self.csv_items_tree.selection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select an item to add to auto-purchase monitor")
+            return
+
+        if len(selection) > 1:
+            messagebox.showinfo("Multiple Selection", "Please select only one item at a time")
+            return
+
+        # Get item values
+        item_id = selection[0]
+        values = self.csv_items_tree.item(item_id, 'values')
+
+        # Extract data from CSV row
+        # Column order: Title, Price, Shop, Stock Status, Category, URL, ...
+        title = str(values[0]) if len(values) > 0 else ""
+        price_str = str(values[1]) if len(values) > 1 else "¥0"
+        shop = str(values[2]) if len(values) > 2 else "Unknown"
+        stock_status = str(values[3]) if len(values) > 3 else ""
+        url = str(values[5]) if len(values) > 5 else ""
+
+        # Check if out of stock
+        if stock_status and "sold" not in stock_status.lower() and "out" not in stock_status.lower():
+            messagebox.showinfo(
+                "Item In Stock",
+                "Auto-purchase is only for out-of-stock items.\n\nThis item is currently in stock."
+            )
+            return
+
+        # Parse price
+        price_jpy = 0
+        try:
+            price_jpy = int(''.join(c for c in price_str if c.isdigit()))
+        except ValueError:
+            pass
+
+        if not url:
+            messagebox.showerror("Error", "Could not find URL for this item")
+            return
+
+        # Open auto-purchase dialog
+        dialog = AutoPurchaseDialog(
+            self,
+            item_name=title,
+            url=url,
+            last_price=price_jpy,
+            shop=shop
+        )
+        self.wait_window(dialog)
+
+        result = dialog.get_result()
+        if result:
+            # Create auto-purchase schedule
+            manager = ScheduleManager()
+
+            schedule = Schedule(
+                schedule_id=0,  # Auto-assigned
+                name=result['name'],
+                active=True,
+                schedule_type=ScheduleType.DAILY,
+                frequency_hours=24,
+                config_files=[],  # No config files for auto-purchase
+                auto_purchase_enabled=True,
+                auto_purchase_url=result.get('url'),
+                auto_purchase_keyword=result.get('keyword'),
+                auto_purchase_last_price=result['last_price'],
+                auto_purchase_max_price=result['max_price'],
+                auto_purchase_check_interval=result['check_interval'],
+                auto_purchase_expiry=result['expiry'],
+                auto_purchase_monitoring_method=result.get('monitoring_method', 'polling')
+            )
+
+            created = manager.storage.add_schedule(schedule)
+            messagebox.showinfo(
+                "Success",
+                f"Added '{created.name}' to auto-purchase monitor!\n\n"
+                f"Check the Scheduler tab to view monitoring status."
+            )
 
     # ==================== Settings ====================
 

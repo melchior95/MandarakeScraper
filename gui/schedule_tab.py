@@ -72,7 +72,11 @@ class ScheduleTab(ttk.Frame):
             "start_time",
             "next_run",
             "end_date",
-            "configs"
+            "configs",
+            "auto_purchase",
+            "last_price",
+            "max_price",
+            "last_check"
         )
 
         self.tree = ttk.Treeview(
@@ -98,6 +102,10 @@ class ScheduleTab(ttk.Frame):
         self.tree.column("next_run", width=150, minwidth=120)
         self.tree.column("end_date", width=100, minwidth=80)
         self.tree.column("configs", width=250, minwidth=150)
+        self.tree.column("auto_purchase", width=120, minwidth=100)
+        self.tree.column("last_price", width=90, minwidth=70)
+        self.tree.column("max_price", width=90, minwidth=70)
+        self.tree.column("last_check", width=120, minwidth=100)
 
         # Headings
         self.tree.heading("#0", text="Name")
@@ -109,6 +117,10 @@ class ScheduleTab(ttk.Frame):
         self.tree.heading("next_run", text="Next Run")
         self.tree.heading("end_date", text="End Date")
         self.tree.heading("configs", text="Config Files")
+        self.tree.heading("auto_purchase", text="Auto-Purchase")
+        self.tree.heading("last_price", text="Last Price")
+        self.tree.heading("max_price", text="Max Price")
+        self.tree.heading("last_check", text="Last Check")
 
         # Bind events
         self.tree.bind("<Double-Button-1>", lambda e: self._on_edit_schedule())
@@ -189,6 +201,28 @@ class ScheduleTab(ttk.Frame):
         config_count = len(schedule.config_files)
         configs_str = f"{config_count} config(s)"
 
+        # Format auto-purchase columns
+        if schedule.auto_purchase_enabled:
+            auto_purchase_str = "Monitoring..." if schedule.active else "Disabled"
+            last_price_str = f"¥{schedule.auto_purchase_last_price:,}" if schedule.auto_purchase_last_price else "-"
+            max_price_str = f"¥{schedule.auto_purchase_max_price:,}" if schedule.auto_purchase_max_price else "-"
+
+            # Format last check time
+            if schedule.auto_purchase_last_check:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(schedule.auto_purchase_last_check)
+                    last_check_str = dt.strftime("%m-%d %H:%M")
+                except (ValueError, AttributeError):
+                    last_check_str = "-"
+            else:
+                last_check_str = "Never"
+        else:
+            auto_purchase_str = "-"
+            last_price_str = "-"
+            max_price_str = "-"
+            last_check_str = "-"
+
         values = (
             active_str,
             type_str,
@@ -197,7 +231,11 @@ class ScheduleTab(ttk.Frame):
             start_time_str,
             next_run_str,
             end_date_str,
-            configs_str
+            configs_str,
+            auto_purchase_str,
+            last_price_str,
+            max_price_str,
+            last_check_str
         )
 
         # Insert item

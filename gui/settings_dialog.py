@@ -94,6 +94,15 @@ class SettingsDialog(tk.Toplevel):
         self.img_ssim_weight_var = tk.StringVar(value="10")
         self.img_histogram_weight_var = tk.StringVar(value="5")
 
+        # Proxy Settings
+        self.proxy_enabled_var = tk.BooleanVar(value=False)
+        self.proxy_ebay_enabled_var = tk.BooleanVar(value=True)
+        self.proxy_mandarake_enabled_var = tk.BooleanVar(value=True)
+        self.proxy_surugaya_enabled_var = tk.BooleanVar(value=True)
+        self.proxy_api_key_var = tk.StringVar(value="")
+        self.proxy_country_var = tk.StringVar(value="us")
+        self.proxy_render_js_var = tk.BooleanVar(value=False)
+
         # Output
         self.output_csv_dir_var = tk.StringVar(value="results")
         self.output_images_dir_var = tk.StringVar(value="images")
@@ -113,6 +122,7 @@ class SettingsDialog(tk.Toplevel):
         self._create_general_tab()
         self._create_scrapers_tab()
         self._create_ebay_tab()
+        self._create_proxy_tab()
         self._create_images_tab()
         self._create_output_tab()
 
@@ -401,6 +411,216 @@ class SettingsDialog(tk.Toplevel):
         )
         row += 1
 
+    def _create_proxy_tab(self):
+        """Create Proxy Rotation settings tab."""
+        tab = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(tab, text="Proxy Rotation")
+
+        row = 0
+
+        # Header
+        ttk.Label(
+            tab,
+            text="ScrapeOps Proxy Configuration:",
+            font=('TkDefaultFont', 9, 'bold')
+        ).grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+        row += 1
+
+        # Enable proxy
+        ttk.Checkbutton(
+            tab,
+            text="Enable ScrapeOps proxy rotation",
+            variable=self.proxy_enabled_var,
+            command=self._toggle_proxy_fields
+        ).grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=(20, 0), pady=5)
+        row += 1
+
+        # Info label
+        info_label = ttk.Label(
+            tab,
+            text="Prevents IP bans by rotating through different proxy IPs for each request.",
+            foreground='gray',
+            font=('TkDefaultFont', 8)
+        )
+        info_label.grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=(40, 0), pady=(0, 10))
+        row += 1
+
+        # Separator
+        ttk.Separator(tab, orient='horizontal').grid(
+            row=row, column=0, columnspan=2, sticky='ew', pady=10
+        )
+        row += 1
+
+        # Use proxy for
+        ttk.Label(
+            tab,
+            text="Use proxy for:",
+            font=('TkDefaultFont', 9, 'bold')
+        ).grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+        row += 1
+
+        self.proxy_ebay_check = ttk.Checkbutton(
+            tab,
+            text="eBay scraping (Scrapy spider)",
+            variable=self.proxy_ebay_enabled_var
+        )
+        self.proxy_ebay_check.grid(
+            row=row, column=0, columnspan=2, sticky=tk.W, padx=(20, 0), pady=2
+        )
+        row += 1
+
+        self.proxy_mandarake_check = ttk.Checkbutton(
+            tab,
+            text="Mandarake scraping (BrowserMimic)",
+            variable=self.proxy_mandarake_enabled_var
+        )
+        self.proxy_mandarake_check.grid(
+            row=row, column=0, columnspan=2, sticky=tk.W, padx=(20, 0), pady=2
+        )
+        row += 1
+
+        self.proxy_surugaya_check = ttk.Checkbutton(
+            tab,
+            text="Suruga-ya scraping (BrowserMimic)",
+            variable=self.proxy_surugaya_enabled_var
+        )
+        self.proxy_surugaya_check.grid(
+            row=row, column=0, columnspan=2, sticky=tk.W, padx=(20, 0), pady=2
+        )
+        row += 1
+
+        # Separator
+        ttk.Separator(tab, orient='horizontal').grid(
+            row=row, column=0, columnspan=2, sticky='ew', pady=10
+        )
+        row += 1
+
+        # API Key
+        ttk.Label(tab, text="API Key:").grid(
+            row=row, column=0, sticky=tk.W, padx=(20, 0), pady=2
+        )
+        self.proxy_api_key_entry = ttk.Entry(
+            tab,
+            textvariable=self.proxy_api_key_var,
+            width=50,
+            show="*"
+        )
+        self.proxy_api_key_entry.grid(row=row, column=1, sticky=tk.W, pady=2)
+        row += 1
+
+        # Help link
+        help_label = ttk.Label(
+            tab,
+            text="Get free API key at scrapeops.io/app/register",
+            foreground='blue',
+            cursor='hand2',
+            font=('TkDefaultFont', 8)
+        )
+        help_label.grid(row=row, column=1, sticky=tk.W, pady=2)
+        help_label.bind("<Button-1>", lambda e: self._open_scrapeops_signup())
+        row += 1
+
+        # Separator
+        ttk.Separator(tab, orient='horizontal').grid(
+            row=row, column=0, columnspan=2, sticky='ew', pady=10
+        )
+        row += 1
+
+        # Advanced Settings
+        ttk.Label(
+            tab,
+            text="Advanced Settings:",
+            font=('TkDefaultFont', 9, 'bold')
+        ).grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+        row += 1
+
+        # Country
+        ttk.Label(tab, text="Proxy country:").grid(
+            row=row, column=0, sticky=tk.W, padx=(20, 0), pady=2
+        )
+        self.proxy_country_combo = ttk.Combobox(
+            tab,
+            textvariable=self.proxy_country_var,
+            values=["us", "uk", "ca", "au", "de", "fr", "jp"],
+            width=10,
+            state='readonly'
+        )
+        self.proxy_country_combo.grid(row=row, column=1, sticky=tk.W, pady=2)
+        row += 1
+
+        # Render JavaScript
+        self.proxy_render_js_check = ttk.Checkbutton(
+            tab,
+            text="Enable JavaScript rendering (slower, more expensive)",
+            variable=self.proxy_render_js_var
+        )
+        self.proxy_render_js_check.grid(
+            row=row, column=0, columnspan=2, sticky=tk.W, padx=(20, 0), pady=2
+        )
+        row += 1
+
+        # Separator
+        ttk.Separator(tab, orient='horizontal').grid(
+            row=row, column=0, columnspan=2, sticky='ew', pady=10
+        )
+        row += 1
+
+        # Usage Info
+        ttk.Label(
+            tab,
+            text="Usage Information:",
+            font=('TkDefaultFont', 9, 'bold')
+        ).grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+        row += 1
+
+        usage_text = (
+            "Free Plan: 1,000 requests/month, 1 concurrent request\n"
+            "Hobby Plan: $29/mo, 100,000 requests, 10 concurrent\n"
+            "Startup Plan: $99/mo, 500,000 requests, 25 concurrent\n\n"
+            "Monitor usage: scrapeops.io/app/dashboard"
+        )
+        usage_label = ttk.Label(
+            tab,
+            text=usage_text,
+            foreground='gray',
+            font=('TkDefaultFont', 8),
+            justify=tk.LEFT
+        )
+        usage_label.grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=(20, 0), pady=2)
+        row += 1
+
+        # Separator
+        ttk.Separator(tab, orient='horizontal').grid(
+            row=row, column=0, columnspan=2, sticky='ew', pady=10
+        )
+        row += 1
+
+        # When to Use
+        ttk.Label(
+            tab,
+            text="When to Enable:",
+            font=('TkDefaultFont', 9, 'bold')
+        ).grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+        row += 1
+
+        when_text = (
+            "✅ Auto-purchase monitoring (prevents bans from repeated checks)\n"
+            "✅ High-volume scraping (100+ pages in a session)\n"
+            "✅ After getting IP banned (immediate workaround)\n\n"
+            "❌ Single searches (wastes quota)\n"
+            "❌ Low-volume usage (<10 searches/day)\n"
+            "❌ Testing (save requests for production)"
+        )
+        when_label = ttk.Label(
+            tab,
+            text=when_text,
+            foreground='gray',
+            font=('TkDefaultFont', 8),
+            justify=tk.LEFT
+        )
+        when_label.grid(row=row, column=0, columnspan=2, sticky=tk.W, padx=(20, 0), pady=2)
+        row += 1
+
     def _create_images_tab(self):
         """Create Image Comparison settings tab."""
         tab = ttk.Frame(self.notebook, padding=10)
@@ -512,6 +732,23 @@ class SettingsDialog(tk.Toplevel):
         ).grid(row=row, column=2, sticky=tk.W, padx=(5, 0), pady=2)
         row += 1
 
+    def _toggle_proxy_fields(self):
+        """Enable/disable proxy fields based on checkbox."""
+        enabled = self.proxy_enabled_var.get()
+        state = 'normal' if enabled else 'disabled'
+
+        self.proxy_ebay_check.config(state=state)
+        self.proxy_mandarake_check.config(state=state)
+        self.proxy_surugaya_check.config(state=state)
+        self.proxy_api_key_entry.config(state=state)
+        self.proxy_country_combo.config(state='readonly' if enabled else 'disabled')
+        self.proxy_render_js_check.config(state=state)
+
+    def _open_scrapeops_signup(self):
+        """Open ScrapeOps signup page."""
+        import webbrowser
+        webbrowser.open("https://scrapeops.io/app/register")
+
     def _load_settings(self):
         """Load current settings into dialog."""
         # General
@@ -549,6 +786,18 @@ class SettingsDialog(tk.Toplevel):
         self.img_orb_weight_var.set(str(weights.get('orb', 25)))
         self.img_ssim_weight_var.set(str(weights.get('ssim', 10)))
         self.img_histogram_weight_var.set(str(weights.get('histogram', 5)))
+
+        # Proxy Settings
+        self.proxy_enabled_var.set(self.settings.get_setting('proxy.enabled', False))
+        self.proxy_ebay_enabled_var.set(self.settings.get_setting('proxy.ebay_enabled', True))
+        self.proxy_mandarake_enabled_var.set(self.settings.get_setting('proxy.mandarake_enabled', True))
+        self.proxy_surugaya_enabled_var.set(self.settings.get_setting('proxy.surugaya_enabled', True))
+        self.proxy_api_key_var.set(self.settings.get_setting('proxy.api_key', ''))
+        self.proxy_country_var.set(self.settings.get_setting('proxy.country', 'us'))
+        self.proxy_render_js_var.set(self.settings.get_setting('proxy.render_js', False))
+
+        # Toggle proxy fields based on enabled state
+        self._toggle_proxy_fields()
 
         # Output
         self.output_csv_dir_var.set(self.settings.get_setting('output.csv_dir', 'results'))
@@ -599,6 +848,15 @@ class SettingsDialog(tk.Toplevel):
                 'ssim': int(self.img_ssim_weight_var.get()),
                 'histogram': int(self.img_histogram_weight_var.get())
             })
+
+            # Proxy Settings
+            self.settings.set_setting('proxy.enabled', self.proxy_enabled_var.get())
+            self.settings.set_setting('proxy.ebay_enabled', self.proxy_ebay_enabled_var.get())
+            self.settings.set_setting('proxy.mandarake_enabled', self.proxy_mandarake_enabled_var.get())
+            self.settings.set_setting('proxy.surugaya_enabled', self.proxy_surugaya_enabled_var.get())
+            self.settings.set_setting('proxy.api_key', self.proxy_api_key_var.get().strip())
+            self.settings.set_setting('proxy.country', self.proxy_country_var.get())
+            self.settings.set_setting('proxy.render_js', self.proxy_render_js_var.get())
 
             # Output
             self.settings.set_setting('output.csv_dir', self.output_csv_dir_var.get())

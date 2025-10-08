@@ -247,3 +247,83 @@ class ScheduleManager:
                 due.append(schedule)
 
         return due
+
+    def update_auto_purchase_check_time(self, schedule_id: int):
+        """
+        Update last check time for auto-purchase schedule.
+
+        Args:
+            schedule_id: ID of schedule to update
+        """
+        schedule = self.storage.get_by_id(schedule_id)
+        if schedule:
+            now = datetime.now()
+            schedule.auto_purchase_last_check = now.isoformat()
+            schedule.auto_purchase_next_check = (
+                now + timedelta(minutes=schedule.auto_purchase_check_interval)
+            ).isoformat()
+            self.storage.update_schedule(schedule)
+
+    def mark_auto_purchase_completed(
+        self,
+        schedule_id: int,
+        purchased_price: int,
+        order_id: Optional[str] = None
+    ):
+        """
+        Mark auto-purchase as completed and disable monitoring.
+
+        Args:
+            schedule_id: ID of schedule
+            purchased_price: Price paid in JPY
+            order_id: Order confirmation ID
+        """
+        schedule = self.storage.get_by_id(schedule_id)
+        if schedule:
+            schedule.auto_purchase_enabled = False
+            schedule.active = False  # Stop monitoring
+            schedule.name = f"{schedule.name} ✓ PURCHASED"
+            self.storage.update_schedule(schedule)
+
+            # Log to purchase history
+            self._log_auto_purchase(schedule_id, purchased_price, order_id)
+
+    def _log_auto_purchase(self, schedule_id: int, purchased_price: int, order_id: Optional[str]):
+        """
+        Log auto-purchase to history file.
+
+        Args:
+            schedule_id: Schedule ID
+            purchased_price: Price paid
+            order_id: Order confirmation ID
+        """
+        import json
+        from pathlib import Path
+
+        log_file = Path("auto_purchase_log.json")
+
+        # Load existing logs
+        if log_file.exists():
+            logs = json.loads(log_file.read_text(encoding='utf-8'))
+        else:
+            logs = []
+
+        # Get schedule details
+        schedule = self.storage.get_by_id(schedule_id)
+        if schedule:
+            # Add new log entry
+            log_entry = {
+                'schedule_id': schedule_id,
+                'item_name': schedule.name,
+                'purchased_at': datetime.now().isoformat(),
+                'purchased_price': purchased_price,
+                'order_id': order_id or 'N/A',
+                'url': schedule.auto_purchase_url or schedule.auto_purchase_keyword
+            }
+            logs.append(log_entry)
+
+            # Save logs
+            log_file.write_text(
+                json.dumps(logs, indent=2, ensure_ascii=False),
+                encoding='utf-8'
+            )

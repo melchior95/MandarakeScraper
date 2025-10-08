@@ -45,6 +45,8 @@ class MenuManager:
         settings_menu.add_command(label="View Settings Summary", command=self.show_settings_summary)
         settings_menu.add_command(label="Reset to Defaults", command=self.reset_settings)
         settings_menu.add_separator()
+        settings_menu.add_command(label="⚠️ Configure Auto-Checkout...", command=self.show_checkout_settings)
+        settings_menu.add_separator()
         settings_menu.add_command(label="Export Settings", command=self.export_settings)
         settings_menu.add_command(label="Import Settings", command=self.import_settings)
 
@@ -157,6 +159,33 @@ class MenuManager:
         from gui.settings_dialog import SettingsDialog
         dialog = SettingsDialog(self.root, self.settings)
         self.root.wait_window(dialog)
+
+    def show_checkout_settings(self) -> None:
+        """Show the automatic checkout configuration dialog."""
+        from gui.checkout_settings_dialog import CheckoutSettingsDialog
+        from gui.checkout_settings_storage import CheckoutSettingsStorage
+
+        dialog = CheckoutSettingsDialog(self.root)
+        self.root.wait_window(dialog)
+
+        if dialog.result:
+            # Check if auto-checkout was enabled
+            storage = CheckoutSettingsStorage()
+            if storage.is_auto_checkout_enabled():
+                messagebox.showinfo(
+                    "Auto-Checkout Enabled",
+                    "⚠️ Automatic checkout is now ACTIVE.\n\n"
+                    "The system will automatically purchase monitored items\n"
+                    "when they come back in stock (subject to your spending limits).\n\n"
+                    "You can disable this at any time by opening this dialog again."
+                )
+            else:
+                messagebox.showinfo(
+                    "Settings Saved",
+                    "Checkout settings have been saved.\n\n"
+                    "Automatic checkout is currently disabled.\n"
+                    "Enable it when you're ready to start monitoring."
+                )
 
     def show_image_search_help(self):
         """Show image search help dialog."""

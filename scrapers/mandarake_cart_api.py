@@ -431,6 +431,125 @@ class MandarakeCartAPI:
         webbrowser.open(cart_url)
         self.logger.info(f"Opened cart in browser: {cart_url}")
 
+    def execute_checkout(self, shipping_info: dict, payment_method: str = 'stored') -> dict:
+        """
+        Execute full checkout process automatically.
+
+        WARNING: This will complete a real purchase! Use with caution.
+
+        Args:
+            shipping_info: Dictionary with shipping details:
+                {
+                    'name': str,
+                    'postal_code': str,
+                    'address': str,
+                    'phone': str,
+                    'email': str
+                }
+            payment_method: Payment method ('stored', 'credit_card', 'paypal')
+
+        Returns:
+            {
+                'success': bool,
+                'order_id': str,
+                'total_jpy': int,
+                'message': str,
+                'error': str
+            }
+        """
+        try:
+            from bs4 import BeautifulSoup
+
+            self.logger.info("[CHECKOUT] Starting automatic checkout process")
+
+            # Step 1: Verify cart has items
+            cart = self.get_cart()
+            if not cart:
+                return {'success': False, 'error': 'Cart is empty'}
+
+            # Step 2: Get cart page to extract form tokens
+            cart_page_url = f"{self.cart_url}/cart/view/order/inputOrderEn.html"
+            response = self.session.get(cart_page_url)
+
+            if response.status_code != 200:
+                return {'success': False, 'error': f'Failed to load cart page: {response.status_code}'}
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Step 3: Extract any CSRF tokens or hidden form fields
+            form = soup.find('form', attrs={'name': 'orderForm'}) or soup.find('form')
+            form_data = {}
+
+            if form:
+                # Extract all hidden inputs
+                for hidden in form.find_all('input', attrs={'type': 'hidden'}):
+                    name = hidden.get('name')
+                    value = hidden.get('value', '')
+                    if name:
+                        form_data[name] = value
+
+            # Step 4: Fill shipping information
+            form_data.update({
+                'receiverName': shipping_info.get('name', ''),
+                'receiverZip': shipping_info.get('postal_code', ''),
+                'receiverAddress': shipping_info.get('address', ''),
+                'receiverTel': shipping_info.get('phone', ''),
+                'receiverEmail': shipping_info.get('email', ''),
+                'paymentMethod': payment_method
+            })
+
+            # Step 5: Submit shipping info
+            receiver_url = f"{self.cart_url}/cart/view/order/inputReceiverEn.html"
+            headers = {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Referer': cart_page_url
+            }
+
+            response = self.session.post(receiver_url, data=form_data, headers=headers)
+
+            if response.status_code != 200:
+                return {'success': False, 'error': f'Failed to submit shipping info: {response.status_code}'}
+
+            self.logger.info("[CHECKOUT] Shipping info submitted")
+
+            # Step 6: Confirm order (final step)
+            confirm_url = f"{self.cart_url}/cart/view/order/confirmOrderEn.html"
+            response = self.session.post(confirm_url, headers={'Referer': receiver_url})
+
+            if response.status_code != 200:
+                return {'success': False, 'error': f'Failed to confirm order: {response.status_code}'}
+
+            # Step 7: Parse order confirmation
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Try to extract order ID
+            order_id = 'AUTO_CHECKOUT'
+            order_elem = soup.find(string=lambda t: t and 'Order' in t and '#' in t)
+            if order_elem:
+                import re
+                match = re.search(r'#(\d+)', str(order_elem))
+                if match:
+                    order_id = match.group(1)
+
+            # Get total from cart summary
+            summary = self.get_cart_summary()
+            total_jpy = summary.get('total_value_jpy', 0)
+
+            self.logger.info(f"[CHECKOUT] ✓ Order completed! Order ID: {order_id}")
+
+            return {
+                'success': True,
+                'order_id': order_id,
+                'total_jpy': total_jpy,
+                'message': f'Order {order_id} placed successfully'
+            }
+
+        except Exception as e:
+            self.logger.error(f"[CHECKOUT] Error during checkout: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'success': False, 'error': str(e)}
+
 
 class MandarakeCartSession:
     """

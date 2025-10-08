@@ -61,13 +61,31 @@ class BrowserMimic:
         }
     ]
 
-    def __init__(self, session_file: str = 'browser_session.pkl'):
-        """Initialize browser mimic with session persistence"""
+    def __init__(self, session_file: str = 'browser_session.pkl', use_scrapeops: bool = False, scrapeops_api_key: str = None):
+        """
+        Initialize browser mimic with session persistence.
+
+        Args:
+            session_file: File to persist session data
+            use_scrapeops: Whether to use ScrapeOps proxy rotation
+            scrapeops_api_key: ScrapeOps API key (required if use_scrapeops=True)
+        """
         self.session_file = session_file
         self.session = requests.Session()
         self.current_profile = random.choice(self.BROWSER_PROFILES)
         self.request_history = []
         self.last_request_time = None
+
+        # Proxy settings
+        self.use_scrapeops = use_scrapeops
+        self.scrapeops_rotator = None
+
+        if use_scrapeops:
+            if not scrapeops_api_key:
+                raise ValueError("scrapeops_api_key required when use_scrapeops=True")
+            from scrapers.proxy_rotator import ScrapeOpsProxyRotator
+            self.scrapeops_rotator = ScrapeOpsProxyRotator(scrapeops_api_key)
+            logging.info("ScrapeOps proxy rotation enabled")
 
         # Setup retry strategy
         retry_strategy = Retry(
@@ -330,6 +348,12 @@ class BrowserMimic:
         print(f"[BROWSER DEBUG] Original URL: {url}")
         print(f"[BROWSER DEBUG] URL type: {type(url)}")
         print(f"[BROWSER DEBUG] URL length: {len(url)}")
+
+        # If using ScrapeOps, route through their proxy API
+        if self.use_scrapeops and self.scrapeops_rotator:
+            logging.info(f"[PROXY] Routing request through ScrapeOps proxy")
+            # ScrapeOps rotator handles the request
+            return self.scrapeops_rotator.get(url, session=self.session, **kwargs)
 
         # Ensure URL is properly encoded for Japanese characters
         from urllib.parse import quote, unquote, urlparse, urlunparse

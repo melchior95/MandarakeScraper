@@ -49,6 +49,15 @@ class Schedule:
         created_at: Creation timestamp
         last_run: Last execution timestamp
         next_run: Next scheduled execution timestamp
+        auto_purchase_enabled: Enable auto-purchase monitoring
+        auto_purchase_url: Mandarake URL to monitor (search or item)
+        auto_purchase_keyword: Search keyword (if using search URL)
+        auto_purchase_last_price: Last known price in JPY
+        auto_purchase_max_price: Max price willing to pay
+        auto_purchase_check_interval: Check every X minutes
+        auto_purchase_expiry: Stop checking after this date
+        auto_purchase_last_check: Last time we checked
+        auto_purchase_next_check: Next scheduled check
     """
     schedule_id: int
     name: str
@@ -66,6 +75,17 @@ class Schedule:
     created_at: Optional[str] = None
     last_run: Optional[str] = None
     next_run: Optional[str] = None
+    # Auto-purchase fields
+    auto_purchase_enabled: bool = False
+    auto_purchase_url: Optional[str] = None
+    auto_purchase_keyword: Optional[str] = None
+    auto_purchase_last_price: Optional[int] = None
+    auto_purchase_max_price: Optional[int] = None
+    auto_purchase_check_interval: int = 30
+    auto_purchase_expiry: Optional[str] = None
+    auto_purchase_last_check: Optional[str] = None
+    auto_purchase_next_check: Optional[str] = None
+    auto_purchase_monitoring_method: str = "polling"  # "polling", "rss", or "hybrid"
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -85,7 +105,17 @@ class Schedule:
             'comparison_method': self.comparison_method,
             'created_at': self.created_at,
             'last_run': self.last_run,
-            'next_run': self.next_run
+            'next_run': self.next_run,
+            'auto_purchase_enabled': self.auto_purchase_enabled,
+            'auto_purchase_url': self.auto_purchase_url,
+            'auto_purchase_keyword': self.auto_purchase_keyword,
+            'auto_purchase_last_price': self.auto_purchase_last_price,
+            'auto_purchase_max_price': self.auto_purchase_max_price,
+            'auto_purchase_check_interval': self.auto_purchase_check_interval,
+            'auto_purchase_expiry': self.auto_purchase_expiry,
+            'auto_purchase_last_check': self.auto_purchase_last_check,
+            'auto_purchase_next_check': self.auto_purchase_next_check,
+            'auto_purchase_monitoring_method': self.auto_purchase_monitoring_method
         }
 
     @classmethod
@@ -107,7 +137,17 @@ class Schedule:
             comparison_method=data.get('comparison_method', 'text'),
             created_at=data.get('created_at'),
             last_run=data.get('last_run'),
-            next_run=data.get('next_run')
+            next_run=data.get('next_run'),
+            auto_purchase_enabled=data.get('auto_purchase_enabled', False),
+            auto_purchase_url=data.get('auto_purchase_url'),
+            auto_purchase_keyword=data.get('auto_purchase_keyword'),
+            auto_purchase_last_price=data.get('auto_purchase_last_price'),
+            auto_purchase_max_price=data.get('auto_purchase_max_price'),
+            auto_purchase_check_interval=data.get('auto_purchase_check_interval', 30),
+            auto_purchase_expiry=data.get('auto_purchase_expiry'),
+            auto_purchase_last_check=data.get('auto_purchase_last_check'),
+            auto_purchase_next_check=data.get('auto_purchase_next_check'),
+            auto_purchase_monitoring_method=data.get('auto_purchase_monitoring_method', 'polling')
         )
 
     def is_valid(self) -> bool:

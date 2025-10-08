@@ -96,9 +96,8 @@ class ImageComparisonWindow:
         from io import BytesIO
         from PIL import Image, ImageTk
 
-        # Load store image
-        store_thumbnail = self.alert_data.get('store_thumbnail', '')
-        store_image_url = self.alert_data.get('thumbnail', store_thumbnail)
+        # Load store image (Mandarake)
+        store_image_url = self.alert_data.get('store_thumbnail', '')
 
         if store_image_url:
             try:
@@ -122,8 +121,8 @@ class ImageComparisonWindow:
                 logging.error(f"Failed to load store image: {e}")
                 self.store_image_label.config(text="[Image not available]")
 
-        # Load eBay image
-        ebay_image_url = self.alert_data.get('thumbnail', '')
+        # Load eBay image (best match from comparison)
+        ebay_image_url = self.alert_data.get('ebay_thumbnail', self.alert_data.get('thumbnail', ''))
 
         if ebay_image_url:
             try:

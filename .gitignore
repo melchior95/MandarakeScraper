@@ -69,3 +69,6 @@ images/
 *.temp
 temp/
 tmp/
+
+# Cache files
+exchange_rate_cache.json
