@@ -172,6 +172,43 @@ class MandarakeCartAPI:
             self.logger.error(f"Error fetching cart: {e}")
             return {}
 
+    def get_cart_items(self) -> List[Dict]:
+        """
+        Get cart contents as a flat list of items
+
+        Returns:
+            list: All cart items across all shops
+            [
+                {
+                    'product_id': '1126279062',
+                    'title': 'Product Title',
+                    'price': '¥3,000',
+                    'price_jpy': 3000,
+                    'shop_code': 'nakano',
+                    'shop_name': 'Nakano',
+                    ...
+                },
+                ...
+            ]
+        """
+        cart_by_shop = self.get_cart()
+
+        all_items = []
+        for shop_name, items in cart_by_shop.items():
+            for item in items:
+                # Add shop info to each item
+                item['shop_name'] = shop_name
+                # Derive shop code from shop name (lowercase, no spaces)
+                item['shop_code'] = shop_name.lower().replace(' ', '')
+
+                # Add formatted price if price_jpy exists
+                if 'price_jpy' in item and 'price' not in item:
+                    item['price'] = f"¥{item['price_jpy']:,}"
+
+                all_items.append(item)
+
+        return all_items
+
     def _extract_shop_name(self, shop_section) -> Optional[str]:
         """Extract shop name from section"""
         try:
