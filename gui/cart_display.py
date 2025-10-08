@@ -333,7 +333,7 @@ class CartDisplayFrame(ttk.LabelFrame):
 
         # Check if cart needs ROI verification
         # (Check if verification is older than 24 hours)
-        last_verification = self.cart_manager.storage.get_latest_verification()
+        last_verification = self.cart_manager.storage.get_last_verification()
         if last_verification:
             from datetime import datetime
             verified_at = datetime.fromisoformat(last_verification['verified_at'])
