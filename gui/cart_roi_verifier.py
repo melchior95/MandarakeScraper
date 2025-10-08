@@ -390,20 +390,32 @@ class CartROIVerifier:
             # Extract keywords from title
             title = item.get('title', '')
 
-            # Use eBay search manager
-            results = self.ebay_search_manager.search_ebay_sold_listings(
-                keyword=title,
-                max_results=20
-            )
+            # First, check if we have cached results from CSV comparison
+            if self.csv_comparison_manager and hasattr(self.csv_comparison_manager, 'csv_compare_data'):
+                # Look for this item in cached comparison results
+                item_url = item.get('url', '')
+                for cached_item in self.csv_comparison_manager.csv_compare_data:
+                    if cached_item.get('url') == item_url and cached_item.get('ebay_avg_price'):
+                        self.logger.info(f"Using cached eBay results for: {title}")
+                        return {
+                            'avg_price_usd': cached_item.get('ebay_avg_price', 0),
+                            'sold_count': cached_item.get('ebay_sold_count', 0),
+                            'results': [],  # Don't need full results from cache
+                            'from_cache': True
+                        }
 
-            if results:
+            # Use eBay search manager - fixed method name
+            results = self.ebay_search_manager.search_ebay_sold(title)
+
+            if results and results.get('items'):
                 # Calculate average price
-                prices = [r['price'] for r in results if r.get('price', 0) > 0]
+                prices = [r['price'] for r in results['items'] if r.get('price', 0) > 0]
                 if prices:
                     return {
                         'avg_price_usd': sum(prices) / len(prices),
-                        'sold_count': len(results),
-                        'results': results
+                        'sold_count': len(results['items']),
+                        'results': results['items'],
+                        'from_cache': False
                     }
 
         except Exception as e:
@@ -417,6 +429,23 @@ class CartROIVerifier:
             return None
 
         try:
+            # First, check if we have cached image comparison results
+            if hasattr(self.csv_comparison_manager, 'csv_compare_data'):
+                item_url = item.get('url', '')
+                for cached_item in self.csv_comparison_manager.csv_compare_data:
+                    if (cached_item.get('url') == item_url and
+                        cached_item.get('best_match_similarity') is not None):
+                        self.logger.info(f"Using cached image comparison for: {item.get('title')}")
+                        return {
+                            'matches': [{
+                                'similarity': cached_item.get('best_match_similarity', 0),
+                                'price': cached_item.get('best_match_price', 0),
+                                'title': cached_item.get('best_match_title', '')
+                            }],
+                            'match_count': 1,
+                            'from_cache': True
+                        }
+
             # Create temporary CSV row for comparison
             csv_row = {
                 'Title': item.get('title', ''),
@@ -434,7 +463,8 @@ class CartROIVerifier:
             if matches:
                 return {
                     'matches': matches,
-                    'match_count': len(matches)
+                    'match_count': len(matches),
+                    'from_cache': False
                 }
 
         except Exception as e:
