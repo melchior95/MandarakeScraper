@@ -53,7 +53,8 @@ class ScraperGUI(tk.Tk):
         self.usd_jpy_rate = 150.0
 
         # Fetch current USD/JPY exchange rate in background after GUI initializes
-        self._fetch_exchange_rate_async()
+        # Use after() to delay until main loop is running
+        self.after(100, self._fetch_exchange_rate_async)
 
         self.title("Mandarake Scraper GUI")
 
