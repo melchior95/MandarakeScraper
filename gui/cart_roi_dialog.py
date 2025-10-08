@@ -38,6 +38,43 @@ class CartROIDialog(tk.Toplevel):
     def _create_ui(self):
         """Create ROI verification UI"""
 
+        # Cart selection frame
+        cart_frame = ttk.LabelFrame(self, text="Cart Selection", padding=10)
+        cart_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        # Get cart breakdown to show shops
+        try:
+            cart_items = self.cart_manager.cart_api.get_cart_items()
+            shops = {}
+            for item in cart_items:
+                shop_code = item.get('shop_code', 'unknown')
+                shop_name = item.get('shop_name', shop_code.title())
+                if shop_code not in shops:
+                    shops[shop_code] = {'name': shop_name, 'count': 0}
+                shops[shop_code]['count'] += 1
+
+            # Display selected shops
+            shop_text = ", ".join([f"{data['name']} ({data['count']} items)" for data in shops.values()])
+            ttk.Label(
+                cart_frame,
+                text=f"Verifying: {shop_text}",
+                wraplength=750
+            ).pack(anchor=tk.W)
+
+            total_items = sum(data['count'] for data in shops.values())
+            ttk.Label(
+                cart_frame,
+                text=f"Total: {total_items} items across {len(shops)} shop(s)",
+                foreground='gray'
+            ).pack(anchor=tk.W, pady=(5, 0))
+
+        except Exception as e:
+            ttk.Label(
+                cart_frame,
+                text=f"Error loading cart: {e}",
+                foreground='red'
+            ).pack(anchor=tk.W)
+
         # Options frame
         options_frame = ttk.LabelFrame(self, text="Verification Options", padding=10)
         options_frame.pack(fill=tk.X, padx=10, pady=10)

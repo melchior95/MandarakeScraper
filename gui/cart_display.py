@@ -69,7 +69,7 @@ class CartDisplayFrame(ttk.LabelFrame):
         breakdown_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
         # Create treeview for shop display
-        columns = ('shop', 'items', 'total_jpy', 'total_usd', 'status')
+        columns = ('shop', 'items', 'total_jpy', 'total_usd', 'roi', 'status')
         self.shop_tree = ttk.Treeview(
             breakdown_frame,
             columns=columns,
@@ -82,6 +82,7 @@ class CartDisplayFrame(ttk.LabelFrame):
         self.shop_tree.heading('items', text='Items')
         self.shop_tree.heading('total_jpy', text='Total (¥)')
         self.shop_tree.heading('total_usd', text='Total ($)')
+        self.shop_tree.heading('roi', text='ROI %')
         self.shop_tree.heading('status', text='Status')
 
         # Column widths
@@ -89,7 +90,8 @@ class CartDisplayFrame(ttk.LabelFrame):
         self.shop_tree.column('items', width=60, anchor='center')
         self.shop_tree.column('total_jpy', width=100, anchor='e')
         self.shop_tree.column('total_usd', width=100, anchor='e')
-        self.shop_tree.column('status', width=120, anchor='center')
+        self.shop_tree.column('roi', width=80, anchor='center')
+        self.shop_tree.column('status', width=100, anchor='center')
 
         # Scrollbar
         scrollbar = ttk.Scrollbar(breakdown_frame, orient=tk.VERTICAL, command=self.shop_tree.yview)
@@ -247,6 +249,7 @@ class CartDisplayFrame(ttk.LabelFrame):
                     'items': 0,
                     'total_jpy': 0,
                     'total_usd': 0.0,
+                    'roi_percent': None,
                     'status': 'unknown',
                     'min_threshold': thresholds.get('min_cart_value', 5000),
                     'max_threshold': thresholds.get('max_cart_value', 50000),
@@ -264,6 +267,14 @@ class CartDisplayFrame(ttk.LabelFrame):
 
             total_items += 1
             total_jpy += price_jpy
+
+        # Get ROI data from last verification
+        last_verification = self.cart_manager.storage.get_last_verification()
+        if last_verification and last_verification.get('roi_percent'):
+            # For now, use overall ROI for all shops (can be enhanced later to track per-shop)
+            overall_roi = last_verification['roi_percent']
+            for shop_code in breakdown.keys():
+                breakdown[shop_code]['roi_percent'] = overall_roi
 
         # Calculate status for each shop
         for shop_code, data in breakdown.items():
@@ -310,11 +321,15 @@ class CartDisplayFrame(ttk.LabelFrame):
             from mandarake_codes import MANDARAKE_STORES
             shop_name = MANDARAKE_STORES.get(shop_code, shop_code.title())
 
+            # Format ROI
+            roi_text = f"{data['roi_percent']:.1f}%" if data['roi_percent'] is not None else "Not verified"
+
             values = (
                 shop_name,
                 str(data['items']),
                 f"¥{data['total_jpy']:,}",
                 f"${data['total_usd']:.2f}",
+                roi_text,
                 data['status_text']
             )
 
