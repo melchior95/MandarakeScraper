@@ -3,8 +3,8 @@
 ## Overview
 This document serves as a comprehensive index to all documentation files in the Mandarake Scraper project. It provides a roadmap for understanding the project structure, features, and implementation details.
 
-**Last Updated**: October 4, 2025
-**Status**: Active Development
+**Last Updated**: October 7, 2025
+**Status**: Active Development - Cart Management System Implemented ✅
 
 ---
 
@@ -58,6 +58,40 @@ gui_config.py (1473 lines)
   - Bulk operations
   - Threshold filtering
   - JSON persistence
+
+### Cart Management System ✅ NEW
+- **[CART_SYSTEM_COMPLETE.md](CART_SYSTEM_COMPLETE.md)** - Complete cart management system
+  - Cart API implementation
+  - Shop-level threshold tracking
+  - ROI verification (text, image, hybrid methods)
+  - SQLite persistence
+
+- **[CART_ADD_TO_CART_COMPLETE.md](CART_ADD_TO_CART_COMPLETE.md)** ✅ - Add-to-cart implementation
+  - Real endpoint captured: `https://tools.mandarake.co.jp/basket/add/`
+  - AJAX request parameters
+  - Test script: `test_add_to_cart.py`
+  - Integration with alert workflow
+
+- **[ADD_YAYS_TO_CART_WORKFLOW.md](ADD_YAYS_TO_CART_WORKFLOW.md)** - "Add Yays to Cart" workflow
+  - One-click bulk cart addition
+  - Threshold checking and warnings
+  - Shop consolidation
+  - State transitions: Yay → In Cart
+
+- **[MULTI_SHOP_OPTIMIZATION.md](MULTI_SHOP_OPTIMIZATION.md)** - Multi-shop optimization design
+  - Detect items in multiple shops
+  - Consolidation algorithm
+  - Shipping cost minimization
+
+- **[PRICE_CONDITION_OPTIMIZER.md](PRICE_CONDITION_OPTIMIZER.md)** - Price/condition comparison
+  - Multi-factor scoring (price 50%, condition 30%, consolidation 20%)
+  - Condition hierarchy (New → Poor)
+  - Smart recommendations
+
+- **[CAPTURE_ADD_TO_CART_ENDPOINT.md](CAPTURE_ADD_TO_CART_ENDPOINT.md)** ✅ - Endpoint capture guide
+  - Step-by-step DevTools instructions
+  - Captured endpoint details
+  - cURL conversion
 
 ### eBay Integration
 - **[EBAY_IMAGE_COMPARISON_GUIDE.md](EBAY_IMAGE_COMPARISON_GUIDE.md)** - User guide for eBay image comparison

@@ -37,6 +37,7 @@ from gui.csv_comparison_manager import CSVComparisonManager
 from gui.surugaya_manager import SurugayaManager
 from gui.window_manager import WindowManager
 from gui.menu_manager import MenuManager
+from gui.cart_manager import CartManager
 
 
 class ScraperGUI(tk.Tk):
@@ -154,7 +155,11 @@ class ScraperGUI(tk.Tk):
         browserless_frame = ttk.Frame(notebook)
         advanced_frame = ttk.Frame(notebook)
 
+        # Initialize cart manager (connects to Mandarake cart for automated adding)
+        self.cart_manager = None  # Will be initialized when alert_tab is created
+
         # Always create alert tab first (other tabs may reference it)
+        # Note: cart_manager is initialized after alert_tab, then passed back to it
         self.alert_tab = AlertTab(notebook, settings_manager=self.settings)
 
         if marketplace_toggles.get('mandarake', True):
@@ -189,6 +194,18 @@ class ScraperGUI(tk.Tk):
         if marketplace_toggles.get('ebay', True):
             self.ebay_tab = EbayTab(browserless_frame, self.settings, self.alert_tab, self)
             self.ebay_tab.pack(fill=tk.BOTH, expand=True)
+
+        # Initialize Cart Manager (after alert_manager is available)
+        self.cart_manager = CartManager(
+            alert_manager=self.alert_tab.alert_manager,
+            ebay_search_manager=self.ebay_tab.ebay_search_manager if hasattr(self, 'ebay_tab') else None,
+            csv_comparison_manager=self.ebay_tab.csv_comparison_manager if hasattr(self, 'ebay_tab') else None
+        )
+
+        # Pass cart_manager to alert_tab and initialize cart UI
+        self.alert_tab.cart_manager = self.cart_manager
+        if hasattr(self.alert_tab, 'initialize_cart_ui'):
+            self.alert_tab.initialize_cart_ui()
 
         # Advanced tab - Create using AdvancedTab module
         self.advanced_tab = AdvancedTab(advanced_frame, self.settings, self)

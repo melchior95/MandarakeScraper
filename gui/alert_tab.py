@@ -27,17 +27,19 @@ from gui.image_comparison_window import ImageComparisonWindow
 class AlertTab(ttk.Frame):
     """Alert/Review tab for managing items through reselling workflow."""
 
-    def __init__(self, parent, settings_manager=None):
+    def __init__(self, parent, settings_manager=None, cart_manager=None):
         """
         Initialize Alert tab.
 
         Args:
             parent: Parent widget
             settings_manager: Optional settings manager instance
+            cart_manager: Optional CartManager instance for cart operations
         """
         super().__init__(parent)
         self.selected_alert_ids = []
         self.settings_manager = settings_manager
+        self.cart_manager = cart_manager
 
         # Load saved settings or use defaults
         if settings_manager:
@@ -150,6 +152,10 @@ class AlertTab(ttk.Frame):
         )
         notify_profit_spin.pack(side=tk.LEFT, padx=2)
         ttk.Label(notify_frame, text="%").pack(side=tk.LEFT)
+
+        # Cart management frame - placeholder (will be created when cart_manager is set)
+        self.cart_frame = None
+        self.controls_frame = controls_frame  # Save reference for later
 
         # Bulk actions frame
         actions_frame = ttk.Frame(self)
@@ -907,3 +913,210 @@ class AlertTab(ttk.Frame):
 
         # Reload alerts to show new ones
         self._load_alerts()
+
+    # Cart Management Methods
+
+    def initialize_cart_ui(self):
+        """Initialize cart management UI after cart_manager is set."""
+        if not self.cart_manager or self.cart_frame:
+            return  # Already initialized or no cart_manager
+
+        # Create quick cart actions frame in controls
+        self.cart_frame = ttk.LabelFrame(self.controls_frame, text="Cart Quick Actions:", padding=5)
+        self.cart_frame.pack(side=tk.RIGHT, padx=(10, 0))
+
+        ttk.Button(
+            self.cart_frame,
+            text="🔌 Connect to Cart",
+            command=self._show_cart_connection_dialog
+        ).pack(side=tk.LEFT, padx=2)
+
+        self.cart_status_label = ttk.Label(self.cart_frame, text="Not connected")
+        self.cart_status_label.pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(
+            self.cart_frame,
+            text="Add Yays to Cart",
+            command=self._add_yays_to_cart
+        ).pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(
+            self.cart_frame,
+            text="📊 Cart Overview",
+            command=self._toggle_cart_display
+        ).pack(side=tk.LEFT, padx=2)
+
+        # Create full cart display section (hidden initially)
+        from gui.cart_display import CartDisplayFrame
+        self.cart_display = CartDisplayFrame(self, self.cart_manager)
+
+        # Toggle variable for showing/hiding cart display
+        self.cart_display_visible = False
+
+        # Update cart status
+        self._update_cart_status()
+
+    def _show_cart_connection_dialog(self):
+        """Show cart connection dialog"""
+        from gui.cart_connection_dialog import CartConnectionDialog
+
+        dialog = CartConnectionDialog(self, self.cart_manager)
+        dialog.wait_window()
+
+        # Update status after dialog closes
+        self._update_cart_status()
+
+        # If connection successful and cart display is visible, refresh it
+        if dialog.connected and hasattr(self, 'cart_display_visible') and self.cart_display_visible:
+            self.cart_display.refresh_display()
+
+    def _check_cart_connection(self) -> bool:
+        """
+        Check if cart is connected, prompt user to connect if not
+
+        Returns:
+            True if connected (or user connected via dialog), False otherwise
+        """
+        if not self.cart_manager:
+            messagebox.showerror("Error", "Cart manager not initialized")
+            return False
+
+        if self.cart_manager.is_connected():
+            return True
+
+        # Show connection dialog
+        response = messagebox.askyesno(
+            "Not Connected",
+            "You are not connected to your Mandarake cart.\n\n"
+            "Would you like to connect now?",
+            parent=self
+        )
+
+        if response:
+            self._show_cart_connection_dialog()
+            return self.cart_manager.is_connected()
+
+        return False
+
+    def _toggle_cart_display(self):
+        """Toggle cart display visibility"""
+        if not hasattr(self, 'cart_display'):
+            return
+
+        # Check connection before showing cart display
+        if not self.cart_display_visible and not self._check_cart_connection():
+            return
+
+        if self.cart_display_visible:
+            # Hide cart display
+            self.cart_display.pack_forget()
+            self.cart_display_visible = False
+        else:
+            # Show cart display (between controls and tree)
+            self.cart_display.pack(fill=tk.X, padx=5, pady=5, before=self.tree.master)
+            # Refresh cart data
+            self.cart_display.refresh_display()
+            self.cart_display_visible = True
+
+    def _update_cart_status(self):
+        """Update cart connection status label."""
+        if not self.cart_manager or not hasattr(self, 'cart_status_label'):
+            return
+
+        if self.cart_manager.is_connected():
+            self.cart_status_label.config(text="✓ Connected", foreground="green")
+        else:
+            self.cart_status_label.config(text="Not connected", foreground="gray")
+
+    def _add_yays_to_cart(self):
+        """Add all Yay alerts to Mandarake cart."""
+        # Check connection first
+        if not self._check_cart_connection():
+            return
+
+        # Get Yay count
+        yay_alerts = self.alert_manager.get_alerts_by_state(AlertState.YAY)
+        if not yay_alerts:
+            messagebox.showinfo(
+                "No Yay Items",
+                "There are no items marked as 'Yay' to add to cart.",
+                parent=self
+            )
+            return
+
+        yay_count = len(yay_alerts)
+
+        # Confirm
+        response = messagebox.askyesno(
+            "Add to Cart",
+            f"Add {yay_count} Yay item(s) to Mandarake cart?",
+            parent=self
+        )
+        if not response:
+            return
+
+        # Show progress dialog
+        from gui.cart_ui import CartProgressDialog
+
+        progress_dialog = CartProgressDialog(self, yay_count)
+
+        def progress_callback(current, total, message):
+            progress_dialog.update_progress(current, total, message)
+
+        # Add to cart
+        result = self.cart_manager.add_yays_to_cart(
+            force_below_threshold=False,
+            progress_callback=progress_callback
+        )
+
+        # Close progress dialog
+        progress_dialog.finish()
+
+        # Show results
+        self._show_cart_results(result)
+
+    def _show_threshold_warning(self, warnings: List[Dict]):
+        """Show threshold warning dialog."""
+        from gui.cart_ui import ThresholdWarningDialog
+
+        def on_proceed():
+            # User chose to proceed - add with force_below_threshold=True
+            from gui.cart_ui import CartProgressDialog, show_cart_results
+
+            # Create progress dialog
+            yay_alerts = self.alert_manager.get_alerts_by_state(AlertState.YAY)
+            progress_dialog = CartProgressDialog(self, len(yay_alerts))
+
+            def progress_callback(current, total, message):
+                progress_dialog.update_progress(current, total, message)
+
+            # Add to cart (forced)
+            result = self.cart_manager.add_yays_to_cart(
+                force_below_threshold=True,
+                progress_callback=progress_callback
+            )
+
+            # Close progress dialog
+            progress_dialog.finish()
+
+            # Show results
+            show_cart_results(self, result)
+
+            # Reload alerts to show updated states
+            self._load_alerts()
+
+        def on_cancel():
+            pass  # Do nothing
+
+        # Show warning dialog
+        ThresholdWarningDialog(self, warnings, on_proceed, on_cancel)
+
+    def _show_cart_results(self, result: Dict):
+        """Show cart operation results."""
+        from gui.cart_ui import show_cart_results
+
+        show_cart_results(self, result)
+
+        # Reload alerts to show updated states
+        if result.get('success'):
+            self._load_alerts()

@@ -41,7 +41,16 @@ def slugify(value: str) -> str:
 
 
 def fetch_exchange_rate() -> float:
-    """Fetch current USD to JPY exchange rate."""
+    """
+    Fetch current USD to JPY exchange rate.
+
+    Falls back to last known rate if fetch fails, or 150.0 if no history exists.
+    """
+    import json
+    from pathlib import Path
+
+    cache_file = Path('exchange_rate_cache.json')
+
     try:
         import requests
         # Use exchangerate-api.com (free, no API key needed)
@@ -49,11 +58,35 @@ def fetch_exchange_rate() -> float:
         if response.status_code == 200:
             data = response.json()
             rate = data['rates']['JPY']
+
+            # Save to cache
+            try:
+                with open(cache_file, 'w') as f:
+                    json.dump({
+                        'rate': rate,
+                        'timestamp': data.get('time_last_updated', 0)
+                    }, f)
+            except Exception:
+                pass  # Don't fail if we can't save cache
+
             return rate
     except Exception as e:
         print(f"[EXCHANGE RATE] Error fetching rate: {e}")
 
-    # Fallback to a reasonable default if fetch fails
+    # Try to load last known rate from cache
+    try:
+        if cache_file.exists():
+            with open(cache_file, 'r') as f:
+                cached = json.load(f)
+                rate = cached.get('rate')
+                if rate:
+                    print(f"[EXCHANGE RATE] Using cached rate: ¥{rate:.2f}")
+                    return rate
+    except Exception:
+        pass
+
+    # Final fallback
+    print("[EXCHANGE RATE] Using default rate: ¥150.00")
     return 150.0
 
 

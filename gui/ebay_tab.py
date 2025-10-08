@@ -373,6 +373,8 @@ class EbayTab(ttk.Frame):
 
         # Add right-click context menu for CSV tree
         self.csv_tree_menu = tk.Menu(self.csv_items_tree, tearoff=0)
+        self.csv_tree_menu.add_command(label="Send to Alerts (without eBay data)", command=self._send_csv_to_alerts)
+        self.csv_tree_menu.add_separator()
         self.csv_tree_menu.add_command(label="Add Full Title to Search", command=self._add_full_title_to_search)
         self.csv_tree_menu.add_command(label="Add Secondary Keyword", command=self._add_secondary_keyword_from_csv)
         self.csv_tree_menu.add_separator()
@@ -381,7 +383,6 @@ class EbayTab(ttk.Frame):
         self.csv_tree_menu.add_command(label="Download Missing Images", command=self._download_missing_csv_images)
         self.csv_tree_menu.add_separator()
         self.csv_tree_menu.add_command(label="Search by Image on eBay (API)", command=self._search_csv_by_image_api)
-        self.csv_tree_menu.add_command(label="Search by Image on eBay (Web)", command=self._search_csv_by_image_web)
         self.csv_items_tree.bind("<Button-3>", self._show_csv_tree_menu)
         self.csv_items_tree.bind('<Double-1>', self._on_csv_double_click)
         # Allow deselect by clicking empty area
@@ -512,6 +513,82 @@ class EbayTab(ttk.Frame):
         """Add secondary keyword from CSV to search."""
         if self.csv_comparison_manager:
             return self.csv_comparison_manager._add_secondary_keyword_from_csv()
+
+    def _send_csv_to_alerts(self):
+        """Send selected CSV items to Alert tab without eBay data."""
+        from tkinter import messagebox
+
+        # Get selected items
+        selected = self.csv_items_tree.selection()
+        if not selected:
+            messagebox.showinfo("No Selection", "Please select items to send to alerts.")
+            return
+
+        # Get CSV data from csv_comparison_manager
+        if not self.csv_comparison_manager or not hasattr(self.csv_comparison_manager, 'csv_compare_data'):
+            messagebox.showerror("Error", "No CSV data loaded.")
+            return
+
+        csv_data = self.csv_comparison_manager.csv_compare_data
+        if not csv_data:
+            messagebox.showerror("Error", "No CSV data loaded.")
+            return
+
+        # Build comparison results from selected items
+        comparison_results = []
+        for item_id in selected:
+            # Get the item data from treeview
+            values = self.csv_items_tree.item(item_id, 'values')
+            if not values:
+                continue
+
+            # Find matching CSV row by title
+            title = values[0]  # Title column
+            csv_row = None
+            for row in csv_data:
+                if row.get('title') == title or row.get('title_en') == title:
+                    csv_row = row
+                    break
+
+            if not csv_row:
+                continue
+
+            # Create comparison result dict (without eBay data)
+            comparison_result = {
+                'store_title': csv_row.get('title', 'N/A'),
+                'store_title_en': csv_row.get('title_en', csv_row.get('title', 'N/A')),
+                'store_link': csv_row.get('link', ''),
+                'store_price': csv_row.get('price', '¥0'),
+                'store_thumbnail': csv_row.get('thumbnail', ''),
+                'store_images': csv_row.get('images', []),
+                # Dummy eBay data so alert creation works
+                'ebay_title': 'No eBay data',
+                'ebay_link': '',
+                'ebay_price': '$0',
+                'similarity': 0,
+                'profit_margin': 0,
+                'shipping': '$0',
+                'sold_date': '',
+                'thumbnail': ''
+            }
+            comparison_results.append(comparison_result)
+
+        if not comparison_results:
+            messagebox.showwarning("No Items", "Could not find matching CSV data for selected items.")
+            return
+
+        # Send to alert tab
+        if self.alert_tab and hasattr(self.alert_tab, 'add_filtered_alerts'):
+            self.alert_tab.add_filtered_alerts(comparison_results)
+            messagebox.showinfo(
+                "Sent to Alerts",
+                f"Sent {len(comparison_results)} item(s) to Alert tab.\n\n"
+                f"Note: These items have no eBay comparison data.\n"
+                f"You can still mark them as Yay and add to cart.",
+                parent=self
+            )
+        else:
+            messagebox.showerror("Error", "Alert tab not available.")
 
     def _delete_csv_items(self):
         """Delete selected CSV items."""
