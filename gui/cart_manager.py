@@ -52,6 +52,10 @@ class CartManager:
         # Session will be loaded asynchronously (don't block GUI startup)
         # Call load_session_async() from GUI after initialization
 
+        # Cache connection status to avoid blocking verify_session() calls
+        self._connection_verified = False
+        self._last_verify_time = 0
+
     def load_session_async(self, callback=None):
         """
         Load saved session in background thread (non-blocking)
@@ -60,9 +64,17 @@ class CartManager:
             callback: Optional callback(success: bool) to call on main thread when done
         """
         import threading
+        import time
 
         def load_in_background():
             self.cart_api = self.session_manager.load_session()
+            # Set verified flag if session was loaded successfully
+            if self.cart_api:
+                self._connection_verified = True
+                self._last_verify_time = time.time()
+            else:
+                self._connection_verified = False
+
             if callback:
                 # Schedule callback on main thread
                 import tkinter as tk
@@ -90,10 +102,46 @@ class CartManager:
             return False, f"Connection failed: {str(e)}"
 
     def is_connected(self) -> bool:
-        """Check if cart API is connected and session is valid"""
+        """
+        Check if cart API is connected (uses cached status, doesn't verify)
+
+        For actual verification, use verify_connection_async()
+        """
         if not self.cart_api:
             return False
-        return self.cart_api.verify_session()
+
+        # Return cached status (don't block with network request)
+        return self._connection_verified
+
+    def verify_connection_async(self, callback=None):
+        """
+        Verify cart connection in background (non-blocking)
+
+        Args:
+            callback: Optional callback(is_valid: bool) to call when done
+        """
+        import threading
+        import time
+
+        def verify_in_background():
+            if not self.cart_api:
+                self._connection_verified = False
+                if callback:
+                    import tkinter as tk
+                    tk._default_root.after_idle(lambda: callback(False))
+                return
+
+            # Verify session with network request
+            is_valid = self.cart_api.verify_session()
+            self._connection_verified = is_valid
+            self._last_verify_time = time.time()
+
+            if callback:
+                import tkinter as tk
+                tk._default_root.after_idle(lambda: callback(is_valid))
+
+        thread = threading.Thread(target=verify_in_background, daemon=True)
+        thread.start()
 
     def add_yays_to_cart(self, force_below_threshold: bool = False,
                         progress_callback=None) -> Dict:
