@@ -484,6 +484,11 @@ class MandarakeCartSession:
         """
         Load saved session from file
 
+        Tries multiple filenames:
+        - mandarake_cookies.json (browser export)
+        - mandarake_session.json (saved session)
+        - self.session_file (custom filename)
+
         Supports two formats:
         - Dict format: {"cookie_name": "value", ...}
         - Browser extension format: [{"name": "cookie_name", "value": "...", "domain": "...", ...}, ...]
@@ -494,27 +499,38 @@ class MandarakeCartSession:
         import json
         from pathlib import Path
 
-        if not Path(self.session_file).exists():
-            return None
+        # Try multiple filenames in order
+        filenames_to_try = [
+            'mandarake_cookies.json',  # Browser export
+            self.session_file,          # Default or custom
+        ]
 
-        try:
-            with open(self.session_file, 'r') as f:
-                cookies_data = json.load(f)
+        for filename in filenames_to_try:
+            if not Path(filename).exists():
+                continue
 
-            # Convert browser extension format (array) to dict format
-            if isinstance(cookies_data, list):
-                cookies = {}
-                for cookie in cookies_data:
-                    cookies[cookie['name']] = cookie['value']
-            else:
-                cookies = cookies_data
+            try:
+                with open(filename, 'r') as f:
+                    cookies_data = json.load(f)
 
-            self.cart_api = MandarakeCartAPI(session_cookies=cookies)
+                # Convert browser extension format (array) to dict format
+                if isinstance(cookies_data, list):
+                    cookies = {}
+                    for cookie in cookies_data:
+                        cookies[cookie['name']] = cookie['value']
+                else:
+                    cookies = cookies_data
 
-            if self.cart_api.verify_session():
-                return self.cart_api
-            else:
-                return None
+                self.cart_api = MandarakeCartAPI(session_cookies=cookies)
 
-        except Exception:
-            return None
+                if self.cart_api.verify_session():
+                    self.logger.info(f"Loaded session from {filename}")
+                    return self.cart_api
+                else:
+                    self.logger.warning(f"Session from {filename} is invalid")
+
+            except Exception as e:
+                self.logger.error(f"Error loading session from {filename}: {e}")
+                continue
+
+        return None

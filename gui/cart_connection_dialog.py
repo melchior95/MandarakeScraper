@@ -23,7 +23,7 @@ class CartConnectionDialog(tk.Toplevel):
         self.connected = False
 
         self.title("Connect to Mandarake Cart")
-        self.geometry("600x300")
+        self.geometry("650x400")
         self.resizable(False, False)
 
         self._create_ui()
@@ -39,14 +39,17 @@ class CartConnectionDialog(tk.Toplevel):
         instructions = ttk.Label(
             self,
             text="To connect to your Mandarake cart:\n\n"
-                 "1. Open your cart in a web browser and log in\n"
-                 "2. Copy the full cart URL from the address bar\n"
-                 "3. Paste it below and click 'Connect'\n\n"
-                 "The URL should contain jsessionid or te-uniquekey:\n"
-                 "• https://cart.mandarake.co.jp/cart/...?te-uniquekey=...\n"
-                 "• https://order.mandarake.co.jp/...;jsessionid=...",
+                 "METHOD 1 (Recommended): Export cookies using Cookie-Editor\n"
+                 "  1. Install Cookie-Editor browser extension\n"
+                 "  2. Open cart.mandarake.co.jp (logged in)\n"
+                 "  3. Click extension → Export → Save as mandarake_cookies.json\n"
+                 "  4. Place file in project folder, then restart GUI\n\n"
+                 "METHOD 2: Paste cart URL with jsessionid\n"
+                 "  Example: https://order.mandarake.co.jp/...;jsessionid=...\n"
+                 "  (Note: te-uniquekey URLs often don't work)",
             justify=tk.LEFT,
-            padding=10
+            padding=10,
+            font=('TkDefaultFont', 9)
         )
         instructions.pack(fill=tk.X, pady=10)
 
