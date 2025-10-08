@@ -42,8 +42,9 @@ class CartConnectionDialog(tk.Toplevel):
                  "1. Open your cart in a web browser and log in\n"
                  "2. Copy the full cart URL from the address bar\n"
                  "3. Paste it below and click 'Connect'\n\n"
-                 "The URL should look like:\n"
-                 "https://order.mandarake.co.jp/order/cartList/;jsessionid=...",
+                 "The URL should contain jsessionid or te-uniquekey:\n"
+                 "• https://cart.mandarake.co.jp/cart/...?te-uniquekey=...\n"
+                 "• https://order.mandarake.co.jp/...;jsessionid=...",
             justify=tk.LEFT,
             padding=10
         )
@@ -98,9 +99,10 @@ class CartConnectionDialog(tk.Toplevel):
             self.status_label.config(text="Please enter a cart URL", foreground="red")
             return
 
-        if 'jsessionid' not in cart_url.lower():
+        # Check if URL contains session info
+        if 'jsessionid' not in cart_url.lower() and 'te-uniquekey' not in cart_url.lower():
             self.status_label.config(
-                text="⚠️ Warning: URL doesn't contain jsessionid - connection may fail",
+                text="⚠️ Warning: URL doesn't contain session info - connection may fail",
                 foreground="orange"
             )
 

@@ -126,7 +126,7 @@ class CartManager:
 
         Args:
             alert_ids: Alert IDs to add (usually all "Yay" items)
-            force_below_threshold: Unused (kept for compatibility)
+            force_below_threshold: Add even if thresholds will be violated
             progress_callback: Optional callback(current, total, message)
 
         Returns:
@@ -134,7 +134,8 @@ class CartManager:
                 'success': bool,
                 'added': [...],
                 'failed': [...],
-                'shop_totals': {...}  # Shop totals after adding
+                'shop_totals': {...},
+                'threshold_warnings': {...}  # Shops that will violate thresholds
             }
         """
         if not self.is_connected():
@@ -143,7 +144,8 @@ class CartManager:
                 'error': 'Not connected to Mandarake cart',
                 'added': [],
                 'failed': [],
-                'shop_totals': {}
+                'shop_totals': {},
+                'threshold_warnings': {}
             }
 
         # 1. Get alert data
@@ -154,11 +156,26 @@ class CartManager:
                 'error': 'No alerts found',
                 'added': [],
                 'failed': [],
-                'shop_totals': {}
+                'shop_totals': {},
+                'threshold_warnings': {}
             }
 
         # 2. Group by shop
         by_shop = self._group_by_shop(alerts)
+
+        # 3. Check thresholds (if not forcing)
+        if not force_below_threshold:
+            threshold_warnings = self._check_add_thresholds(by_shop)
+            if threshold_warnings:
+                # Return warnings without adding items
+                return {
+                    'success': False,
+                    'error': 'Threshold violations detected',
+                    'added': [],
+                    'failed': [],
+                    'shop_totals': {},
+                    'threshold_warnings': threshold_warnings
+                }
 
         # 3. Add items to cart via API
         added = []
@@ -302,6 +319,107 @@ class CartManager:
             self.storage.save_verification(result)
 
         return result
+
+    def _check_add_thresholds(self, items_to_add: Dict[str, List[Dict]]) -> Dict:
+        """
+        Check if adding items will violate thresholds
+
+        Args:
+            items_to_add: Dict of {shop_code: [items]} to be added
+
+        Returns:
+            dict: {
+                'shop_code': {
+                    'violation_type': 'below_min' | 'over_max' | 'too_many_items',
+                    'current_total': int,
+                    'items_to_add': int,
+                    'value_to_add': int,
+                    'new_total': int,
+                    'threshold': int,
+                    'shop_name': str
+                }
+            }
+            Empty dict if no violations
+        """
+        warnings = {}
+
+        # Get current cart state
+        try:
+            current_cart = self.cart_api.get_cart_items()
+            if current_cart is None:
+                current_cart = []
+        except Exception:
+            current_cart = []
+
+        # Calculate current totals per shop
+        current_totals = {}
+        current_counts = {}
+        for item in current_cart:
+            shop_code = item.get('shop_code', 'unknown')
+            price_str = item.get('price', '¥0')
+            price_jpy = int(''.join(c for c in price_str if c.isdigit()))
+
+            current_totals[shop_code] = current_totals.get(shop_code, 0) + price_jpy
+            current_counts[shop_code] = current_counts.get(shop_code, 0) + 1
+
+        # Check each shop's items to add
+        for shop_code, items in items_to_add.items():
+            # Get threshold for this shop
+            threshold = self.storage.get_shop_threshold(shop_code)
+
+            if not threshold or not threshold.get('enabled', True):
+                continue  # Skip if no threshold or disabled
+
+            min_val = threshold.get('min_cart_value', 0)
+            max_val = threshold.get('max_cart_value', float('inf'))
+            max_items = threshold.get('max_items', float('inf'))
+
+            # Calculate new totals
+            current_total = current_totals.get(shop_code, 0)
+            current_count = current_counts.get(shop_code, 0)
+
+            items_to_add_count = len(items)
+            value_to_add = sum(item.get('price_jpy', 0) for item in items)
+
+            new_total = current_total + value_to_add
+            new_count = current_count + items_to_add_count
+
+            # Get shop name
+            from mandarake_codes import MANDARAKE_STORES
+            shop_name = MANDARAKE_STORES.get(shop_code, shop_code.title())
+
+            # Check for violations
+            violation = None
+
+            if new_total > max_val:
+                violation = {
+                    'violation_type': 'over_max',
+                    'current_total': current_total,
+                    'items_to_add': items_to_add_count,
+                    'value_to_add': value_to_add,
+                    'new_total': new_total,
+                    'threshold': max_val,
+                    'shop_name': shop_name,
+                    'excess': new_total - max_val
+                }
+            elif new_count > max_items:
+                violation = {
+                    'violation_type': 'too_many_items',
+                    'current_count': current_count,
+                    'items_to_add': items_to_add_count,
+                    'new_count': new_count,
+                    'threshold': max_items,
+                    'shop_name': shop_name,
+                    'excess': new_count - max_items
+                }
+
+            # Note: We don't warn about below minimum when ADDING items
+            # Below minimum is only relevant for checkout warnings
+
+            if violation:
+                warnings[shop_code] = violation
+
+        return warnings
 
     def get_shop_breakdown(self) -> Dict[str, Dict]:
         """

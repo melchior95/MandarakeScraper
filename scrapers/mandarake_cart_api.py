@@ -51,21 +51,44 @@ class MandarakeCartAPI:
             'Upgrade-Insecure-Requests': '1',
         })
 
-    def extract_session_from_url(self, cart_url: str) -> str:
+    def extract_session_from_url(self, cart_url: str) -> Tuple[Optional[str], Optional[str]]:
         """
-        Extract JSESSIONID from cart URL
+        Extract session information from cart URL
+
+        Supports multiple formats:
+        - jsessionid in path: ;jsessionid=ABC123
+        - jsessionid as query param: ?jsessionid=ABC123
+        - te-uniquekey as query param: ?te-uniquekey=ABC123
 
         Args:
-            cart_url: Full cart URL with jsessionid parameter
+            cart_url: Full cart URL with session info
 
         Returns:
-            Session ID string
+            Tuple of (session_id, unique_key)
         """
+        session_id = None
+        unique_key = None
+
+        # Try jsessionid in path (old format)
         # Example: https://cart.mandarake.co.jp/cart/view/order/inputOrderEn.html;jsessionid=ABC123
-        match = re.search(r'jsessionid=([A-F0-9]+)', cart_url)
+        match = re.search(r';jsessionid=([A-Fa-f0-9]+)', cart_url)
         if match:
-            return match.group(1)
-        return None
+            session_id = match.group(1)
+
+        # Try jsessionid as query parameter
+        # Example: ?jsessionid=ABC123
+        if not session_id:
+            match = re.search(r'[?&]jsessionid=([A-Fa-f0-9]+)', cart_url)
+            if match:
+                session_id = match.group(1)
+
+        # Try te-uniquekey (new format)
+        # Example: ?te-uniquekey=199c1ff6120
+        match = re.search(r'[?&]te-uniquekey=([A-Fa-f0-9]+)', cart_url)
+        if match:
+            unique_key = match.group(1)
+
+        return session_id, unique_key
 
     def verify_session(self) -> bool:
         """
@@ -386,27 +409,50 @@ class MandarakeCartSession:
         """
         self.session_file = session_file
         self.cart_api = None
+        self.logger = logging.getLogger(__name__)
 
     def login_with_url(self, cart_url: str) -> MandarakeCartAPI:
         """
-        Create cart API from cart URL (extracts session ID)
+        Create cart API from cart URL (extracts session and establishes connection)
 
         Args:
-            cart_url: Full cart URL with jsessionid
+            cart_url: Full cart URL with session info (jsessionid or te-uniquekey)
 
         Returns:
             MandarakeCartAPI instance
         """
         api = MandarakeCartAPI()
-        session_id = api.extract_session_from_url(cart_url)
+        session_id, unique_key = api.extract_session_from_url(cart_url)
 
+        # If we have a jsessionid, use it directly
         if session_id:
             self.cart_api = MandarakeCartAPI(session_id=session_id)
             if self.cart_api.verify_session():
                 self.save_session()
                 return self.cart_api
 
-        raise ValueError("Invalid cart URL or session expired")
+        # If we have a te-uniquekey, visit the URL to get session cookies
+        if unique_key:
+            try:
+                # Create a session and visit the URL
+                temp_api = MandarakeCartAPI()
+                response = temp_api.session.get(cart_url, allow_redirects=True)
+
+                # Check if we got cookies from the response
+                if response.cookies:
+                    cookies = dict(response.cookies)
+                    self.cart_api = MandarakeCartAPI(session_cookies=cookies)
+
+                    if self.cart_api.verify_session():
+                        self.save_session()
+                        return self.cart_api
+
+                self.logger.error(f"No session cookies received from URL")
+            except Exception as e:
+                self.logger.error(f"Failed to connect with URL: {e}")
+                raise ValueError(f"Failed to establish session: {e}")
+
+        raise ValueError("Invalid cart URL - no session info found (need jsessionid or te-uniquekey)")
 
     def login_with_cookies(self, cookies: dict) -> MandarakeCartAPI:
         """

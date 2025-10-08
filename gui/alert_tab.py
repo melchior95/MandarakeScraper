@@ -1063,9 +1063,101 @@ class AlertTab(ttk.Frame):
         def progress_callback(current, total, message):
             progress_dialog.update_progress(current, total, message)
 
-        # Add to cart
+        # Add to cart (will check thresholds first)
         result = self.cart_manager.add_yays_to_cart(
             force_below_threshold=False,
+            progress_callback=progress_callback
+        )
+
+        # Close progress dialog
+        progress_dialog.finish()
+
+        # Check if threshold violations were detected
+        if not result.get('success') and result.get('threshold_warnings'):
+            # Show threshold warning dialog with option to proceed
+            self._show_threshold_violation_dialog(result['threshold_warnings'])
+            return
+
+        # Show results
+        self._show_cart_results(result)
+
+    def _show_threshold_violation_dialog(self, warnings: Dict):
+        """
+        Show threshold violation dialog with detailed breakdown
+
+        Args:
+            warnings: Dict of {shop_code: violation_info}
+        """
+        # Build warning message
+        violation_messages = []
+
+        for shop_code, violation in warnings.items():
+            shop_name = violation['shop_name']
+            violation_type = violation['violation_type']
+
+            if violation_type == 'over_max':
+                msg = (
+                    f"• {shop_name}:\n"
+                    f"  Current: ¥{violation['current_total']:,}\n"
+                    f"  Adding: ¥{violation['value_to_add']:,} ({violation['items_to_add']} items)\n"
+                    f"  New Total: ¥{violation['new_total']:,}\n"
+                    f"  Maximum: ¥{violation['threshold']:,}\n"
+                    f"  Over by: ¥{violation['excess']:,}"
+                )
+            elif violation_type == 'too_many_items':
+                msg = (
+                    f"• {shop_name}:\n"
+                    f"  Current: {violation['current_count']} items\n"
+                    f"  Adding: {violation['items_to_add']} items\n"
+                    f"  New Total: {violation['new_count']} items\n"
+                    f"  Maximum: {violation['threshold']} items\n"
+                    f"  Over by: {violation['excess']} items"
+                )
+            else:
+                msg = f"• {shop_name}: Unknown violation"
+
+            violation_messages.append(msg)
+
+        warning_text = (
+            "⚠️ THRESHOLD VIOLATIONS DETECTED\n\n"
+            "Adding these items will exceed the following thresholds:\n\n" +
+            "\n\n".join(violation_messages) +
+            "\n\n"
+            "Do you want to add them anyway?"
+        )
+
+        response = messagebox.askyesno(
+            "Threshold Exceeded",
+            warning_text,
+            icon='warning',
+            parent=self
+        )
+
+        if response:
+            # User chose to proceed - add with force=True
+            self._add_yays_forcing_thresholds()
+
+    def _add_yays_forcing_thresholds(self):
+        """Add Yay alerts to cart, forcing past threshold violations"""
+        from gui.cart_ui import CartProgressDialog
+        from gui.alert_states import AlertState
+
+        # Get Yay alerts
+        yay_alerts = self.alert_manager.get_alerts_by_state(AlertState.YAY)
+        if not yay_alerts:
+            return
+
+        yay_count = len(yay_alerts)
+
+        # Show progress dialog
+        progress_dialog = CartProgressDialog(self, yay_count)
+
+        def progress_callback(current, total, message):
+            progress_dialog.update_progress(current, total, message)
+
+        # Add to cart (forced)
+        result = self.cart_manager.add_yays_to_cart(
+            force_below_threshold=True,  # Force past thresholds
             progress_callback=progress_callback
         )
 
@@ -1075,8 +1167,11 @@ class AlertTab(ttk.Frame):
         # Show results
         self._show_cart_results(result)
 
+        # Reload alerts to show updated states
+        self._load_alerts()
+
     def _show_threshold_warning(self, warnings: List[Dict]):
-        """Show threshold warning dialog."""
+        """Show threshold warning dialog (OLD - kept for compatibility)."""
         from gui.cart_ui import ThresholdWarningDialog
 
         def on_proceed():
