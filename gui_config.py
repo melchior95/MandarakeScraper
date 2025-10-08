@@ -208,6 +208,11 @@ class ScraperGUI(tk.Tk):
         if hasattr(self.alert_tab, 'initialize_cart_ui'):
             self.alert_tab.initialize_cart_ui()
 
+        # Load cart session asynchronously (after GUI is built, don't block startup)
+        self.after(100, lambda: self.cart_manager.load_session_async(
+            callback=lambda success: self.alert_tab._update_cart_status() if hasattr(self.alert_tab, '_update_cart_status') else None
+        ))
+
         # Advanced tab - Create using AdvancedTab module
         self.advanced_tab = AdvancedTab(advanced_frame, self.settings, self)
         self.advanced_tab.pack(fill=tk.BOTH, expand=True)

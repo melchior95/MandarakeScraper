@@ -49,8 +49,28 @@ class CartManager:
             csv_comparison_manager=csv_comparison_manager
         )
 
-        # Try to load saved session
-        self.cart_api = self.session_manager.load_session()
+        # Session will be loaded asynchronously (don't block GUI startup)
+        # Call load_session_async() from GUI after initialization
+
+    def load_session_async(self, callback=None):
+        """
+        Load saved session in background thread (non-blocking)
+
+        Args:
+            callback: Optional callback(success: bool) to call on main thread when done
+        """
+        import threading
+
+        def load_in_background():
+            self.cart_api = self.session_manager.load_session()
+            if callback:
+                # Schedule callback on main thread
+                import tkinter as tk
+                # Use after_idle to ensure we're on main thread
+                tk._default_root.after_idle(lambda: callback(self.cart_api is not None))
+
+        thread = threading.Thread(target=load_in_background, daemon=True)
+        thread.start()
 
     def connect_with_url(self, cart_url: str) -> Tuple[bool, str]:
         """
