@@ -180,14 +180,14 @@ class AlertTab(ttk.Frame):
         ttk.Button(actions_frame, text="Export to Spreadsheet", command=self._export_alerts).pack(side=tk.LEFT, padx=2)
 
         # Treeview frame
-        tree_frame = ttk.Frame(self)
-        tree_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Tree frame will be added to paned window later
+        self.tree_frame = ttk.Frame(self)
 
         # Scrollbars
-        tree_scroll_y = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL)
+        tree_scroll_y = ttk.Scrollbar(self.tree_frame, orient=tk.VERTICAL)
         tree_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
 
-        tree_scroll_x = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL)
+        tree_scroll_x = ttk.Scrollbar(self.tree_frame, orient=tk.HORIZONTAL)
         tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
 
         # Treeview columns
@@ -204,7 +204,7 @@ class AlertTab(ttk.Frame):
         )
 
         self.tree = ttk.Treeview(
-            tree_frame,
+            self.tree_frame,
             columns=columns,
             show="tree headings",
             selectmode="extended",
@@ -946,9 +946,16 @@ class AlertTab(ttk.Frame):
             command=self._toggle_cart_display
         ).pack(side=tk.LEFT, padx=2)
 
+        # Create PanedWindow for cart display and tree (allows vertical resizing)
+        self.main_paned = ttk.PanedWindow(self, orient=tk.VERTICAL)
+        self.main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Add tree to paned window initially
+        self.main_paned.add(self.tree_frame, weight=1)
+
         # Create full cart display section (hidden initially)
         from gui.cart_display import CartDisplayFrame
-        self.cart_display = CartDisplayFrame(self, self.cart_manager)
+        self.cart_display = CartDisplayFrame(self.main_paned, self.cart_manager)
 
         # Toggle variable for showing/hiding cart display
         self.cart_display_visible = False
@@ -1008,12 +1015,13 @@ class AlertTab(ttk.Frame):
             return
 
         if self.cart_display_visible:
-            # Hide cart display
-            self.cart_display.pack_forget()
+            # Hide cart display and show only tree
+            self.main_paned.remove(self.cart_display)
             self.cart_display_visible = False
         else:
-            # Show cart display (between controls and tree)
-            self.cart_display.pack(fill=tk.X, padx=5, pady=5, before=self.tree.master)
+            # Show cart display at top of paned window
+            # Insert at position 0 (before tree)
+            self.main_paned.insert(0, self.cart_display, weight=0)
             # Refresh cart data
             self.cart_display.refresh_display()
             self.cart_display_visible = True
