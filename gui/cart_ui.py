@@ -34,11 +34,9 @@ class ThresholdWarningDialog:
 
         self._build_ui(warnings)
 
-        # Center on parent
-        self.dialog.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() - self.dialog.winfo_width()) // 2
-        y = parent.winfo_y() + (parent.winfo_height() - self.dialog.winfo_height()) // 2
-        self.dialog.geometry(f"+{x}+{y}")
+        # Position at cursor
+        from gui.ui_helpers import position_dialog_at_cursor
+        position_dialog_at_cursor(self.dialog)
 
     def _build_ui(self, warnings: List[Dict]):
         """Build dialog UI."""
@@ -149,11 +147,9 @@ class CartProgressDialog:
 
         self._build_ui()
 
-        # Center on parent
-        self.dialog.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() - self.dialog.winfo_width()) // 2
-        y = parent.winfo_y() + (parent.winfo_height() - self.dialog.winfo_height()) // 2
-        self.dialog.geometry(f"+{x}+{y}")
+        # Position at cursor
+        from gui.ui_helpers import position_dialog_at_cursor
+        position_dialog_at_cursor(self.dialog)
 
         # Prevent closing
         self.dialog.protocol("WM_DELETE_WINDOW", self._on_cancel)

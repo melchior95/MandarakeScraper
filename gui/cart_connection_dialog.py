@@ -28,7 +28,11 @@ class CartConnectionDialog(tk.Toplevel):
 
         self._create_ui()
 
-        # Center on parent
+        # Position at cursor
+        from gui.ui_helpers import position_dialog_at_cursor
+        position_dialog_at_cursor(self)
+
+        # Make modal
         self.transient(parent)
         self.grab_set()
 

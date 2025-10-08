@@ -34,6 +34,10 @@ class CartThresholdDialog(tk.Toplevel):
         self._create_ui()
         self._load_thresholds()
 
+        # Position at cursor
+        from gui.ui_helpers import position_dialog_at_cursor
+        position_dialog_at_cursor(self)
+
     def _create_ui(self):
         """Create threshold configuration UI"""
 

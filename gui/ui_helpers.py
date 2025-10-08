@@ -4,6 +4,52 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 
+def position_dialog_at_cursor(dialog):
+    """
+    Position a dialog window at the current cursor position.
+
+    Args:
+        dialog: Toplevel window to position
+    """
+    # Get cursor position
+    x = dialog.winfo_pointerx()
+    y = dialog.winfo_pointery()
+
+    # Update window to get actual size
+    dialog.update_idletasks()
+
+    # Get window dimensions
+    width = dialog.winfo_width()
+    height = dialog.winfo_height()
+
+    # Get screen dimensions
+    screen_width = dialog.winfo_screenwidth()
+    screen_height = dialog.winfo_screenheight()
+
+    # Adjust position to keep window on screen
+    # Position with a small offset so cursor isn't covering the title bar
+    x_offset = 10
+    y_offset = 10
+
+    # Check right edge
+    if x + width + x_offset > screen_width:
+        x = screen_width - width - 20
+    else:
+        x = x + x_offset
+
+    # Check bottom edge
+    if y + height + y_offset > screen_height:
+        y = screen_height - height - 20
+    else:
+        y = y + y_offset
+
+    # Ensure window isn't off the left or top edge
+    x = max(0, x)
+    y = max(0, y)
+
+    dialog.geometry(f"+{x}+{y}")
+
+
 def show_ransac_info():
     """Show RANSAC information dialog."""
     info_text = """

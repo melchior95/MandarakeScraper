@@ -31,6 +31,10 @@ class CartROIDialog(tk.Toplevel):
 
         self._create_ui()
 
+        # Position at cursor
+        from gui.ui_helpers import position_dialog_at_cursor
+        position_dialog_at_cursor(self)
+
     def _create_ui(self):
         """Create ROI verification UI"""
 
