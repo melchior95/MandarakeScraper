@@ -179,9 +179,12 @@ class AlertTab(ttk.Frame):
         ttk.Separator(actions_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
         ttk.Button(actions_frame, text="Export to Spreadsheet", command=self._export_alerts).pack(side=tk.LEFT, padx=2)
 
-        # Treeview frame
-        # Tree frame will be added to paned window later
-        self.tree_frame = ttk.Frame(self)
+        # Create PanedWindow for cart display and tree (allows vertical resizing)
+        self.main_paned = ttk.PanedWindow(self, orient=tk.VERTICAL)
+        self.main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Treeview frame - create as child of paned window
+        self.tree_frame = ttk.Frame(self.main_paned)
 
         # Scrollbars
         tree_scroll_y = ttk.Scrollbar(self.tree_frame, orient=tk.VERTICAL)
@@ -215,6 +218,9 @@ class AlertTab(ttk.Frame):
 
         tree_scroll_y.config(command=self.tree.yview)
         tree_scroll_x.config(command=self.tree.xview)
+
+        # Add tree frame to paned window
+        self.main_paned.add(self.tree_frame, weight=1)
 
         # Configure columns
         self.tree.column("#0", width=50, minwidth=50)  # ID column
@@ -946,14 +952,8 @@ class AlertTab(ttk.Frame):
             command=self._toggle_cart_display
         ).pack(side=tk.LEFT, padx=2)
 
-        # Create PanedWindow for cart display and tree (allows vertical resizing)
-        self.main_paned = ttk.PanedWindow(self, orient=tk.VERTICAL)
-        self.main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # Add tree to paned window initially
-        self.main_paned.add(self.tree_frame, weight=1)
-
         # Create full cart display section (hidden initially)
+        # Note: main_paned already created above with tree
         from gui.cart_display import CartDisplayFrame
         self.cart_display = CartDisplayFrame(self.main_paned, self.cart_manager)
 
