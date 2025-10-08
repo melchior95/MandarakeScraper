@@ -459,8 +459,8 @@ class CartDisplayFrame(ttk.LabelFrame):
         """Open Mandarake cart in web browser"""
         import webbrowser
 
-        # Can open cart URL even without connection
-        cart_url = "https://order.mandarake.co.jp/order/cartList/"
+        # Use the correct cart URL
+        cart_url = "https://cart.mandarake.co.jp/cart/view/order/inputOrderJa.html?referer=https%3A%2F%2Forder.mandarake.co.jp%2Forder%2F"
         webbrowser.open(cart_url)
 
     def _check_connection(self) -> bool:
