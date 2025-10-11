@@ -40,7 +40,7 @@
 </head>
 <body class="bg-gray-50">
     <!-- Header -->
-    <header class="notranslate bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
         <div class="max-w-7xl mx-auto px-4 py-4">
             <div class="flex items-center justify-between mb-4">
                 <h1 class="text-2xl font-bold text-red-600">
@@ -327,7 +327,7 @@
                     // Show cache indicator
                     const cacheIndicator = document.getElementById('cacheIndicator');
                     if (cacheIndicator) {
-                        const ageText = cacheData.cache_age !== null ? ` (${cacheData.cache_age}s ago)` : '';
+                        const ageText = cacheData.cache_age !== null ? ` (${formatCacheAge(cacheData.cache_age)})` : '';
                         cacheIndicator.textContent = `Cached${ageText}`;
                         cacheIndicator.classList.remove('hidden');
                     }
@@ -379,6 +379,13 @@
 
         // Fetch fresh items from RSS feed
         async function fetchFreshItems(storeCode, page, hasCache) {
+            // Show fetching indicator if we have cache
+            const cacheIndicator = document.getElementById('cacheIndicator');
+            if (hasCache && cacheIndicator) {
+                cacheIndicator.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i><span class="font-semibold">Refreshing...</span>';
+                cacheIndicator.classList.remove('hidden');
+            }
+
             try {
                 const response = await fetch(`/api/items/${storeCode}?page=${page}`);
                 const data = await response.json();
@@ -401,7 +408,6 @@
                 document.getElementById('newCount').textContent = data.new_count || 0;
 
                 // Hide cache indicator (we now have fresh data)
-                const cacheIndicator = document.getElementById('cacheIndicator');
                 if (cacheIndicator) {
                     cacheIndicator.classList.add('hidden');
                 }
@@ -520,6 +526,7 @@
             const container = document.getElementById('itemsList');
             const translateEnabled = document.getElementById('translateCheck').checked;
 
+            cancelItemRender();
             // Grid layout based on largeGallery mode
             // Large Gallery: 2 on mobile, 3 on tablet, 4 on desktop (bigger cards)
             // Standard Gallery: 2 on mobile, 4 on tablet, 6 on desktop (compact cards)
@@ -540,71 +547,28 @@
             grid.className = gridClass;
             container.appendChild(grid);
 
-            // Render in chunks to keep UI responsive while large lists update
-            const chunkSize = 24;
-            let index = 0;
-
             if (items.length === 0) {
                 if (translateEnabled) {
-                    setupLazyTranslation();
+                    requestAnimationFrame(() => setupLazyTranslation());
                 }
                 return;
             }
 
-            const renderChunk = () => {
-                const slice = items.slice(index, index + chunkSize);
-                const chunkHtml = slice.map(item => {
-                    const timeStr = formatTime(item.pub_date);
-                    const newBadge = item.is_new ? '<div class="absolute top-2 right-2 new-badge bg-yellow-400 text-yellow-900 text-xs px-2 py-1 rounded-full font-semibold">NEW</div>' : '';
+            const options = { cardPadding, titleSize, titleLines, metaSize, translateEnabled };
 
-                    return `
-                        <div class="item-card bg-white border-2 border-gray-200 rounded-lg overflow-hidden hover:border-red-500 hover:shadow-lg transition-all cursor-pointer relative"
-                             onclick="openItem('${item.link}', '${item.item_code}', event)">
-                            ${newBadge}
-                            <!-- Thumbnail -->
-                            <div class="aspect-square bg-gray-50 relative group">
-                                <img src="${item.thumbnail}"
-                                     alt="${item.title}"
-                                     class="w-full h-full object-contain thumbnail-loading"
-                                     onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22300%22 height=%22300%22%3E%3Crect fill=%22%23f0f0f0%22 width=%22300%22 height=%22300%22/%3E%3Ctext x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23999%22 font-size=%2220%22%3ENo Image%3C/text%3E%3C/svg%3E'"
-                                     onload="this.classList.remove('thumbnail-loading')"
-                                     title="${item.link}">
-                                <!-- eBay Search Button -->
-                                <div class="action-buttons absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onclick="searchEbayByImage('${item.thumbnail}', '${escapeHtml(item.title)}', event)"
-                                            class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-[10px] font-semibold shadow-lg"
-                                            title="Search on eBay by image">
-                                        <i class="fas fa-search"></i>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Content -->
-                            <div class="${cardPadding}">
-                                <h3 class="${titleSize} font-semibold text-gray-900 ${titleLines} mb-1 ${translateEnabled ? 'translate-title' : ''}" data-original="${escapeHtml(item.title)}">${item.title}</h3>
-                                ${translateEnabled && !compactMode ? `<div class="text-xs text-gray-600 mb-1 line-clamp-1 original-text">${item.title}</div>` : ''}
-                                ${!compactMode ? `
-                                <div class="${metaSize} text-gray-500 mt-2">
-                                    <div><i class="fas fa-clock mr-1"></i>${timeStr}</div>
-                                    <div class="mt-1"><i class="fas fa-barcode mr-1"></i>${item.item_code}</div>
-                                </div>
-                                ` : ''}
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-
-                grid.insertAdjacentHTML('beforeend', chunkHtml);
-                index += chunkSize;
-
-                if (index < items.length) {
-                    requestAnimationFrame(renderChunk);
-                } else if (translateEnabled) {
-                    requestAnimationFrame(() => setupLazyTranslation());
-                }
+            renderState = {
+                items,
+                index: 0,
+                chunkSize: 24,
+                translateEnabled,
+                grid,
+                options,
+                paused: false,
+                frameId: null,
+                resumeTimeout: null
             };
 
-            requestAnimationFrame(renderChunk);
+            scheduleNextRenderChunk();
         }
 
         // Setup lazy translation with Intersection Observer
@@ -714,6 +678,26 @@
             );
 
             displayItems(filtered);
+        }
+
+        // Format cache age in human-readable format
+        function formatCacheAge(seconds) {
+            if (seconds === null || seconds === undefined) return '';
+
+            if (seconds < 60) {
+                return `${seconds}s ago`;
+            } else if (seconds < 3600) {
+                const minutes = Math.floor(seconds / 60);
+                return `${minutes}m ago`;
+            } else if (seconds < 86400) {
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                return minutes > 0 ? `${hours}h ${minutes}m ago` : `${hours}h ago`;
+            } else {
+                const days = Math.floor(seconds / 86400);
+                const hours = Math.floor((seconds % 86400) / 3600);
+                return hours > 0 ? `${days}d ${hours}h ago` : `${days}d ago`;
+            }
         }
 
         // Format publication date with exact time
@@ -840,7 +824,10 @@
                 document.getElementById('autoRefreshText').textContent = 'Auto-refresh: ON';
                 document.getElementById('autoRefreshBtn').classList.add('bg-green-100', 'text-green-700');
                 document.getElementById('autoRefreshBtn').classList.remove('bg-gray-100');
-                autoRefreshInterval = setInterval(loadItems, 60000); // 60 seconds
+                // Auto-refresh forces fresh data fetch (not just cache)
+                autoRefreshInterval = setInterval(() => {
+                    loadItems(currentPage, true); // forceRefresh = true
+                }, 60000); // 60 seconds
             } else {
                 document.getElementById('autoRefreshText').textContent = 'Auto-refresh: OFF';
                 document.getElementById('autoRefreshBtn').classList.remove('bg-green-100', 'text-green-700');
@@ -854,7 +841,20 @@
 
         // Refresh feed (force refresh from RSS)
         function refreshFeed() {
-            loadItems(1, true);
+            const refreshBtn = document.querySelector('button[onclick="refreshFeed()"]');
+            const btnContent = refreshBtn.innerHTML;
+
+            // Show loading state
+            refreshBtn.disabled = true;
+            refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Refreshing...';
+            refreshBtn.classList.add('opacity-75', 'cursor-not-allowed');
+
+            // Call loadItems and restore button when done
+            loadItems(1, true).finally(() => {
+                refreshBtn.disabled = false;
+                refreshBtn.innerHTML = btnContent;
+                refreshBtn.classList.remove('opacity-75', 'cursor-not-allowed');
+            });
         }
 
         // Clear cache for current store
@@ -898,13 +898,30 @@
             displayItems(allItems);
         });
 
-        // Store select - use proper async event listener to prevent blocking
-        document.getElementById('storeSelect').addEventListener('change', (e) => {
-            // Allow dropdown to close first
-            setTimeout(() => {
-                loadItems(1, false);
-            }, 0);
-        });
+        const storeSelectEl = document.getElementById('storeSelect');
+        if (storeSelectEl) {
+            const resumeAfterTick = () => setTimeout(resumeItemRender, 0);
+            storeSelectEl.addEventListener('pointerdown', pauseItemRender);
+            storeSelectEl.addEventListener('focus', pauseItemRender);
+            storeSelectEl.addEventListener('keydown', pauseItemRender);
+            storeSelectEl.addEventListener('pointerup', resumeAfterTick);
+            storeSelectEl.addEventListener('blur', resumeAfterTick);
+            storeSelectEl.addEventListener('change', () => {
+                resumeAfterTick();
+                setTimeout(() => {
+                    loadItems(1, false);
+                }, 0);
+            });
+        }
+
+        const itemsListEl = document.getElementById('itemsList');
+        if (itemsListEl) {
+            const resumeListRender = () => setTimeout(resumeItemRender, 50);
+            itemsListEl.addEventListener('pointerdown', pauseItemRender);
+            itemsListEl.addEventListener('pointerup', resumeListRender);
+            itemsListEl.addEventListener('mouseleave', resumeListRender);
+            itemsListEl.addEventListener('click', resumeListRender);
+        }
 
         // Initialize on load
         document.addEventListener('DOMContentLoaded', () => {

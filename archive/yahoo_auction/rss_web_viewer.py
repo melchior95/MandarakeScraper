@@ -18,6 +18,22 @@ CORS(app)
 # Initialize RSS monitor
 monitor = MandarakeRSSMonitor(use_browser_mimic=True)
 
+# Initialize MarianMT translator (lazy load on first use)
+translator = None
+tokenizer = None
+
+def get_translator():
+    """Lazy load the MarianMT translator"""
+    global translator, tokenizer
+    if translator is None:
+        print("[TRANSLATOR] Loading MarianMT model (first time only, ~500MB)...")
+        from transformers import MarianMTModel, MarianTokenizer
+        model_name = 'Helsinki-NLP/opus-mt-ja-en'
+        tokenizer = MarianTokenizer.from_pretrained(model_name)
+        translator = MarianMTModel.from_pretrained(model_name)
+        print("[TRANSLATOR] Model loaded successfully!")
+    return translator, tokenizer
+
 # Track seen items and item history
 SEEN_FILE = Path(__file__).parent / 'mandarake_rss_seen.json'
 HISTORY_FILE = Path(__file__).parent / 'mandarake_rss_history.json'
@@ -346,7 +362,7 @@ def mark_seen():
 
 @app.route('/api/translate', methods=['POST'])
 def translate_text():
-    """Translate Japanese text to English"""
+    """Translate Japanese text to English using local MarianMT model"""
     data = request.get_json()
     text = data.get('text', '')
 
@@ -354,28 +370,24 @@ def translate_text():
         return jsonify({'error': 'No text provided'}), 400
 
     try:
-        import requests
-        url = "https://translate.googleapis.com/translate_a/single"
-        params = {
-            'client': 'gtx',
-            'sl': 'ja',
-            'tl': 'en',
-            'dt': 't',
-            'q': text
-        }
-        response = requests.get(url, params=params, timeout=5)
-        if response.status_code == 200:
-            result = response.json()
-            translated = ''.join([item[0] for item in result[0]])
-            return jsonify({'translated': translated})
-        else:
-            return jsonify({'error': 'Translation failed'}), 500
+        # Get the translator (lazy loaded)
+        model, tok = get_translator()
+
+        # Tokenize and translate
+        inputs = tok(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+        translated_tokens = model.generate(**inputs)
+        translated = tok.decode(translated_tokens[0], skip_special_tokens=True)
+
+        return jsonify({'translated': translated})
     except Exception as e:
+        print(f"[TRANSLATOR ERROR] {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/ebay_search', methods=['POST'])
 def ebay_search():
-    """Search eBay using translated title"""
+    """Search eBay using translated title (MarianMT local translation)"""
     data = request.get_json()
     title = data.get('title', '')
 
@@ -385,22 +397,13 @@ def ebay_search():
     try:
         import requests
 
-        # First translate the title
-        translate_url = "https://translate.googleapis.com/translate_a/single"
-        translate_params = {
-            'client': 'gtx',
-            'sl': 'ja',
-            'tl': 'en',
-            'dt': 't',
-            'q': title
-        }
-        translate_response = requests.get(translate_url, params=translate_params, timeout=5)
+        # Get the translator (lazy loaded)
+        model, tok = get_translator()
 
-        if translate_response.status_code != 200:
-            return jsonify({'error': 'Translation failed'}), 500
-
-        result = translate_response.json()
-        translated_title = ''.join([item[0] for item in result[0]])
+        # Tokenize and translate
+        inputs = tok(title, return_tensors="pt", padding=True, truncation=True, max_length=512)
+        translated_tokens = model.generate(**inputs)
+        translated_title = tok.decode(translated_tokens[0], skip_special_tokens=True)
 
         # Create eBay search URL
         ebay_url = f"https://www.ebay.com/sch/i.html?_nkw={requests.utils.quote(translated_title)}&_sop=10&LH_Complete=1&LH_Sold=1"
@@ -410,6 +413,9 @@ def ebay_search():
             'ebay_url': ebay_url
         })
     except Exception as e:
+        print(f"[EBAY SEARCH ERROR] {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/mandarake/search', methods=['POST'])
