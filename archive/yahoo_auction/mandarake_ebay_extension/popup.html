@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mandarake Price Checker</title>
+    <style>
+        body {
+            width: 300px;
+            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0 0 16px 0;
+            color: #e63946;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .setting {
+            margin-bottom: 12px;
+        }
+
+        label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        input[type="number"] {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+
+        .info {
+            background: #f0f0f0;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            line-height: 1.5;
+            color: #666;
+            margin-top: 16px;
+        }
+
+        .info strong {
+            color: #333;
+        }
+
+        .save-btn {
+            width: 100%;
+            padding: 8px;
+            background: linear-gradient(135deg, #e63946 0%, #d62828 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 12px;
+        }
+
+        .save-btn:hover {
+            background: linear-gradient(135deg, #d62828 0%, #c1121f 100%);
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            margin-bottom: 12px;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <h1>🛒 Mandarake Price Checker</h1>
+
+    <div id="status" class="status disconnected">
+        ⚠️ Backend: Checking...
+    </div>
+
+    <div class="setting">
+        <label for="exchangeRate">USD/JPY Exchange Rate</label>
+        <input type="number" id="exchangeRate" value="151.5" step="0.1">
+    </div>
+
+    <button class="save-btn" id="saveBtn">Save Settings</button>
+
+    <div class="info">
+        <strong>How to use:</strong><br>
+        1. Make sure the backend is running at <code>localhost:5000</code><br>
+        2. Search for items on eBay<br>
+        3. Click "🔍 Check Mandarake Price" on any listing<br>
+        4. View price comparison and profit margins
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

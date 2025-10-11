@@ -1,0 +1,170 @@
+/**
+ * Mandarake Price Checker Styles
+ */
+
+/* Check Price Button */
+.mandarake-check-btn {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #e63946 0%, #d62828 100%);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(230, 57, 70, 0.2);
+}
+
+.mandarake-check-btn:hover {
+    background: linear-gradient(135deg, #d62828 0%, #c1121f 100%);
+    box-shadow: 0 4px 8px rgba(230, 57, 70, 0.3);
+    transform: translateY(-1px);
+}
+
+.mandarake-check-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(230, 57, 70, 0.2);
+}
+
+.mandarake-check-btn:disabled {
+    background: #999;
+    cursor: wait;
+    box-shadow: none;
+}
+
+.mandarake-check-btn.not-found {
+    background: #6c757d;
+    cursor: default;
+}
+
+.mandarake-check-btn.not-found:hover {
+    background: #5a6268;
+    transform: none;
+}
+
+/* Price Overlay Container */
+.mandarake-overlay {
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+
+/* Price Box */
+.mandarake-price-box {
+    padding: 12px;
+    border-radius: 8px;
+    border-left: 4px solid;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    font-size: 12px;
+    line-height: 1.6;
+    position: relative;
+}
+
+/* Profit-based coloring */
+.mandarake-price-box.high {
+    border-left-color: #28a745;
+    background: linear-gradient(to right, #f0fff4 0%, white 20%);
+}
+
+.mandarake-price-box.good {
+    border-left-color: #17a2b8;
+    background: linear-gradient(to right, #e7f9fc 0%, white 20%);
+}
+
+.mandarake-price-box.neutral {
+    border-left-color: #ffc107;
+    background: linear-gradient(to right, #fff9e6 0%, white 20%);
+}
+
+.mandarake-price-box.low {
+    border-left-color: #dc3545;
+    background: linear-gradient(to right, #ffe6e8 0%, white 20%);
+}
+
+/* Individual elements in price box */
+.mandarake-price {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.mandarake-profit {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.mandarake-price-box.high .mandarake-profit {
+    color: #28a745;
+}
+
+.mandarake-price-box.good .mandarake-profit {
+    color: #17a2b8;
+}
+
+.mandarake-price-box.neutral .mandarake-profit {
+    color: #ff9800;
+}
+
+.mandarake-price-box.low .mandarake-profit {
+    color: #dc3545;
+}
+
+/* Stock Status */
+.mandarake-stock {
+    font-weight: 600;
+    margin-bottom: 6px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.mandarake-stock.in-stock {
+    background: #d4edda;
+    color: #155724;
+}
+
+.mandarake-stock.out-of-stock {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+/* Link to Mandarake */
+.mandarake-link {
+    display: inline-block;
+    margin-top: 6px;
+    color: #e63946;
+    text-decoration: none;
+    font-weight: 600;
+    transition: color 0.2s ease;
+}
+
+.mandarake-link:hover {
+    color: #d62828;
+    text-decoration: underline;
+}
+
+/* Cache indicator */
+.cache-indicator {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    font-size: 10px;
+    color: #999;
+    background: #f0f0f0;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+/* Ensure proper spacing in eBay listings */
+.s-item__detail .mandarake-check-btn,
+.s-item__detail .mandarake-overlay {
+    margin-top: 8px;
+}
+
+.s-item__info .mandarake-check-btn,
+.s-item__info .mandarake-overlay {
+    margin-top: 8px;
+}

@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Mandarake Price Checker for eBay",
+  "version": "1.0",
+  "description": "Check Mandarake prices and stock status directly on eBay search results",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.ebay.com/*",
+    "http://localhost:5000/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.ebay.com/sch/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

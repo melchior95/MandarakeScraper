@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mandarake RSS Viewer</title>
+    <meta http-equiv="Content-Language" content="ja">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .item-card:hover {
+            background-color: #fef3f2;
+        }
+        .new-badge {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .7; }
+        }
+        .thumbnail-loading {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s ease-in-out infinite;
+        }
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        #itemsList {
+            transition: opacity 0.2s ease-in-out;
+        }
+        /* Force header to its own rendering layer to prevent repaints */
+        header {
+            will-change: transform;
+            transform: translateZ(0);
+            backface-visibility: hidden;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Header -->
+    <header class="notranslate bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 py-4">
+            <div class="flex items-center justify-between mb-4">
+                <h1 class="text-2xl font-bold text-red-600">
+                    <i class="fas fa-rss mr-2"></i>
+                    Mandarake RSS Viewer
+                </h1>
+                <div class="flex items-center gap-4">
+                    <button onclick="toggleAutoRefresh()" id="autoRefreshBtn" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm">
+                        <i class="fas fa-sync-alt mr-2"></i>
+                        <span id="autoRefreshText">Auto-refresh: OFF</span>
+                    </button>
+                    <button onclick="refreshFeed()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm">
+                        <i class="fas fa-refresh mr-2"></i>
+                        Refresh
+                    </button>
+                    <button onclick="clearCache()" class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm" title="Clear cache for current store">
+                        <i class="fas fa-trash mr-2"></i>
+                        Clear Cache
+                    </button>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="flex items-center gap-4 flex-wrap">
+                <div class="flex items-center gap-2">
+                    <label class="text-sm font-medium text-gray-700">Store:</label>
+                    <select id="storeSelect" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500">
+                        <option value="all">All Stores</option>
+                        <option value="nkn">Nakano Store (Tokyo)</option>
+                        <option value="shr">Shibuya Store (Tokyo)</option>
+                        <option value="ikebukuro">Ikebukuro Store (Tokyo)</option>
+                        <option value="utsunomiya">Utsunomiya Store (Tochigi)</option>
+                        <option value="nagoya">Nagoya Store (Aichi)</option>
+                        <option value="umeda">Umeda Store (Osaka)</option>
+                        <option value="fukuoka">Fukuoka Store (Fukuoka)</option>
+                        <option value="kokura">Kokura Store (Fukuoka)</option>
+                        <option value="sapporo">Sapporo Store (Hokkaido)</option>
+                        <option value="kyoto">Kyoto Store (Kyoto)</option>
+                        <option value="grand-chaos">Grand Chaos (Tokyo)</option>
+                        <option value="complex">Complex (Tokyo)</option>
+                        <option value="nayuta">Nayuta (Tokyo)</option>
+                        <option value="cocoo">CoCoo (Tokyo)</option>
+                        <option value="sala">Sara (Tokyo)</option>
+                    </select>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="translateCheck" class="rounded">
+                    <label for="translateCheck" class="text-sm text-gray-700">Translate to English</label>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="compactCheck" class="rounded" onchange="toggleCompactMode()">
+                    <label for="compactCheck" class="text-sm text-gray-700">Compact View</label>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="largeGalleryCheck" class="rounded" onchange="toggleLargeGallery()">
+                    <label for="largeGalleryCheck" class="text-sm text-gray-700">Large Gallery (4 columns)</label>
+                </div>
+
+                <div class="flex items-center gap-2 ml-auto">
+                    <i class="fas fa-search text-gray-400"></i>
+                    <input type="text" id="searchInput" placeholder="Filter items..."
+                           class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500 w-64"
+                           oninput="filterItems()">
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="mt-4 flex items-center gap-6 text-sm text-gray-600">
+                <span><i class="fas fa-list mr-1"></i>Total: <span id="totalCount" class="font-semibold">0</span></span>
+                <span><i class="fas fa-star mr-1 text-yellow-500"></i>New: <span id="newCount" class="font-semibold text-yellow-600">0</span></span>
+                <span id="cacheIndicator" class="hidden text-blue-600"><i class="fas fa-clock mr-1"></i><span class="font-semibold">Cached</span></span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <!-- Loading State (hidden by default, only shown when no cache) -->
+        <div id="loadingState" class="text-center py-12 hidden">
+            <i class="fas fa-spinner fa-spin text-4xl text-red-600 mb-4"></i>
+            <p class="text-gray-600">Loading RSS feed...</p>
+        </div>
+
+        <!-- Items List -->
+        <div id="itemsList" class="space-y-2 hidden">
+            <!-- Items will be inserted here -->
+        </div>
+
+        <!-- Pagination -->
+        <div id="paginationContainer" class="hidden">
+            <!-- Pagination controls will be inserted here -->
+        </div>
+
+        <!-- Empty State -->
+        <div id="emptyState" class="text-center py-12 hidden">
+            <i class="fas fa-inbox text-6xl text-gray-300 mb-4"></i>
+            <p class="text-gray-500">No items found</p>
+        </div>
+    </main>
+
+    <script>
+        let allItems = [];
+        let autoRefreshInterval = null;
+        let isAutoRefresh = false;
+        let compactMode = false;
+        let largeGallery = false;
+        let translationCache = new Map(); // Cache translations
+        let visibleObserver = null; // Intersection Observer for lazy loading
+        let currentPage = 1;
+        let totalPages = 1;
+        let totalItems = 0;
+        let renderState = null;
+
+        function cancelItemRender() {
+            if (!renderState) {
+                return;
+            }
+
+            if (renderState.frameId !== null) {
+                cancelAnimationFrame(renderState.frameId);
+                renderState.frameId = null;
+            }
+
+            if (renderState.resumeTimeout) {
+                clearTimeout(renderState.resumeTimeout);
+                renderState.resumeTimeout = null;
+            }
+
+            renderState = null;
+        }
+
+        function pauseItemRender() {
+            if (!renderState) {
+                return;
+            }
+
+            renderState.paused = true;
+
+            if (renderState.frameId !== null) {
+                cancelAnimationFrame(renderState.frameId);
+                renderState.frameId = null;
+            }
+
+            if (renderState.resumeTimeout) {
+                clearTimeout(renderState.resumeTimeout);
+            }
+
+            renderState.resumeTimeout = setTimeout(() => {
+                if (renderState && renderState.paused) {
+                    renderState.resumeTimeout = null;
+                    renderState.paused = false;
+                    scheduleNextRenderChunk();
+                }
+            }, 300);
+        }
+
+        function resumeItemRender() {
+            if (!renderState) {
+                return;
+            }
+
+            if (renderState.resumeTimeout) {
+                clearTimeout(renderState.resumeTimeout);
+                renderState.resumeTimeout = null;
+            }
+
+            if (!renderState.paused) {
+                return;
+            }
+
+            renderState.paused = false;
+            scheduleNextRenderChunk();
+        }
+
+        function scheduleNextRenderChunk() {
+            if (!renderState || renderState.paused) {
+                return;
+            }
+
+            if (renderState.index >= renderState.items.length) {
+                if (renderState.translateEnabled) {
+                    requestAnimationFrame(() => setupLazyTranslation());
+                }
+
+                if (renderState.resumeTimeout) {
+                    clearTimeout(renderState.resumeTimeout);
+                    renderState.resumeTimeout = null;
+                }
+
+                renderState = null;
+                return;
+            }
+
+            if (renderState.frameId !== null) {
+                return; // Already scheduled
+            }
+
+            renderState.frameId = requestAnimationFrame(() => {
+                if (!renderState || renderState.paused) {
+                    renderState.frameId = null;
+                    return;
+                }
+
+                const slice = renderState.items.slice(renderState.index, renderState.index + renderState.chunkSize);
+                const chunkHtml = slice.map(item => renderItemCard(item, renderState.options)).join('');
+                renderState.grid.insertAdjacentHTML('beforeend', chunkHtml);
+                renderState.index += renderState.chunkSize;
+                renderState.frameId = null;
+                scheduleNextRenderChunk();
+            });
+        }
+
+        function renderItemCard(item, options) {
+            const { cardPadding, titleSize, titleLines, metaSize, translateEnabled } = options;
+            const timeStr = formatTime(item.pub_date);
+            const newBadge = item.is_new ? '<div class="absolute top-2 right-2 new-badge bg-yellow-400 text-yellow-900 text-xs px-2 py-1 rounded-full font-semibold">NEW</div>' : '';
+
+            return `
+                <div class="item-card bg-white border-2 border-gray-200 rounded-lg overflow-hidden hover:border-red-500 hover:shadow-lg transition-all cursor-pointer relative"
+                     onclick="openItem('${item.link}', '${item.item_code}', event)">
+                    ${newBadge}
+                    <!-- Thumbnail -->
+                    <div class="aspect-square bg-gray-50 relative group">
+                        <img src="${item.thumbnail}"
+                             alt="${item.title}"
+                             class="w-full h-full object-contain thumbnail-loading"
+                             onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22300%22 height=%22300%22%3E%3Crect fill=%22%23f0f0f0%22 width=%22300%22 height=%22300%22/%3E%3Ctext x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23999%22 font-size=%2220%22%3ENo Image%3C/text%3E%3C/svg%3E'"
+                             onload="this.classList.remove('thumbnail-loading')"
+                             title="${item.link}">
+                        <!-- eBay Search Button -->
+                        <div class="action-buttons absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onclick="searchEbayByImage('${item.thumbnail}', '${escapeHtml(item.title)}', event)"
+                                    class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-[10px] font-semibold shadow-lg"
+                                    title="Search on eBay by image">
+                                <i class="fas fa-search"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Content -->
+                    <div class="${cardPadding}">
+                        <h3 class="${titleSize} font-semibold text-gray-900 ${titleLines} mb-1 ${translateEnabled ? 'translate-title' : ''}" data-original="${escapeHtml(item.title)}">${item.title}</h3>
+                        ${translateEnabled && !compactMode ? `<div class="text-xs text-gray-600 mb-1 line-clamp-1 original-text">${item.title}</div>` : ''}
+                        ${!compactMode ? `
+                        <div class="${metaSize} text-gray-500 mt-2">
+                            <div><i class="fas fa-clock mr-1"></i>${timeStr}</div>
+                            <div class="mt-1"><i class="fas fa-barcode mr-1"></i>${item.item_code}</div>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Stores are now hardcoded in HTML for instant loading
+        // No need to fetch from API
+
+        // Load items from selected store with progressive loading
+        async function loadItems(page = 1, forceRefresh = false) {
+            const storeCode = document.getElementById('storeSelect').value;
+            currentPage = page;
+
+            const loadingText = document.querySelector('#loadingState p');
+            const itemsList = document.getElementById('itemsList');
+            cancelItemRender();
+
+            try {
+                // Step 1: Load cache instantly (if available)
+                const cacheResponse = await fetch(`/api/cache/${storeCode}?page=${page}`);
+                const cacheData = await cacheResponse.json();
+
+                if (cacheData.has_cache && cacheData.items.length > 0) {
+                    // Display cached items immediately WITHOUT showing loading screen
+                    allItems = cacheData.items || [];
+                    totalPages = cacheData.total_pages || 1;
+                    totalItems = cacheData.total_items || 0;
+
+                    document.getElementById('totalCount').textContent = totalItems;
+                    document.getElementById('newCount').textContent = cacheData.new_count || 0;
+
+                    // Show cache indicator
+                    const cacheIndicator = document.getElementById('cacheIndicator');
+                    if (cacheIndicator) {
+                        const ageText = cacheData.cache_age !== null ? ` (${cacheData.cache_age}s ago)` : '';
+                        cacheIndicator.textContent = `Cached${ageText}`;
+                        cacheIndicator.classList.remove('hidden');
+                    }
+
+                    // Defer rendering to allow UI to update (prevent dropdown blocking)
+                    requestAnimationFrame(() => {
+                        displayItems(allItems);
+                        updatePagination();
+
+                        // Make sure items are visible, loading is hidden
+                        document.getElementById('loadingState').classList.add('hidden');
+                        itemsList.classList.remove('hidden');
+                        document.getElementById('emptyState').classList.add('hidden');
+
+                        // Scroll to top after rendering
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                    });
+
+                    // Only fetch fresh items in background if:
+                    // 1. Force refresh is requested (manual refresh button), OR
+                    // 2. Auto-refresh is enabled
+                    if (forceRefresh) {
+                        // Force refresh still happens, but in background since we have cache
+                        await fetchFreshItems(storeCode, page, true);
+                    } else if (isAutoRefresh) {
+                        // Auto-refresh is ON - fetch in background
+                        fetchFreshItems(storeCode, page, true);
+                    }
+                    // If auto-refresh is OFF and not force refresh, just show cached data (no background fetch)
+                } else {
+                    // No cache - NOW we show loading screen
+                    document.getElementById('loadingState').classList.remove('hidden');
+                    document.getElementById('emptyState').classList.add('hidden');
+                    loadingText.textContent = 'Loading RSS feed...';
+
+                    // Fetch items (blocking - we need to wait since no cache)
+                    await fetchFreshItems(storeCode, page, false);
+
+                    // Scroll to top
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+
+            } catch (error) {
+                console.error('Error loading items:', error);
+                document.getElementById('loadingState').classList.add('hidden');
+                document.getElementById('emptyState').classList.remove('hidden');
+            }
+        }
+
+        // Fetch fresh items from RSS feed
+        async function fetchFreshItems(storeCode, page, hasCache) {
+            try {
+                const response = await fetch(`/api/items/${storeCode}?page=${page}`);
+                const data = await response.json();
+
+                // Update with fresh data
+                const freshItems = data.items || [];
+
+                // Check if we got new items
+                const newItemCodes = new Set(freshItems.map(i => i.item_code));
+                const oldItemCodes = new Set(allItems.map(i => i.item_code));
+                const hasNewItems = freshItems.some(i => !oldItemCodes.has(i.item_code));
+
+                // Update global state
+                allItems = freshItems;
+                totalPages = data.total_pages || 1;
+                totalItems = data.total_items || 0;
+
+                // Update stats
+                document.getElementById('totalCount').textContent = totalItems;
+                document.getElementById('newCount').textContent = data.new_count || 0;
+
+                // Hide cache indicator (we now have fresh data)
+                const cacheIndicator = document.getElementById('cacheIndicator');
+                if (cacheIndicator) {
+                    cacheIndicator.classList.add('hidden');
+                }
+
+                // Re-display items with fresh data
+                displayItems(allItems);
+                updatePagination();
+
+                // Show notification if new items were found
+                if (hasNewItems && hasCache) {
+                    const newCount = freshItems.filter(i => !oldItemCodes.has(i.item_code)).length;
+                    showNotification(`Found ${newCount} new item${newCount !== 1 ? 's' : ''}!`, 'info');
+                }
+
+                // Hide loading
+                document.getElementById('loadingState').classList.add('hidden');
+
+                if (allItems.length > 0) {
+                    document.getElementById('itemsList').classList.remove('hidden');
+                } else {
+                    document.getElementById('emptyState').classList.remove('hidden');
+                }
+
+            } catch (error) {
+                console.error('Error fetching fresh items:', error);
+                // Don't show error if we already have cached items displayed
+                if (!hasCache) {
+                    document.getElementById('loadingState').classList.add('hidden');
+                    document.getElementById('emptyState').classList.remove('hidden');
+                }
+            }
+        }
+
+        // Update pagination controls
+        function updatePagination() {
+            const paginationContainer = document.getElementById('paginationContainer');
+            if (!paginationContainer) return;
+
+            if (totalPages <= 1) {
+                paginationContainer.classList.add('hidden');
+                return;
+            }
+
+            paginationContainer.classList.remove('hidden');
+
+            let html = '<div class="flex items-center justify-center gap-2 mt-6">';
+
+            // Previous button
+            if (currentPage > 1) {
+                html += `<button onclick="loadItems(${currentPage - 1})" class="px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm">
+                    <i class="fas fa-chevron-left"></i> Previous
+                </button>`;
+            }
+
+            // Page numbers
+            const maxButtons = 7;
+            let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+            let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+
+            if (endPage - startPage < maxButtons - 1) {
+                startPage = Math.max(1, endPage - maxButtons + 1);
+            }
+
+            if (startPage > 1) {
+                html += `<button onclick="loadItems(1)" class="px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm">1</button>`;
+                if (startPage > 2) {
+                    html += `<span class="px-2 text-gray-500">...</span>`;
+                }
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                const isActive = i === currentPage;
+                html += `<button onclick="loadItems(${i})" class="px-3 py-2 ${isActive ? 'bg-red-600 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'} rounded-lg text-sm">${i}</button>`;
+            }
+
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    html += `<span class="px-2 text-gray-500">...</span>`;
+                }
+                html += `<button onclick="loadItems(${totalPages})" class="px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm">${totalPages}</button>`;
+            }
+
+            // Next button
+            if (currentPage < totalPages) {
+                html += `<button onclick="loadItems(${currentPage + 1})" class="px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm">
+                    Next <i class="fas fa-chevron-right"></i>
+                </button>`;
+            }
+
+            html += '</div>';
+            paginationContainer.innerHTML = html;
+        }
+
+        // Display items in gallery view
+        function displayItems(items) {
+            // De-duplicate items by item_code before displaying
+            const seen = new Set();
+            const uniqueItems = items.filter(item => {
+                if (seen.has(item.item_code)) {
+                    console.warn('Duplicate item_code detected in frontend:', item.item_code, item.title);
+                    return false;
+                }
+                seen.add(item.item_code);
+                return true;
+            });
+
+            if (uniqueItems.length !== items.length) {
+                console.warn(`Filtered out ${items.length - uniqueItems.length} duplicate items`);
+            }
+
+            displayGallery(uniqueItems);
+        }
+
+        // Display items in gallery view (6 columns standard, 4 columns large)
+        function displayGallery(items) {
+            const container = document.getElementById('itemsList');
+            const translateEnabled = document.getElementById('translateCheck').checked;
+
+            // Grid layout based on largeGallery mode
+            // Large Gallery: 2 on mobile, 3 on tablet, 4 on desktop (bigger cards)
+            // Standard Gallery: 2 on mobile, 4 on tablet, 6 on desktop (compact cards)
+            const gridClass = largeGallery
+                ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'
+                : 'grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3';
+
+            // Compact mode: smaller padding and text (only in standard gallery)
+            const cardPadding = (compactMode && !largeGallery) ? 'p-2' : 'p-3';
+            const titleSize = (compactMode && !largeGallery) ? 'text-xs' : 'text-sm';
+            const metaSize = (compactMode && !largeGallery) ? 'text-[10px]' : 'text-xs';
+            const titleLines = (compactMode && !largeGallery) ? 'line-clamp-1' : 'line-clamp-2';
+
+            container.innerHTML = '';
+            container.classList.remove('hidden');
+
+            const grid = document.createElement('div');
+            grid.className = gridClass;
+            container.appendChild(grid);
+
+            // Render in chunks to keep UI responsive while large lists update
+            const chunkSize = 24;
+            let index = 0;
+
+            if (items.length === 0) {
+                if (translateEnabled) {
+                    setupLazyTranslation();
+                }
+                return;
+            }
+
+            const renderChunk = () => {
+                const slice = items.slice(index, index + chunkSize);
+                const chunkHtml = slice.map(item => {
+                    const timeStr = formatTime(item.pub_date);
+                    const newBadge = item.is_new ? '<div class="absolute top-2 right-2 new-badge bg-yellow-400 text-yellow-900 text-xs px-2 py-1 rounded-full font-semibold">NEW</div>' : '';
+
+                    return `
+                        <div class="item-card bg-white border-2 border-gray-200 rounded-lg overflow-hidden hover:border-red-500 hover:shadow-lg transition-all cursor-pointer relative"
+                             onclick="openItem('${item.link}', '${item.item_code}', event)">
+                            ${newBadge}
+                            <!-- Thumbnail -->
+                            <div class="aspect-square bg-gray-50 relative group">
+                                <img src="${item.thumbnail}"
+                                     alt="${item.title}"
+                                     class="w-full h-full object-contain thumbnail-loading"
+                                     onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22300%22 height=%22300%22%3E%3Crect fill=%22%23f0f0f0%22 width=%22300%22 height=%22300%22/%3E%3Ctext x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23999%22 font-size=%2220%22%3ENo Image%3C/text%3E%3C/svg%3E'"
+                                     onload="this.classList.remove('thumbnail-loading')"
+                                     title="${item.link}">
+                                <!-- eBay Search Button -->
+                                <div class="action-buttons absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onclick="searchEbayByImage('${item.thumbnail}', '${escapeHtml(item.title)}', event)"
+                                            class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-[10px] font-semibold shadow-lg"
+                                            title="Search on eBay by image">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Content -->
+                            <div class="${cardPadding}">
+                                <h3 class="${titleSize} font-semibold text-gray-900 ${titleLines} mb-1 ${translateEnabled ? 'translate-title' : ''}" data-original="${escapeHtml(item.title)}">${item.title}</h3>
+                                ${translateEnabled && !compactMode ? `<div class="text-xs text-gray-600 mb-1 line-clamp-1 original-text">${item.title}</div>` : ''}
+                                ${!compactMode ? `
+                                <div class="${metaSize} text-gray-500 mt-2">
+                                    <div><i class="fas fa-clock mr-1"></i>${timeStr}</div>
+                                    <div class="mt-1"><i class="fas fa-barcode mr-1"></i>${item.item_code}</div>
+                                </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                grid.insertAdjacentHTML('beforeend', chunkHtml);
+                index += chunkSize;
+
+                if (index < items.length) {
+                    requestAnimationFrame(renderChunk);
+                } else if (translateEnabled) {
+                    requestAnimationFrame(() => setupLazyTranslation());
+                }
+            };
+
+            requestAnimationFrame(renderChunk);
+        }
+
+        // Setup lazy translation with Intersection Observer
+        function setupLazyTranslation() {
+            // Disconnect existing observer
+            if (visibleObserver) {
+                visibleObserver.disconnect();
+            }
+
+            // Create new observer with preload margins
+            // Preload 5 items above and 20 items below the viewport
+            // Item height varies based on gallery mode and compact mode
+            let itemHeight;
+            if (largeGallery) {
+                itemHeight = 400;  // Large gallery cards
+            } else if (compactMode) {
+                itemHeight = 250;  // Compact 6-column cards
+            } else {
+                itemHeight = 350;  // Standard 6-column cards
+            }
+            const preloadAbove = itemHeight * 5;  // 5 items above
+            const preloadBelow = itemHeight * 20; // 20 items below
+
+            visibleObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const titleElem = entry.target.querySelector('.translate-title');
+                        if (titleElem && !titleElem.getAttribute('data-translated')) {
+                            translateElement(titleElem);
+                        }
+                    }
+                });
+            }, {
+                // Positive values expand the viewport detection area
+                rootMargin: `${preloadAbove}px 0px ${preloadBelow}px 0px`,
+                threshold: 0
+            });
+
+            // Observe all item cards
+            document.querySelectorAll('.item-card').forEach(card => {
+                visibleObserver.observe(card);
+            });
+        }
+
+        // Translate a single element
+        async function translateElement(titleElem) {
+            const originalText = titleElem.getAttribute('data-original');
+            if (!originalText) return;
+
+            // Check cache first
+            if (translationCache.has(originalText)) {
+                titleElem.textContent = translationCache.get(originalText);
+                titleElem.setAttribute('data-translated', 'true');
+                return;
+            }
+
+            // Translate
+            try {
+                const translated = await translateText(originalText);
+                if (translated && translated !== originalText) {
+                    translationCache.set(originalText, translated);
+                    titleElem.textContent = translated;
+                    titleElem.setAttribute('data-translated', 'true');
+                }
+            } catch (error) {
+                console.error('Translation error:', error);
+            }
+        }
+
+        // Toggle compact mode
+        function toggleCompactMode() {
+            compactMode = document.getElementById('compactCheck').checked;
+
+            // Disable large gallery when using compact mode
+            if (compactMode && largeGallery) {
+                largeGallery = false;
+                document.getElementById('largeGalleryCheck').checked = false;
+            }
+
+            displayItems(allItems);
+        }
+
+        // Toggle large gallery mode
+        function toggleLargeGallery() {
+            largeGallery = document.getElementById('largeGalleryCheck').checked;
+
+            // Disable compact mode when using large gallery
+            if (largeGallery && compactMode) {
+                compactMode = false;
+                document.getElementById('compactCheck').checked = false;
+            }
+
+            displayItems(allItems);
+        }
+
+        // Filter items by search text
+        function filterItems() {
+            const searchText = document.getElementById('searchInput').value.toLowerCase();
+
+            if (!searchText) {
+                displayItems(allItems);
+                return;
+            }
+
+            const filtered = allItems.filter(item =>
+                item.title.toLowerCase().includes(searchText)
+            );
+
+            displayItems(filtered);
+        }
+
+        // Format publication date with exact time
+        function formatTime(pubDate) {
+            if (!pubDate) return '';
+
+            // "Sat, 11 Oct 2025 01:00:00 +0900" -> "11 Oct 2025, 01:00"
+            const parts = pubDate.split(',');
+            if (parts.length > 1) {
+                const dateParts = parts[1].trim().split(' ');
+                if (dateParts.length >= 4) {
+                    // Extract date and time
+                    const date = `${dateParts[0]} ${dateParts[1]} ${dateParts[2]}`;
+                    const time = dateParts[3].substring(0, 5); // Get HH:MM
+                    return `${date}, ${time}`;
+                }
+            }
+            return pubDate;
+        }
+
+        // Open item in new tab and mark as seen
+        async function openItem(link, itemCode, event) {
+            // Prevent opening if clicking on action buttons
+            if (event && event.target.closest('.action-buttons')) {
+                return;
+            }
+
+            window.open(link, '_blank');
+
+            // Mark as seen
+            if (itemCode) {
+                await fetch('/api/mark_seen', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ item_code: itemCode })
+                });
+
+                // Update item state locally
+                const item = allItems.find(i => i.item_code === itemCode);
+                if (item) {
+                    item.is_new = false;
+                    displayItems(allItems);
+
+                    // Update stats
+                    const newCount = allItems.filter(i => i.is_new).length;
+                    document.getElementById('newCount').textContent = newCount;
+                }
+            }
+        }
+
+        // Search eBay using translated title
+        async function searchEbayByImage(imageUrl, title, event) {
+            event.stopPropagation();
+
+            try {
+                // Call backend to translate and get eBay URL
+                const response = await fetch('/api/ebay_search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: title })
+                });
+
+                const data = await response.json();
+
+                if (data.ebay_url) {
+                    window.open(data.ebay_url, '_blank');
+                } else {
+                    showNotification('Failed to create eBay search', 'error');
+                }
+            } catch (error) {
+                console.error('eBay search error:', error);
+                showNotification('Error searching eBay', 'error');
+            }
+        }
+
+        // Show notification helper
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            const bgColor = type === 'error' ? 'bg-red-600' : 'bg-blue-600';
+            notification.className = `fixed bottom-4 right-4 ${bgColor} text-white px-4 py-3 rounded-lg shadow-lg z-50`;
+            notification.innerHTML = `
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-${type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+                    <span>${message}</span>
+                </div>
+            `;
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.remove();
+            }, 5000);
+        }
+
+        // Translate a single text (used by lazy translation)
+        async function translateText(text) {
+            // Check cache first
+            if (translationCache.has(text)) {
+                return translationCache.get(text);
+            }
+
+            try {
+                const response = await fetch('/api/translate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+                const data = await response.json();
+                const translated = data.translated || text;
+
+                // Cache the result
+                translationCache.set(text, translated);
+                return translated;
+            } catch (error) {
+                console.error('Translation error:', error);
+                return text; // Return original on error
+            }
+        }
+
+        // Toggle auto-refresh
+        function toggleAutoRefresh() {
+            isAutoRefresh = !isAutoRefresh;
+
+            if (isAutoRefresh) {
+                document.getElementById('autoRefreshText').textContent = 'Auto-refresh: ON';
+                document.getElementById('autoRefreshBtn').classList.add('bg-green-100', 'text-green-700');
+                document.getElementById('autoRefreshBtn').classList.remove('bg-gray-100');
+                autoRefreshInterval = setInterval(loadItems, 60000); // 60 seconds
+            } else {
+                document.getElementById('autoRefreshText').textContent = 'Auto-refresh: OFF';
+                document.getElementById('autoRefreshBtn').classList.remove('bg-green-100', 'text-green-700');
+                document.getElementById('autoRefreshBtn').classList.add('bg-gray-100');
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    autoRefreshInterval = null;
+                }
+            }
+        }
+
+        // Refresh feed (force refresh from RSS)
+        function refreshFeed() {
+            loadItems(1, true);
+        }
+
+        // Clear cache for current store
+        async function clearCache() {
+            const storeCode = document.getElementById('storeSelect').value;
+            const storeName = document.getElementById('storeSelect').selectedOptions[0].text;
+
+            if (!confirm(`Clear cache for "${storeName}"?\n\nThis will delete all cached items and force a fresh fetch from the RSS feed.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/clear_cache/${storeCode}`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showNotification(`Cache cleared for ${storeName}`, 'info');
+                    // Reload with fresh data
+                    loadItems(1, true);
+                } else {
+                    showNotification('Failed to clear cache', 'error');
+                }
+            } catch (error) {
+                console.error('Error clearing cache:', error);
+                showNotification('Error clearing cache', 'error');
+            }
+        }
+
+        // Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Toggle translate
+        document.getElementById('translateCheck').addEventListener('change', () => {
+            displayItems(allItems);
+        });
+
+        // Store select - use proper async event listener to prevent blocking
+        document.getElementById('storeSelect').addEventListener('change', (e) => {
+            // Allow dropdown to close first
+            setTimeout(() => {
+                loadItems(1, false);
+            }, 0);
+        });
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadItems();
+        });
+    </script>
+</body>
+</html>
